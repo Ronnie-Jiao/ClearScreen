@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="净屏 ClearScreen">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#126df4"/>
+      <stop offset=".56" stop-color="#2aa5dd"/>
+      <stop offset="1" stop-color="#18d6bd"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7bc8fb"/>
+      <stop offset="1" stop-color="#d8fbff"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="19" width="116" height="122" rx="29" fill="url(#g)"/>
+  <rect x="39" y="41" width="24" height="27" rx="6" fill="#b9e5ff" opacity=".92"/>
+  <rect x="68" y="52" width="14" height="16" rx="4" fill="#b9e5ff" opacity=".84"/>
+  <rect x="30" y="78" width="19" height="19" rx="5" fill="#b9e5ff" opacity=".74"/>
+  <rect x="14" y="87" width="12" height="12" rx="3" fill="#219ee8"/>
+  <rect x="6" y="104" width="10" height="10" rx="3" fill="#2d9fea"/>
+  <path d="M22 113c31-16 50-43 71-62 16-15 31-22 47-27-13 24-33 43-54 60-22 18-43 33-64 43z" fill="white" opacity=".96"/>
+  <path d="M33 132c29-20 58-48 78-67 13-12 22-19 31-23-7 17-22 36-42 54-25 22-47 36-67 45z" fill="url(#g2)" opacity=".93"/>
+  <path d="M116 101l4.2 10.8L131 116l-10.8 4.2L116 131l-4.2-10.8L101 116l10.8-4.2z" fill="white"/>
+  <path d="M101 119l2.2 5.8 5.8 2.2-5.8 2.2-2.2 5.8-2.2-5.8-5.8-2.2 5.8-2.2z" fill="white" opacity=".95"/>
+</svg>

@@ -37,6 +37,7 @@ com.vivo.dr/com.vivo.dr.LocateBehaviorAnalysisService
 - 服务组件：`com.clearscreen.prototype/.backend.ClearScreenAccessibilityService`
 - 安装方式：ADB 覆盖安装，`pm install -r -d --user 0`
 - 当前安装来源：`com.android.shell`，`installerPackageName=null`
+- 当前设备 `dumpsys package` 还显示 `packageSource=1`（`OTHER`）；因此不能只用 `LOCAL_FILE` / `DOWNLOADED_FILE` 判断侧载，必须同时考虑“安装者为空 + `OTHER`/`UNSPECIFIED`”这一类 ADB 结果。
 
 ## 四、已经尝试过的修复
 
@@ -147,3 +148,29 @@ adb logcat -d -v threadtime
 - vivo 无障碍详情页返回后自动关闭的问题仍未解决，根因更可能在系统授权策略或安装来源校验。
 
 不要把“应用页面显示已开启”当作无障碍服务真正启用；必须以系统无障碍列表和 `Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES` 的返回结果为准。
+
+## 八、按 Android 16 安装来源机制补充处理
+
+结合 Android 16 的受限设置机制，当前版本已补充两项处理：
+
+1. 原生快照新增安装来源诊断：
+   - `installingPackageName`
+   - `initiatingPackageName`
+   - `originatingPackageName`
+   - `packageSource` / `packageSourceLabel`
+   - `adbInstallLikely`
+   - `restrictedSettingsLikely`
+2. 当检测到 ADB、`LOCAL_FILE` 或 `DOWNLOADED_FILE` 来源，且净屏尚未真正出现在 `ENABLED_ACCESSIBILITY_SERVICES` 中时，权限页先提示用户打开净屏的“应用信息”，完成右上角“允许受限设置”后再回到无障碍页面。
+
+这只是引导和诊断，不会伪造授权状态，也不会通过 `settings put secure` 写入系统设置。`EnhancedConfirmationManager` 属于系统/隐藏 API，应用不直接调用；最终授权仍以系统无障碍列表和 `Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES` 为准。
+
+## 九、下一轮真机验证
+
+安装新版后记录原生快照中的 `installSource`，并按以下顺序验证：
+
+1. 净屏 → 开启权限 → 自动跳过权限。
+2. 在应用信息页选择右上角菜单中的“允许受限设置”。
+3. 返回无障碍设置，开启净屏并确认。
+4. 返回无障碍列表，再读取 `enabled_accessibility_services` 和 `dumpsys accessibility`。
+
+如果完成第 2 步后仍然被 OriginOS 删除组件，下一步应保留安装来源诊断和系统日志，单独判断 vivo 的系统策略，而不是继续随机调整服务 XML。

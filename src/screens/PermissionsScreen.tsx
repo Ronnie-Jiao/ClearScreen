@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-na
 import { Background, Badge, Card, PrimaryButton, SquareIcon, TopBar } from '../components/UI';
 import { C } from '../theme';
 
-export default function PermissionsScreen({onBack,onContinue,permissions,onToggle}:{onBack:()=>void;onContinue:()=>void;permissions:{skip:boolean;network:boolean;bg:boolean};onToggle:(k:'skip'|'network'|'bg')=>void}){
+export default function PermissionsScreen({onBack,onContinue,permissions,onToggle}:{onBack:()=>void;onContinue:()=>void;permissions:{skip:boolean;network:boolean;bg:boolean;restrictedSettingsLikely:boolean};onToggle:(k:'skip'|'network'|'bg')=>void}){
  const { width, height } = useWindowDimensions();
  const scale = Math.min(1, Math.max(.84, Math.min(width / 360, height / 800)));
  const px = (value:number) => Math.round(value * scale);

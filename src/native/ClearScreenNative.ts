@@ -22,6 +22,17 @@ export type BackendPermissions = {
   network: boolean;
   networkRunning: boolean;
   bg: boolean;
+  restrictedSettingsLikely: boolean;
+};
+
+export type InstallSourceDiagnostics = {
+  installingPackageName: string | null;
+  initiatingPackageName: string | null;
+  originatingPackageName: string | null;
+  packageSource: number;
+  packageSourceLabel: string;
+  adbInstallLikely: boolean;
+  restrictedSettingsLikely: boolean;
 };
 
 export type BackendSnapshot = {
@@ -32,6 +43,7 @@ export type BackendSnapshot = {
   todaySkipCount: number;
   todayNetworkCount: number;
   permissions: BackendPermissions;
+  installSource: InstallSourceDiagnostics;
   apps: AppItem[];
   logs: LogItem[];
   settings: { startup: boolean; autoUpdate: boolean; debug: boolean };
@@ -61,7 +73,16 @@ function fallbackSnapshot(): BackendSnapshot {
     installedAppCount: APPS.length,
     todaySkipCount: 28,
     todayNetworkCount: 136,
-    permissions: { skip: true, skipRunning: false, network: true, networkRunning: false, bg: false },
+    permissions: { skip: true, skipRunning: false, network: true, networkRunning: false, bg: false, restrictedSettingsLikely: false },
+    installSource: {
+      installingPackageName: null,
+      initiatingPackageName: null,
+      originatingPackageName: null,
+      packageSource: -1,
+      packageSourceLabel: 'unknown',
+      adbInstallLikely: false,
+      restrictedSettingsLikely: false,
+    },
     apps: APPS,
     logs: LOGS,
     settings: { startup: true, autoUpdate: true, debug: false },
@@ -72,6 +93,15 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
   if (!raw || !native) return fallbackSnapshot();
   const apps = Array.isArray(raw.apps) ? raw.apps.map(normalizeApp) : [];
   const logs = Array.isArray(raw.logs) ? raw.logs as LogItem[] : [];
+  const installSource: InstallSourceDiagnostics = {
+    installingPackageName: raw.installSource?.installingPackageName ?? null,
+    initiatingPackageName: raw.installSource?.initiatingPackageName ?? null,
+    originatingPackageName: raw.installSource?.originatingPackageName ?? null,
+    packageSource: Number(raw.installSource?.packageSource ?? -1),
+    packageSourceLabel: String(raw.installSource?.packageSourceLabel || 'unknown'),
+    adbInstallLikely: Boolean(raw.installSource?.adbInstallLikely),
+    restrictedSettingsLikely: Boolean(raw.installSource?.restrictedSettingsLikely),
+  };
   return {
     backendReady: Boolean(raw.backendReady),
     onboardingCompleted: Boolean(raw.onboardingCompleted),
@@ -85,7 +115,9 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
       network: Boolean(raw.vpnPrepared),
       networkRunning: Boolean(raw.vpnRunning),
       bg: Boolean(raw.batteryOptimizationIgnored),
+      restrictedSettingsLikely: installSource.restrictedSettingsLikely,
     },
+    installSource,
     apps,
     logs,
     settings: {
@@ -121,6 +153,7 @@ export const ClearScreenNative = {
     return normalizeSnapshot(await native.clearLogs());
   },
   openAccessibilitySettings: async () => native?.openAccessibilitySettings?.(),
+  openAppDetailsSettings: async () => native?.openAppDetailsSettings?.(),
   startVpn: async () => native?.startVpn?.(),
   stopVpn: async () => native?.stopVpn?.(),
   openBatterySettings: async () => native?.openBatterySettings?.(),

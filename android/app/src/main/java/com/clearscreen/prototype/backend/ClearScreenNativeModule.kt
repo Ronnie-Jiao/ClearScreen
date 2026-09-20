@@ -3,9 +3,11 @@ package com.clearscreen.prototype.backend
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.PowerManager
@@ -97,6 +99,16 @@ class ClearScreenNativeModule(
   }
 
   @ReactMethod
+  fun openAppDetailsSettings(promise: Promise) {
+    openSettings(
+      Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+        data = Uri.parse("package:${reactContext.packageName}")
+      },
+      promise,
+    )
+  }
+
+  @ReactMethod
   fun startVpn(promise: Promise) {
     val prepareIntent = VpnService.prepare(reactContext)
     if (prepareIntent != null) {
@@ -172,7 +184,60 @@ class ClearScreenNativeModule(
     map.putArray("apps", apps)
     map.putArray("logs", logs)
     map.putMap("settings", settings)
+    map.putMap("installSource", installSourceDiagnostics())
     return map
+  }
+
+  private fun installSourceDiagnostics(): WritableMap {
+    val map = Arguments.createMap()
+    val packageManager = reactContext.packageManager
+    val sourceInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      runCatching { packageManager.getInstallSourceInfo(reactContext.packageName) }.getOrNull()
+    } else {
+      null
+    }
+    val installingPackageName = sourceInfo?.installingPackageName
+    val initiatingPackageName = sourceInfo?.initiatingPackageName
+    val originatingPackageName = sourceInfo?.originatingPackageName
+    val packageSource = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      sourceInfo?.packageSource ?: -1
+    } else {
+      -1
+    }
+    val noInstallerRecorded = installingPackageName.isNullOrBlank() &&
+      initiatingPackageName.isNullOrBlank()
+    // A direct `adb install` on the target vivo build can report packageSource=OTHER
+    // while leaving both installer package names empty. Keep this conservative signal
+    // so the first authorization attempt can explain the Restricted Settings path.
+    val adbInstallLikely = installingPackageName == "com.android.shell" ||
+      initiatingPackageName == "com.android.shell" ||
+      (noInstallerRecorded && (packageSource == PackageInstaller.PACKAGE_SOURCE_OTHER ||
+        packageSource == PackageInstaller.PACKAGE_SOURCE_UNSPECIFIED))
+    val restrictedSettingsLikely = adbInstallLikely ||
+      packageSource == PackageInstaller.PACKAGE_SOURCE_LOCAL_FILE ||
+      packageSource == PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE
+
+    putNullableString(map, "installingPackageName", installingPackageName)
+    putNullableString(map, "initiatingPackageName", initiatingPackageName)
+    putNullableString(map, "originatingPackageName", originatingPackageName)
+    map.putInt("packageSource", packageSource)
+    map.putString("packageSourceLabel", packageSourceLabel(packageSource))
+    map.putBoolean("adbInstallLikely", adbInstallLikely)
+    map.putBoolean("restrictedSettingsLikely", restrictedSettingsLikely)
+    return map
+  }
+
+  private fun packageSourceLabel(source: Int): String = when (source) {
+    PackageInstaller.PACKAGE_SOURCE_UNSPECIFIED -> "unspecified"
+    PackageInstaller.PACKAGE_SOURCE_OTHER -> "other"
+    PackageInstaller.PACKAGE_SOURCE_STORE -> "store"
+    PackageInstaller.PACKAGE_SOURCE_LOCAL_FILE -> "local_file"
+    PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE -> "downloaded_file"
+    else -> "unknown"
+  }
+
+  private fun putNullableString(map: WritableMap, key: String, value: String?) {
+    if (value == null) map.putNull(key) else map.putString(key, value)
   }
 
   private fun installedApps(): List<WritableMap> {

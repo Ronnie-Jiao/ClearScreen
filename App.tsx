@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import SplashScreen from './src/screens/SplashScreen';
@@ -29,6 +29,7 @@ export default function App(){
  const [today,setToday]=useState({skip:0,network:0});
  const [settings,setSettings]=useState({startup:true,autoUpdate:true,debug:false});
  const [backendReady,setBackendReady]=useState(false);
+ const accessibilityAttempted=useRef(false);
  const applySnapshot=useCallback((snapshot:BackendSnapshot)=>{
    setBackendReady(snapshot.backendReady);
    setOnboardingCompleted(snapshot.onboardingCompleted);
@@ -47,7 +48,30 @@ export default function App(){
    let alive=true;
    const started=Date.now();
    refresh().then(snapshot=>{if(alive){const wait=Math.max(0,1200-(Date.now()-started));setTimeout(()=>alive&&setPage(snapshot?.onboardingCompleted?'home':'welcome'),wait)}});
-   const subscription=AppState.addEventListener('change',state=>{if(state==='active')refresh()});
+   const subscription=AppState.addEventListener('change',state=>{
+     if(state!=='active')return;
+     refresh().then(snapshot=>{
+       if(!alive||!accessibilityAttempted.current||!snapshot)return;
+       accessibilityAttempted.current=false;
+       if(snapshot.permissions.skip)return;
+        const restricted=snapshot.permissions.restrictedSettingsLikely;
+        setTimeout(()=>alive&&Alert.alert(
+          '还没有完成授权',
+          restricted
+            ? '系统无障碍开关没有保持开启，当前安装来源可能触发了 Android 的“受限设置”。请打开“应用信息”，查看右上角菜单中是否有“允许受限设置”；如果没有，需要通过 vivo EasyShare 或可信应用商店重新安装。'
+            : '系统无障碍开关没有保持开启，请重新打开净屏的无障碍开关；如果仍然自动关闭，请检查系统的后台运行和电池限制。',
+          restricted
+            ? [
+              {text:'稍后',style:'cancel'},
+              {text:'打开应用信息',onPress:()=>{ClearScreenNative.openAppDetailsSettings().catch(error=>console.warn('App details settings open failed',error))}},
+            ]
+            : [
+              {text:'稍后',style:'cancel'},
+              {text:'重新授权',onPress:()=>{accessibilityAttempted.current=true;ClearScreenNative.openAccessibilitySettings().catch(error=>console.warn('Accessibility settings open failed',error))}},
+            ],
+        ),200);
+     });
+   });
    return()=>{alive=false;subscription.remove()};
  },[refresh]);
  const completeOnboarding=useCallback(()=>{
@@ -74,16 +98,17 @@ export default function App(){
    if(key==='skip'){
      if(!permissions.skip&&permissions.restrictedSettingsLikely){
        Alert.alert(
-         '先允许受限设置',
-         '这台设备把侧载应用的无障碍服务拦住了。请先在“应用信息”右上角菜单中选择“允许受限设置”，返回后再打开净屏的无障碍开关。',
+         '需要先确认系统限制',
+         '当前安装来源可能触发 Android 的“受限设置”。如果“应用信息”右上角有“允许受限设置”，请先允许；如果没有，请通过 vivo EasyShare 或可信应用商店重新安装后再授权。',
          [
            {text:'取消',style:'cancel'},
-           {text:'直接去无障碍',onPress:()=>{ClearScreenNative.openAccessibilitySettings().catch(error=>console.warn('Accessibility settings open failed',error))}},
            {text:'打开应用信息',onPress:()=>{ClearScreenNative.openAppDetailsSettings().catch(error=>console.warn('App details settings open failed',error))}},
+           {text:'直接去无障碍',onPress:()=>{accessibilityAttempted.current=true;ClearScreenNative.openAccessibilitySettings().catch(error=>console.warn('Accessibility settings open failed',error))}},
          ],
        );
        return;
      }
+     accessibilityAttempted.current=true;
      await ClearScreenNative.openAccessibilitySettings();
    }
    else if(key==='network')await ClearScreenNative.startVpn();

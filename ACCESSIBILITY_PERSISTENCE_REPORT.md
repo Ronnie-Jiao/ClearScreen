@@ -160,17 +160,28 @@ adb logcat -d -v threadtime
    - `packageSource` / `packageSourceLabel`
    - `adbInstallLikely`
    - `restrictedSettingsLikely`
-2. 当检测到 ADB、`LOCAL_FILE` 或 `DOWNLOADED_FILE` 来源，且净屏尚未真正出现在 `ENABLED_ACCESSIBILITY_SERVICES` 中时，权限页先提示用户打开净屏的“应用信息”，完成右上角“允许受限设置”后再回到无障碍页面。
+2. 权限页会根据安装来源选择引导路径：可信来源直接打开系统无障碍页；检测到 ADB/侧载风险时，先提供“打开应用信息”和“直接去无障碍”两个快捷入口。
+3. 从系统无障碍页返回后，应用会自动重新读取系统授权状态。若开关没有保持开启，会提示用户打开应用信息；如果系统没有提供“允许受限设置”，则明确提示通过 vivo EasyShare 或可信应用商店重新安装。
 
 这只是引导和诊断，不会伪造授权状态，也不会通过 `settings put secure` 写入系统设置。`EnhancedConfirmationManager` 属于系统/隐藏 API，应用不直接调用；最终授权仍以系统无障碍列表和 `Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES` 为准。
 
-## 九、下一轮真机验证
+## 九、最新真机验证结果
 
-安装新版后记录原生快照中的 `installSource`，并按以下顺序验证：
+已将版本 `1.0.9`（`versionCode=10`）覆盖安装到测试机，未清除应用数据。vivo 安装器明确显示：
 
-1. 净屏 → 开启权限 → 自动跳过权限。
-2. 在应用信息页选择右上角菜单中的“允许受限设置”。
-3. 返回无障碍设置，开启净屏并确认。
-4. 返回无障碍列表，再读取 `enabled_accessibility_services` 和 `dumpsys accessibility`。
+- “来自未知来源”
+- “外部来源应用：该应用来源于非 vivo 官方应用商店，未经 vivo 人工亲测”
 
-如果完成第 2 步后仍然被 OriginOS 删除组件，下一步应保留安装来源诊断和系统日志，单独判断 vivo 的系统策略，而不是继续随机调整服务 XML。
+安装后的系统信息仍为：
+
+```text
+versionCode=10
+versionName=1.0.9
+installerPackageName=null
+initiatingPackageName=com.android.shell
+packageSource=1
+```
+
+在无障碍详情页打开净屏后，`ENABLED_ACCESSIBILITY_SERVICES` 仍只保留 vivo 自己的服务；返回列表后净屏显示“已关闭”。同时 `dumpsys accessibility` 没有 `Crashed services`，说明这次仍是系统安装来源/受限设置策略拒绝持久化，不是净屏服务崩溃。
+
+因此新版已经把失败状态和下一步衔接补上，但在这台 vivo 设备上，ADB 安装本身仍不具备授予该受限无障碍权限的资格。若“应用信息”里没有“允许受限设置”，应用代码不能绕过系统校验；必须改用 vivo EasyShare 或 vivo 官方应用商店等可信安装来源。

@@ -1,0 +1,43 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import SplashScreen from './src/screens/SplashScreen';
+import WelcomeScreen from './src/screens/WelcomeScreen';
+import PermissionsScreen from './src/screens/PermissionsScreen';
+import HomeScreen from './src/screens/HomeScreen';
+import AppsScreen from './src/screens/AppsScreen';
+import AppDetailScreen from './src/screens/AppDetailScreen';
+import RecordsScreen from './src/screens/RecordsScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
+import AppearanceScreen from './src/screens/AppearanceScreen';
+import WhitelistScreen from './src/screens/WhitelistScreen';
+import { APPS, AppItem } from './src/data';
+
+type Page='splash'|'welcome'|'permissions'|'home'|'apps'|'appDetail'|'records'|'settings'|'appearance'|'whitelist';
+export default function App(){
+ const [page,setPage]=useState<Page>('splash');
+ const [history,setHistory]=useState<Page[]>([]);
+ const [apps,setApps]=useState<AppItem[]>(APPS);
+ const [selectedId,setSelectedId]=useState('xhs');
+ const [master,setMaster]=useState(true);
+ const [permissions,setPermissions]=useState({skip:true,network:true,bg:false});
+ const [startup,setStartup]=useState(true); const [autoUpdate,setAutoUpdate]=useState(true); const [debug,setDebug]=useState(false);
+ useEffect(()=>{const id=setTimeout(()=>setPage('welcome'),1200);return()=>clearTimeout(id)},[]);
+ const go=(p:Page)=>{setHistory(h=>[...h,page]);setPage(p)};
+ const back=()=>{setHistory(h=>{const copy=[...h];const p=copy.pop()||'home';setPage(p);return copy})};
+ const tab=(t:'home'|'apps'|'settings')=>{setHistory([]);setPage(t)};
+ const selected=useMemo(()=>apps.find(a=>a.id===selectedId)||apps[0],[apps,selectedId]);
+ let screen:React.ReactNode;
+ if(page==='splash')screen=<SplashScreen/>;
+ else if(page==='welcome')screen=<WelcomeScreen onStart={()=>go('permissions')} onLater={()=>tab('home')}/>;
+ else if(page==='permissions')screen=<PermissionsScreen onBack={back} onContinue={()=>tab('home')} permissions={permissions} onToggle={k=>setPermissions(p=>({...p,[k]:!p[k]}))}/>;
+ else if(page==='home')screen=<HomeScreen master={master} onMaster={()=>setMaster(v=>!v)} onTab={tab} onPermissions={()=>go('permissions')} onRecords={()=>go('records')}/>;
+ else if(page==='apps')screen=<AppsScreen apps={apps} onChangeApps={setApps} onTab={tab} onOpen={id=>{setSelectedId(id);go('appDetail')}} onWhitelist={()=>go('whitelist')}/>;
+ else if(page==='appDetail'&&selected)screen=<AppDetailScreen app={selected} onBack={back} onChange={a=>setApps(xs=>xs.map(x=>x.id===a.id?a:x))} onRecords={()=>go('records')}/>;
+ else if(page==='records')screen=<RecordsScreen onBack={back}/>;
+ else if(page==='settings')screen=<SettingsScreen startup={startup} autoUpdate={autoUpdate} debug={debug} onToggle={k=>k==='startup'?setStartup(v=>!v):k==='autoUpdate'?setAutoUpdate(v=>!v):setDebug(v=>!v)} onTab={tab} onAppearance={()=>go('appearance')} onPermissions={()=>go('permissions')} onClear={()=>Alert.alert('清空记录','这是高保真前端演示，当前不会删除真实数据。')} onRules={()=>Alert.alert('规则管理','规则管理入口已预留，可继续接入正式规则编辑页面。')}/>;
+ else if(page==='appearance')screen=<AppearanceScreen onBack={back}/>;
+ else if(page==='whitelist')screen=<WhitelistScreen apps={apps} onChangeApps={setApps} onBack={back} onSave={()=>{Alert.alert('已保存','白名单设置已保存（前端演示）。');back()}}/>;
+ else screen=<HomeScreen master={master} onMaster={()=>setMaster(v=>!v)} onTab={tab} onPermissions={()=>go('permissions')} onRecords={()=>go('records')}/>;
+ return <><StatusBar hidden/>{screen}</>;
+}

@@ -23,6 +23,7 @@ export default function App(){
  const [apps,setApps]=useState<AppItem[]>([]);
  const [logs,setLogs]=useState<LogItem[]>([]);
  const [selectedId,setSelectedId]=useState('');
+ const [onboardingCompleted,setOnboardingCompleted]=useState(false);
  const [master,setMaster]=useState(false);
  const [permissions,setPermissions]=useState({skip:false,skipRunning:false,network:false,networkRunning:false,bg:false});
  const [today,setToday]=useState({skip:0,network:0});
@@ -30,6 +31,7 @@ export default function App(){
  const [backendReady,setBackendReady]=useState(false);
  const applySnapshot=useCallback((snapshot:BackendSnapshot)=>{
    setBackendReady(snapshot.backendReady);
+   setOnboardingCompleted(snapshot.onboardingCompleted);
    setApps(snapshot.apps);
    setLogs(snapshot.logs);
    setMaster(snapshot.masterEnabled);
@@ -38,16 +40,20 @@ export default function App(){
    setSettings(snapshot.settings);
    setSelectedId(current=>current||snapshot.apps[0]?.id||'');
  },[]);
- const refresh=useCallback(async()=>{
-   try{applySnapshot(await ClearScreenNative.getSnapshot())}catch(error){console.warn('ClearScreen backend refresh failed',error)}
+ const refresh=useCallback(async():Promise<BackendSnapshot|undefined>=>{
+   try{const snapshot=await ClearScreenNative.getSnapshot();applySnapshot(snapshot);return snapshot}catch(error){console.warn('ClearScreen backend refresh failed',error);return undefined}
  },[applySnapshot]);
  useEffect(()=>{
    let alive=true;
    const started=Date.now();
-   refresh().finally(()=>{if(alive){const wait=Math.max(0,1200-(Date.now()-started));setTimeout(()=>alive&&setPage('welcome'),wait)}});
+   refresh().then(snapshot=>{if(alive){const wait=Math.max(0,1200-(Date.now()-started));setTimeout(()=>alive&&setPage(snapshot?.onboardingCompleted?'home':'welcome'),wait)}});
    const subscription=AppState.addEventListener('change',state=>{if(state==='active')refresh()});
    return()=>{alive=false;subscription.remove()};
  },[refresh]);
+ const completeOnboarding=useCallback(()=>{
+   setOnboardingCompleted(true);
+   ClearScreenNative.setOnboardingCompleted(true).catch(error=>console.warn('ClearScreen onboarding update failed',error));
+ },[]);
  const go=(p:Page)=>{setHistory(h=>[...h,page]);setPage(p)};
  const back=()=>{setHistory(h=>{const copy=[...h];const p=copy.pop()||'home';setPage(p);return copy})};
  const tab=(t:'home'|'apps'|'settings')=>{setHistory([]);setPage(t)};
@@ -74,8 +80,8 @@ export default function App(){
  },[]);
  let screen:React.ReactNode;
  if(page==='splash')screen=<SplashScreen/>;
- else if(page==='welcome')screen=<WelcomeScreen onStart={()=>go('permissions')} onLater={()=>tab('home')}/>;
- else if(page==='permissions')screen=<PermissionsScreen onBack={back} onContinue={()=>{refresh();tab('home')}} permissions={{skip:permissions.skip,network:permissions.network,bg:permissions.bg}} onToggle={openPermission}/>;
+ else if(page==='welcome')screen=<WelcomeScreen onStart={()=>{completeOnboarding();go('permissions')}} onLater={()=>{completeOnboarding();tab('home')}}/>;
+ else if(page==='permissions')screen=<PermissionsScreen onBack={back} onContinue={()=>{completeOnboarding();refresh();tab('home')}} permissions={{skip:permissions.skip,network:permissions.network,bg:permissions.bg}} onToggle={openPermission}/>;
  else if(page==='home')screen=<HomeScreen master={master} onMaster={toggleMaster} onTab={tab} onPermissions={()=>go('permissions')} onRecords={()=>go('records')} apps={apps} logs={logs} today={today} permissions={permissions}/>;
  else if(page==='apps')screen=<AppsScreen apps={apps} onChangeApps={updateApps} onTab={tab} onOpen={id=>{setSelectedId(id);go('appDetail')}} onWhitelist={()=>go('whitelist')}/>;
  else if(page==='appDetail'&&selected)screen=<AppDetailScreen app={selected} logs={logs} onBack={back} onChange={a=>updateApps(apps.map(x=>x.id===a.id?a:x))} onRecords={()=>go('records')}/>;

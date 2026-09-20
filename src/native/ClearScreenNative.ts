@@ -26,6 +26,7 @@ export type BackendPermissions = {
 
 export type BackendSnapshot = {
   backendReady: boolean;
+  onboardingCompleted: boolean;
   masterEnabled: boolean;
   installedAppCount: number;
   todaySkipCount: number;
@@ -55,6 +56,7 @@ function normalizeApp(app: NativeApp): AppItem {
 function fallbackSnapshot(): BackendSnapshot {
   return {
     backendReady: false,
+    onboardingCompleted: false,
     masterEnabled: true,
     installedAppCount: APPS.length,
     todaySkipCount: 28,
@@ -72,6 +74,7 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
   const logs = Array.isArray(raw.logs) ? raw.logs as LogItem[] : [];
   return {
     backendReady: Boolean(raw.backendReady),
+    onboardingCompleted: Boolean(raw.onboardingCompleted),
     masterEnabled: Boolean(raw.masterEnabled),
     installedAppCount: Number(raw.installedAppCount || apps.length),
     todaySkipCount: Number(raw.todaySkipCount || 0),
@@ -98,6 +101,9 @@ export const ClearScreenNative = {
   getSnapshot: async (): Promise<BackendSnapshot> => {
     if (!native?.getSnapshot) return fallbackSnapshot();
     return normalizeSnapshot(await native.getSnapshot());
+  },
+  setOnboardingCompleted: async (completed: boolean) => {
+    if (native?.setOnboardingCompleted) await native.setOnboardingCompleted(completed);
   },
   setMasterEnabled: async (enabled: boolean) => {
     if (native?.setMasterEnabled) await native.setMasterEnabled(enabled);

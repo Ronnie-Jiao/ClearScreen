@@ -48,6 +48,12 @@ class ClearScreenNativeModule(
   }
 
   @ReactMethod
+  fun setOnboardingCompleted(completed: Boolean, promise: Promise) = runAsync(promise) {
+    store.setOnboardingCompleted(completed)
+    true
+  }
+
+  @ReactMethod
   fun setMasterEnabled(enabled: Boolean, promise: Promise) = runAsync(promise) {
     store.setMasterEnabled(enabled)
     if (!enabled) stopVpnService()
@@ -129,7 +135,11 @@ class ClearScreenNativeModule(
     val apps = Arguments.createArray()
     installedApps().forEach { app -> apps.pushMap(app) }
     val logs = Arguments.createArray()
-    store.getRecentEvents().forEach { event ->
+    // Older builds could inspect the ClearScreen UI itself and record its own
+    // "今日自动跳过" labels as fake skips. Keep the stored events intact, but
+    // exclude this package from user-facing history and counters so every view
+    // uses the same real-data measure.
+    store.getRecentEvents(excludedPackageName = reactContext.packageName).forEach { event ->
       logs.pushMap(Arguments.createMap().apply {
         putString("appId", event.packageName ?: "")
         putString("packageName", event.packageName)
@@ -146,12 +156,16 @@ class ClearScreenNativeModule(
       putBoolean("debug", store.isSettingEnabled(ClearScreenStore.KEY_DEBUG, false))
     }
     map.putBoolean("backendReady", true)
+    map.putBoolean("onboardingCompleted", store.isOnboardingCompleted())
     map.putBoolean("masterEnabled", store.isMasterEnabled())
     map.putInt("installedAppCount", apps.size())
-    map.putInt("todaySkipCount", store.countToday("skip"))
-    map.putInt("todayNetworkCount", store.countToday("network"))
+    map.putInt("todaySkipCount", store.countToday("skip", reactContext.packageName))
+    map.putInt("todayNetworkCount", store.countToday("network", reactContext.packageName))
     map.putBoolean("accessibilityEnabled", ClearScreenAccessibilityService.isEnabled(reactContext))
-    map.putBoolean("accessibilityRunning", ClearScreenAccessibilityService.running)
+    // The accessibility service runs in its own process, so its in-memory running flag
+    // is not visible from the React Native process. The secure setting is the durable
+    // source of truth for the UI and survives activity/process recreation.
+    map.putBoolean("accessibilityRunning", ClearScreenAccessibilityService.isEnabled(reactContext))
     map.putBoolean("vpnPrepared", VpnService.prepare(reactContext) == null)
     map.putBoolean("vpnRunning", ClearScreenVpnService.running)
     map.putBoolean("batteryOptimizationIgnored", isBatteryOptimizationIgnored())

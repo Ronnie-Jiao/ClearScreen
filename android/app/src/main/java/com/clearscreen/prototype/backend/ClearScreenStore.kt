@@ -167,7 +167,9 @@ class ClearScreenStore(context: Context) {
   fun countToday(type: String, excludedPackageName: String? = null): Int {
     val day = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
     return getRecentEvents(MAX_EVENTS, excludedPackageName).count { event ->
-      event.type == type && SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(event.timestamp)) == day
+      event.type == type &&
+        event.result == "success" &&
+        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(event.timestamp)) == day
     }
   }
 

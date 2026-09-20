@@ -4,13 +4,29 @@ import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName
 import android.content.Context
 import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
+import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.clearscreen.prototype.BuildConfig
+import java.util.ArrayDeque
+import java.util.LinkedHashMap
 import java.util.Locale
 
+/**
+ * Accessibility-based ad action detector.
+ *
+ * The detector deliberately uses a layered approach: explicit action labels and
+ * resource ids first, then the surrounding screen/ancestor context, and finally
+ * the target geometry. This borrows the useful ideas behind open-source helpers
+ * without copying a third-party rules engine or its licensed rule data.
+ */
 class ClearScreenAccessibilityService : AccessibilityService() {
   private lateinit var store: ClearScreenStore
+  private val handler = Handler(Looper.getMainLooper())
+  private val recentActions = LinkedHashMap<String, Long>()
   private var lastActionAt = 0L
 
   override fun onServiceConnected() {
@@ -22,47 +38,201 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
     if (event == null || !::store.isInitialized || !store.isMasterEnabled()) return
     val packageName = event.packageName?.toString()?.takeIf { it.isNotBlank() } ?: return
+
     // Never inspect or click our own UI. The app intentionally contains labels such as
-    // "今日自动跳过" and "自动跳过权限"; treating those as ad controls would trigger
-    // the matching Pressable and send the user to the records page.
+    // "今日自动跳过" and "自动跳过权限"; treating those as ad controls would navigate
+    // the user around the app while they are configuring it.
     if (packageName == applicationContext.packageName) return
+
     val rule = store.getAppRule(packageName)
     if (!rule.skipEnabled || rule.whitelist) return
 
     val now = System.currentTimeMillis()
-    if (now - lastActionAt < 700L) return
+    if (now - lastActionAt < ACTION_COOLDOWN_MS) return
+
     val root = findRootForPackage(packageName) ?: return
     val action = findAdAction(root) ?: return
+    val fingerprint = action.targetFingerprint(packageName)
+    if (wasRecentlyAttempted(fingerprint, now)) return
+
     lastActionAt = now
     val clicked = action.target.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
-      action.target.performAction(AccessibilityNodeInfo.ACTION_DISMISS)
-    store.appendEvent(
-      type = "skip",
-      packageName = packageName,
-      ruleId = action.ruleId,
-      result = if (clicked) "success" else "failed",
-      text = if (clicked) action.successText else "处理失败",
-    )
+      (action.allowDismiss && action.target.performAction(AccessibilityNodeInfo.ACTION_DISMISS))
+    if (clicked) rememberAction(fingerprint, now)
+
+    if (BuildConfig.DEBUG) {
+      Log.d(
+        TAG,
+        "action=${action.ruleId} score=${action.score} package=$packageName " +
+          "label=${action.label} clicked=$clicked",
+      )
+    }
+
+    if (!clicked) {
+      appendActionEvent(packageName, action, "failed", "处理失败")
+      return
+    }
+
+    // performAction(true) only means that Android accepted the request. Verify
+    // the same target shortly afterwards so a stale/non-operational node does
+    // not inflate the success counter.
+    handler.postDelayed({
+      if (!::store.isInitialized || !store.isMasterEnabled()) return@postDelayed
+      val currentRoot = findRootForPackage(packageName)
+      val currentAction = currentRoot?.let(::findAdAction)
+      val stillPresent = currentAction?.targetFingerprint(packageName) == fingerprint
+      if (stillPresent) {
+        appendActionEvent(packageName, action, "failed", "动作未生效")
+      } else {
+        appendActionEvent(packageName, action, "success", action.successText)
+      }
+    }, ACTION_VERIFY_DELAY_MS)
   }
 
   override fun onInterrupt() = Unit
 
   override fun onDestroy() {
+    handler.removeCallbacksAndMessages(null)
+    recentActions.clear()
     running = false
     super.onDestroy()
   }
 
-  private fun findAdAction(node: AccessibilityNodeInfo): AccessibilityAction? {
-    findSkipTarget(node)?.let { target ->
-      return AccessibilityAction(target, "builtin.skip.text", "已跳过开屏广告")
+  private fun findAdAction(root: AccessibilityNodeInfo): DetectionAction? {
+    val snapshot = AccessibilitySnapshot.capture(root)
+    if (snapshot.nodes.isEmpty()) return null
+
+    val candidates = snapshot.nodes.mapNotNull { node ->
+      findSkipCandidate(node, snapshot)
+    } + snapshot.nodes.mapNotNull { node ->
+      findPopupCloseCandidate(node, snapshot)
     }
 
-    if (!containsAdMarker(node)) return null
-    val rootBounds = Rect().also(node::getBoundsInScreen)
-    findPopupCloseTarget(node, rootBounds)?.let { target ->
-      return AccessibilityAction(target, "builtin.popup.close", "已关闭弹窗广告")
+    return candidates
+      .filter { it.score >= it.minimumScore }
+      .maxWithOrNull(
+        compareBy<DetectionAction> { it.score }
+          .thenByDescending { it.actionPriority }
+          .thenBy { it.targetBounds.top },
+      )
+  }
+
+  private fun findSkipCandidate(
+    node: ScreenNode,
+    snapshot: AccessibilitySnapshot,
+  ): DetectionAction? {
+    if (!node.isEnabled) return null
+    val target = clickableTarget(node.node) ?: return null
+    if (!target.isVisibleToUser || !target.isEnabled) return null
+
+    val compact = node.compactLabel
+    val resourceId = node.resourceId
+    val strongLabel = isStrongSkipLabel(compact)
+    val countdownLabel = isCountdownSkipLabel(compact)
+    val plainLabel = compact == "跳过" || compact == "skip"
+    val explicitResource = hasSkipResourceId(resourceId)
+    if (!strongLabel && !countdownLabel && !plainLabel && !explicitResource) return null
+
+    val targetBounds = Rect().also(target::getBoundsInScreen)
+    if (!hasUsableBounds(targetBounds)) return null
+    val nearTopRight = isNearTopRight(targetBounds, snapshot.rootBounds)
+    val compactControl = isCompactControl(targetBounds, snapshot.rootBounds)
+    val ancestorHasAdSignal = node.ancestorLabels.any(::hasStrongAdSignal)
+
+    var score = when {
+      countdownLabel -> 116
+      strongLabel -> 112
+      explicitResource -> 96
+      else -> 82
     }
-    return null
+    var ruleId = when {
+      countdownLabel -> "builtin.skip.countdown"
+      strongLabel -> "builtin.skip.strong-label"
+      explicitResource -> "builtin.skip.resource-id"
+      else -> "builtin.skip.short-label"
+    }
+
+    if (explicitResource) score += 28
+    if (nearTopRight) score += 20
+    if (compactControl) score += 8
+    if (ancestorHasAdSignal) score += 18
+    if (snapshot.context.hasAdSignal) score += 24
+    if (snapshot.context.hasStrongAdSignal) score += 12
+
+    // A bare "跳过/Skip" is intentionally accepted only when its position or
+    // surrounding screen makes it look like an ad action. This prevents ordinary
+    // tutorial/settings controls from being clicked just because they contain a
+    // common verb.
+    if (plainLabel && !countdownLabel && !explicitResource &&
+      !nearTopRight && !ancestorHasAdSignal
+    ) return null
+    if (plainLabel && !compactControl && !snapshot.context.hasAdSignal && !explicitResource) return null
+
+    if (snapshot.context.hasAdSignal || ancestorHasAdSignal) {
+      ruleId += ".ad-context"
+    }
+    return DetectionAction(
+      target = target,
+      targetBounds = targetBounds,
+      score = score,
+      minimumScore = if (plainLabel) 102 else 96,
+      actionPriority = 2,
+      allowDismiss = false,
+      ruleId = ruleId,
+      label = node.label.take(MAX_LOG_LABEL_LENGTH),
+      successText = "已跳过开屏广告",
+    )
+  }
+
+  private fun findPopupCloseCandidate(
+    node: ScreenNode,
+    snapshot: AccessibilitySnapshot,
+  ): DetectionAction? {
+    if (!node.isEnabled) return null
+    val target = clickableTarget(node.node) ?: return null
+    if (!target.isVisibleToUser || !target.isEnabled) return null
+
+    val compact = node.compactLabel
+    val resourceId = node.resourceId
+    val closeLabel = isPopupCloseLabel(compact)
+    val explicitAdResource = hasAdCloseResourceId(resourceId)
+    if (!closeLabel && !explicitAdResource) return null
+
+    val targetBounds = Rect().also(target::getBoundsInScreen)
+    if (!hasUsableBounds(targetBounds)) return null
+    val nearTopRight = isNearTopRight(targetBounds, snapshot.rootBounds)
+    val compactControl = isCompactControl(targetBounds, snapshot.rootBounds)
+    val ancestorHasAdSignal = node.ancestorLabels.any(::hasStrongAdSignal)
+    val hasAdContext = snapshot.context.hasAdSignal || ancestorHasAdSignal
+
+    // A generic close icon is too dangerous to click without ad context. A
+    // resource id explicitly mentioning an interstitial/splash/ad is stronger,
+    // but it still must be a small control near the edge of the screen.
+    if (!nearTopRight || !compactControl) return null
+    if (!hasAdContext && !explicitAdResource) return null
+
+    var score = when {
+      explicitAdResource -> 92
+      compact == "关闭广告" || compact == "关闭弹窗" -> 88
+      compact == "关闭" || compact == "close" -> 76
+      else -> 62
+    }
+    if (explicitAdResource) score += 30
+    if (nearTopRight) score += 18
+    if (compactControl) score += 8
+    if (hasAdContext) score += 26
+
+    return DetectionAction(
+      target = target,
+      targetBounds = targetBounds,
+      score = score,
+      minimumScore = 106,
+      actionPriority = 1,
+      allowDismiss = true,
+      ruleId = if (explicitAdResource) "builtin.popup.close.resource-id" else "builtin.popup.close.context",
+      label = node.label.take(MAX_LOG_LABEL_LENGTH),
+      successText = "已关闭弹窗广告",
+    )
   }
 
   private fun findRootForPackage(packageName: String): AccessibilityNodeInfo? {
@@ -78,118 +248,216 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     }.getOrNull()
   }
 
-  private fun findSkipTarget(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-    val label = listOfNotNull(
-      node.text?.toString(),
-      node.contentDescription?.toString(),
-    ).joinToString(" ").trim()
-    val matches = isSkipLabel(label)
-    if (matches && node.isVisibleToUser) {
-      clickableTarget(node)?.let { return it }
-    }
-    for (index in 0 until node.childCount) {
-      val child = node.getChild(index) ?: continue
-      val result = findSkipTarget(child)
-      if (result != null) return result
-    }
-    return null
-  }
-
-  private fun findPopupCloseTarget(
-    node: AccessibilityNodeInfo,
-    rootBounds: Rect,
-  ): AccessibilityNodeInfo? {
-    val label = listOfNotNull(
-      node.text?.toString(),
-      node.contentDescription?.toString(),
-    ).joinToString(" ").trim()
-    val resourceId = node.viewIdResourceName.orEmpty().lowercase(Locale.ROOT)
-    val isExplicitAdResource = resourceId.contains("close_btn") ||
-      resourceId.contains("ad_close") ||
-      resourceId.contains("skip") ||
-      resourceId.contains("countdown") ||
-      resourceId.contains("interstitial") ||
-      resourceId.contains("splash")
-    if ((isPopupCloseLabel(label) || isExplicitAdResource) && node.isVisibleToUser) {
-      val target = clickableTarget(node)
-      if (target != null) {
-        val bounds = Rect().also(target::getBoundsInScreen)
-        val rootWidth = rootBounds.width().coerceAtLeast(1)
-        val rootHeight = rootBounds.height().coerceAtLeast(1)
-        val isNearTopRight = bounds.centerX() >= rootBounds.left + rootWidth * 0.58f &&
-          bounds.top <= rootBounds.top + rootHeight * 0.55f
-        val isCompact = bounds.width() <= rootWidth * 0.35f &&
-          bounds.height() <= rootHeight * 0.22f
-        val isRightEdge = bounds.right >= rootBounds.left + rootWidth * 0.78f
-        if (isCompact && (isNearTopRight || label.trim() == "关闭" ||
-            (isExplicitAdResource && isRightEdge))) return target
-      }
-    }
-    for (index in 0 until node.childCount) {
-      val child = node.getChild(index) ?: continue
-      val result = findPopupCloseTarget(child, rootBounds)
-      if (result != null) return result
-    }
-    return null
-  }
-
   private fun clickableTarget(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
     var current: AccessibilityNodeInfo? = node
-    repeat(5) {
-      if (current?.isVisibleToUser == true && current.isClickable) return current
+    repeat(MAX_CLICKABLE_ANCESTORS) {
+      if (current?.isVisibleToUser == true && current.isEnabled && current.isClickable) {
+        return current
+      }
       current = current?.parent
     }
     return null
   }
 
-  private fun isSkipLabel(label: String): Boolean {
-    val normalized = label.trim().lowercase(Locale.ROOT)
-    if (normalized.isBlank()) return false
-    if (SKIP_LABELS.any { normalized == it || (it != "跳过" && normalized.contains(it)) }) return true
-    return normalized.matches(Regex("^\\d{1,3}\\s*(跳过|skip)(广告|视频|此广告|this ad)?$"))
-  }
+  private fun wasRecentlyAttempted(key: String, now: Long): Boolean =
+    recentActions[key]?.let { now - it < ACTION_REPEAT_GUARD_MS } == true
 
-  private fun containsAdMarker(node: AccessibilityNodeInfo): Boolean {
-    val label = listOfNotNull(
-      node.text?.toString(),
-      node.contentDescription?.toString(),
-    ).joinToString(" ").trim().lowercase(Locale.ROOT)
-    if (AD_MARKERS.any { marker ->
-        if (marker == "ad") label == marker || label.startsWith("ad ") || label.endsWith(" ad")
-        else label.contains(marker)
-      }) return true
-    for (index in 0 until node.childCount) {
-      val child = node.getChild(index) ?: continue
-      if (containsAdMarker(child)) return true
+  private fun rememberAction(key: String, now: Long) {
+    recentActions[key] = now
+    while (recentActions.size > MAX_REMEMBERED_ACTIONS) {
+      recentActions.remove(recentActions.entries.first().key)
     }
-    return false
   }
 
-  private fun isPopupCloseLabel(label: String): Boolean {
-    val normalized = label.trim().lowercase(Locale.ROOT)
-    return normalized in POPUP_CLOSE_LABELS || normalized.startsWith("关闭") || normalized == "close"
+  private fun appendActionEvent(
+    packageName: String,
+    action: DetectionAction,
+    result: String,
+    text: String,
+  ) {
+    store.appendEvent(
+      type = "skip",
+      packageName = packageName,
+      ruleId = action.ruleId,
+      result = result,
+      text = text,
+    )
   }
 
-  private data class AccessibilityAction(
-    val target: AccessibilityNodeInfo,
-    val ruleId: String,
-    val successText: String,
+  private data class PendingNode(
+    val node: AccessibilityNodeInfo,
+    val depth: Int,
+    val ancestorLabels: List<String>,
   )
+
+  private data class AccessibilitySnapshot(
+    val nodes: List<ScreenNode>,
+    val rootBounds: Rect,
+    val context: AdContext,
+  ) {
+    companion object {
+      fun capture(root: AccessibilityNodeInfo): AccessibilitySnapshot {
+        val nodes = mutableListOf<ScreenNode>()
+        val pending = ArrayDeque<PendingNode>()
+        pending.add(PendingNode(root, 0, emptyList()))
+        val rootBounds = Rect().also(root::getBoundsInScreen)
+
+        while (pending.isNotEmpty() && nodes.size < MAX_NODES_PER_SNAPSHOT) {
+          val current = pending.removeFirst()
+          val node = current.node
+          val label = readNodeLabel(node)
+          val resourceId = node.viewIdResourceName.orEmpty().lowercase(Locale.ROOT)
+          val bounds = Rect().also(node::getBoundsInScreen)
+          val visible = node.isVisibleToUser && hasUsableBounds(bounds)
+          nodes += ScreenNode(
+            node = node,
+            label = label,
+            compactLabel = normalizeLabel(label),
+            resourceId = resourceId,
+            ancestorLabels = current.ancestorLabels,
+            bounds = bounds,
+            isVisible = visible,
+            isEnabled = node.isEnabled,
+            depth = current.depth,
+          )
+
+          val nextAncestors = if (label.isBlank()) {
+            current.ancestorLabels
+          } else {
+            (current.ancestorLabels + label).takeLast(MAX_ANCESTOR_LABELS)
+          }
+          if (current.depth >= MAX_TREE_DEPTH) continue
+          for (index in 0 until node.childCount) {
+            node.getChild(index)?.let { child ->
+              pending.add(PendingNode(child, current.depth + 1, nextAncestors))
+            }
+          }
+        }
+
+        return AccessibilitySnapshot(
+          nodes = nodes,
+          rootBounds = rootBounds,
+          context = AdContext.from(nodes),
+        )
+      }
+    }
+  }
+
+  private data class ScreenNode(
+    val node: AccessibilityNodeInfo,
+    val label: String,
+    val compactLabel: String,
+    val resourceId: String,
+    val ancestorLabels: List<String>,
+    val bounds: Rect,
+    val isVisible: Boolean,
+    val isEnabled: Boolean,
+    val depth: Int,
+  )
+
+  private data class AdContext(
+    val strongSignals: Int,
+    val mediumSignals: Int,
+  ) {
+    val hasStrongAdSignal: Boolean get() = strongSignals > 0
+    val hasAdSignal: Boolean get() = hasStrongAdSignal || mediumSignals >= 2
+
+    companion object {
+      fun from(nodes: List<ScreenNode>): AdContext {
+        var strong = 0
+        var medium = 0
+        nodes.forEach { node ->
+          if (!node.isVisible) return@forEach
+          if (hasStrongAdSignal(node.label, node.resourceId)) strong++
+          if (hasMediumAdSignal(node.compactLabel)) medium++
+        }
+        return AdContext(
+          strongSignals = strong.coerceAtMost(3),
+          mediumSignals = medium.coerceAtMost(4),
+        )
+      }
+    }
+  }
+
+  private data class DetectionAction(
+    val target: AccessibilityNodeInfo,
+    val targetBounds: Rect,
+    val score: Int,
+    val minimumScore: Int,
+    val actionPriority: Int,
+    val allowDismiss: Boolean,
+    val ruleId: String,
+    val label: String,
+    val successText: String,
+  ) {
+    fun targetFingerprint(packageName: String): String = buildString {
+      append(packageName)
+      append('|')
+      append(label)
+      append('|')
+      append(targetBounds.left)
+      append(',')
+      append(targetBounds.top)
+      append(',')
+      append(targetBounds.right)
+      append(',')
+      append(targetBounds.bottom)
+    }
+  }
 
   companion object {
     @Volatile
     var running: Boolean = false
 
-    private val SKIP_LABELS = listOf("跳过广告", "跳过", "Skip Ad", "Skip")
-    private val POPUP_CLOSE_LABELS = setOf("关闭", "close", "×", "✕", "✖", "✗", "╳", "⨯", "x")
-    private val AD_MARKERS = listOf(
+    private const val TAG = "ClearScreenA11y"
+    private const val ACTION_COOLDOWN_MS = 480L
+    private const val ACTION_VERIFY_DELAY_MS = 650L
+    private const val ACTION_REPEAT_GUARD_MS = 1_500L
+    private const val MAX_CLICKABLE_ANCESTORS = 6
+    private const val MAX_NODES_PER_SNAPSHOT = 1_200
+    private const val MAX_TREE_DEPTH = 32
+    private const val MAX_ANCESTOR_LABELS = 8
+    private const val MAX_REMEMBERED_ACTIONS = 80
+    private const val MAX_LOG_LABEL_LENGTH = 80
+
+    private val COUNTDOWN_SKIP_PATTERN = Regex(
+      "^(?:\\d{1,3}(?:秒|s)?跳过(?:广告|视频|此广告)?|跳过(?:广告|视频|此广告)?\\d{1,3}(?:秒|s)?|\\d{1,3}(?:秒|s)?skip(?:ad|thisad|video)?)$",
+    )
+    private val STRONG_SKIP_LABELS = setOf(
+      "跳过广告",
+      "跳过此广告",
+      "跳过视频",
+      "skipad",
+      "skipthisad",
+      "skipvideo",
+    )
+    private val POPUP_CLOSE_LABELS = setOf(
+      "关闭",
+      "关闭广告",
+      "关闭弹窗",
+      "close",
+      "closead",
+      "dismiss",
+      "×",
+      "✕",
+      "✖",
+      "✗",
+      "╳",
+      "⨯",
+      "x",
+    )
+    private val STRONG_AD_MARKERS = listOf(
       "广告",
       "广告位",
+      "开屏",
       "推广",
       "赞助",
-      "ad",
       "sponsored",
       "advertisement",
+      "interstitial",
+      "splashad",
+    )
+    private val MEDIUM_AD_MARKERS = listOf(
       "立即打开",
       "立即下载",
       "点击跳转",
@@ -201,8 +469,23 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       "特惠",
       "红包",
       "svip",
-      "会员",
-      "开通",
+    )
+    private val SKIP_RESOURCE_MARKERS = listOf(
+      "skip",
+      "jump",
+      "countdown",
+      "ad_skip",
+      "skip_ad",
+      "skipad",
+    )
+    private val AD_CLOSE_RESOURCE_MARKERS = listOf(
+      "ad_close",
+      "close_ad",
+      "closebtn_ad",
+      "interstitial",
+      "splash",
+      "ad_dialog",
+      "adclose",
     )
 
     fun isEnabled(context: Context): Boolean {
@@ -213,6 +496,70 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       val component = ComponentName(context, ClearScreenAccessibilityService::class.java)
         .flattenToString()
       return enabled.split(':').any { it.equals(component, ignoreCase = true) }
+    }
+
+    private fun readNodeLabel(node: AccessibilityNodeInfo): String =
+      listOfNotNull(
+        node.text?.toString()?.trim()?.takeIf { it.isNotBlank() },
+        node.contentDescription?.toString()?.trim()?.takeIf { it.isNotBlank() },
+      ).distinct().joinToString(" ")
+
+    private fun normalizeLabel(value: String): String = value
+      .lowercase(Locale.ROOT)
+      .replace("\u3000", "")
+      .replace("[\\s\\-_:：，,。.!！？?()（）\\[\\]{}<>《》【】'\"`~·|/\\\\]".toRegex(), "")
+
+    private fun isStrongSkipLabel(compact: String): Boolean =
+      compact in STRONG_SKIP_LABELS ||
+        (compact.startsWith("skipad") && compact.length <= 20) ||
+        (compact.startsWith("跳过") && compact.length <= 10 &&
+          (compact.contains("广告") || compact.contains("视频")))
+
+    private fun isCountdownSkipLabel(compact: String): Boolean =
+      COUNTDOWN_SKIP_PATTERN.matches(compact)
+
+    private fun hasSkipResourceId(resourceId: String): Boolean =
+      SKIP_RESOURCE_MARKERS.any(resourceId::contains)
+
+    private fun hasAdCloseResourceId(resourceId: String): Boolean =
+      AD_CLOSE_RESOURCE_MARKERS.any(resourceId::contains)
+
+    private fun isPopupCloseLabel(compact: String): Boolean =
+      compact in POPUP_CLOSE_LABELS ||
+        (compact.startsWith("关闭") && compact.length <= 8) ||
+        (compact.startsWith("close") && compact.length <= 12)
+
+    private fun hasStrongAdSignal(label: String): Boolean =
+      hasStrongAdSignal(label, "")
+
+    private fun hasStrongAdSignal(label: String, resourceId: String): Boolean {
+      val compact = normalizeLabel(label)
+      return STRONG_AD_MARKERS.any(compact::contains) ||
+        resourceId.contains("ad_") ||
+        resourceId.contains("_ad") ||
+        resourceId.contains("adview") ||
+        resourceId.contains("interstitial") ||
+        resourceId.contains("splash")
+    }
+
+    private fun hasMediumAdSignal(compactLabel: String): Boolean =
+      MEDIUM_AD_MARKERS.any(compactLabel::contains)
+
+    private fun hasUsableBounds(bounds: Rect): Boolean =
+      bounds.width() > 0 && bounds.height() > 0
+
+    private fun isNearTopRight(bounds: Rect, rootBounds: Rect): Boolean {
+      val width = rootBounds.width().coerceAtLeast(1)
+      val height = rootBounds.height().coerceAtLeast(1)
+      return bounds.centerX() >= rootBounds.left + width * 0.55f &&
+        bounds.top <= rootBounds.top + height * 0.48f &&
+        bounds.right >= rootBounds.left + width * 0.70f
+    }
+
+    private fun isCompactControl(bounds: Rect, rootBounds: Rect): Boolean {
+      val width = rootBounds.width().coerceAtLeast(1)
+      val height = rootBounds.height().coerceAtLeast(1)
+      return bounds.width() <= width * 0.36f && bounds.height() <= height * 0.22f
     }
   }
 }

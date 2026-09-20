@@ -1,12 +1,23 @@
 {
   "expo": {
-    "name": "净屏 ClearScreen",
+    "name": "净屏",
     "slug": "clearscreen-high-fidelity-ui",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
+    "icon": "./assets/logo.png",
     "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F4FCFF"
+    },
     "android": {
-      "package": "com.clearscreen.prototype"
+      "package": "com.clearscreen.prototype",
+      "versionCode": 2,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#EAF9FF"
+      }
     }
   }
 }

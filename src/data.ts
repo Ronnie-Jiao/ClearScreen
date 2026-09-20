@@ -8,6 +8,9 @@ export type AppItem = {
   skip: boolean;
   network: boolean;
   whitelist: boolean;
+  isSystemApp?: boolean;
+  versionName?: string;
+  packageName?: string;
 };
 
 export const APPS: AppItem[] = [
@@ -25,7 +28,7 @@ export const APPS: AppItem[] = [
   { id: 'didi', name: '滴滴出行', icon: APP_ICONS.didi, skip: false, network: true, whitelist: false },
 ];
 
-export type LogItem = { appId: string; time: string; type: 'skip'|'network'|'fail'; text: string };
+export type LogItem = { appId: string; time: string; type: 'skip'|'network'|'fail'; text: string; timestamp?: number; result?: string };
 export const LOGS: LogItem[] = [
   {appId:'xhs',time:'08:32',type:'skip',text:'已跳过开屏广告'},
   {appId:'taobao',time:'09:05',type:'network',text:'已拦截广告请求'},

@@ -1,13 +1,28 @@
-# 净屏 ClearScreen
+# 净屏
 
 高保真 React Native + Expo 前端原型，当前以 **Android** 为目标平台。仓库同时保留早期 Hatchable Web 原型在 `public/` 目录。
+
+## 应用命名与打包约定
+
+- 对外应用名称、Android 桌面名称和安装包显示名称统一为 **净屏**。
+- `ClearScreen` 仅作为英文品牌副标题、代码标识和 Android `applicationId` 使用，不作为用户看到的应用名称。
+- 后续打包或重新生成 Android 原生工程时，必须保持 `app.json` 的 Expo 应用名和 `android/app/src/main/res/values/strings.xml` 中的 `app_name` 为 `净屏`。
+- Android `applicationId` `com.clearscreen.prototype` 是技术标识，保持不变。
+
+## 升级与数据保留约定
+
+- 更新安装包时使用“升级安装”，不要先卸载旧版，也不要执行清除应用数据。
+- 必须保持 `com.clearscreen.prototype` 包名不变，并使用同一发布签名；否则 Android 会把它视为不同应用，旧数据无法直接衔接。
+- 每次发布更新都递增 `android/app/build.gradle` 的 `versionCode`，同时同步 `app.json` 的 `android.versionCode` 和版本号。
+- 本地设置、应用规则、白名单和拦截记录保存在 `clearscreen_backend` 中；启动时只做兼容迁移，不调用清空或覆盖旧存储。
+- 发布签名文件属于本机敏感文件，不提交 Git；更换打包机器前要安全迁移同一签名文件。
 
 ## 当前状态
 
 - Android 前端高保真 UI 已实现
 - iOS / HarmonyOS 暂不开发
 - 不包含账号、会员、订阅或支付
-- AccessibilityService、VpnService 等 Android 系统层能力尚未接入
+- AccessibilityService、VpnService 等 Android 系统层能力已接入本地后端；首次使用仍需用户在系统设置中授权
 
 ## 已实现页面
 

@@ -2,5 +2,12 @@ node_modules/
 .expo/
 dist/
 android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/local.properties
+android/app/*.keystore
+.idea/
+*.iml
 *.log
 .DS_Store

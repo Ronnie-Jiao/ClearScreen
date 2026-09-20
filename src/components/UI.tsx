@@ -60,7 +60,7 @@ export function SectionTitle({title}:{title:string}){return <Text style={styles.
 export function Chevron(){return <Text style={styles.chevron}>›</Text>}
 
 const styles=StyleSheet.create({
-  root:{flex:1,backgroundColor:C.bg,overflow:'hidden'},
+  root:{flex:1,backgroundColor:C.bg,overflow:'hidden',paddingTop:14,paddingBottom:18},
   arc:{position:'absolute',width:500,height:500,borderRadius:250,borderWidth:42,borderColor:'rgba(78,199,233,.13)'},
   card:{backgroundColor:'rgba(255,255,255,.94)',borderRadius:R.lg,borderWidth:1,borderColor:'rgba(255,255,255,.95)',shadowColor:'#4A7EA2',shadowOpacity:.10,shadowRadius:20,shadowOffset:{width:0,height:10},elevation:3},
   toggle:{width:74,height:42,borderRadius:24,backgroundColor:C.graySwitch,padding:4,justifyContent:'center'},

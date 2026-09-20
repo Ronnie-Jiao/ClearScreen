@@ -1,10 +1,10 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { AppItem, LOGS } from '../data';
+import { AppItem, LogItem } from '../data';
 import { AppIcon, Background, Badge, Card, Chevron, SquareIcon, Toggle, TopBar } from '../components/UI';
 import { C } from '../theme';
-export default function AppDetailScreen({app,onBack,onChange,onRecords}:{app:AppItem;onBack:()=>void;onChange:(a:AppItem)=>void;onRecords:()=>void}){
- const recent=LOGS.filter(l=>l.appId===app.id).slice(0,3);
+export default function AppDetailScreen({app,logs,onBack,onChange,onRecords}:{app:AppItem;logs:LogItem[];onBack:()=>void;onChange:(a:AppItem)=>void;onRecords:()=>void}){
+ const recent=logs.filter(l=>l.appId===app.id).slice(0,3);
  const set=(k:'skip'|'network'|'whitelist')=>onChange({...app,[k]:!app[k],...(k==='whitelist'&&!app.whitelist?{skip:false,network:false}:{}),...((k==='skip'||k==='network')&&!app[k]?{whitelist:false}:{})});
  return <Background><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.page}><TopBar title="应用详情" onBack={onBack}/>
   <Card style={s.hero}><AppIcon source={app.icon} size={96}/><View><Text style={s.appName}>{app.name}</Text><Badge>✓  已安装</Badge></View></Card>

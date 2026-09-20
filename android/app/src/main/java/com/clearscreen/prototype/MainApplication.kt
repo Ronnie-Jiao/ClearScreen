@@ -2,7 +2,6 @@ package com.clearscreen.prototype
 
 import android.app.Application
 import android.content.res.Configuration
-import android.os.Build
 
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
@@ -42,11 +41,6 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
-    // Keep the accessibility worker lightweight and independent from the React Native UI
-    // process. OriginOS may reclaim the UI process when Settings is brought to the front.
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-      Application.getProcessName() != packageName
-    ) return
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (e: IllegalArgumentException) {

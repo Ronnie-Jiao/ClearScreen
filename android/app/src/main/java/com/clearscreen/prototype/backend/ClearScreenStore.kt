@@ -25,9 +25,9 @@ data class StoredEvent(
 
 class ClearScreenStore(context: Context) {
   private val lock = Any()
-  // The UI and the accessibility worker are separate processes. Ask Android to
-  // re-check the preference file so app-rule and master-switch changes cross that
-  // process boundary instead of remaining in a stale in-memory cache.
+  // Keep the existing preference file and additive migration path. The UI and
+  // accessibility service now share the app process, while this mode remains
+  // compatible with installations that are upgrading from the old service process.
   @Suppress("DEPRECATION")
   private val preferences = context.getSharedPreferences(
     PREFERENCES,

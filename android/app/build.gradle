@@ -68,6 +68,12 @@ react {
  */
 def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBuilds') ?: false).toBoolean()
 
+// Keep the normal build on the current Expo/Android target. For a controlled
+// comparison with older accessibility tools such as LiTiaotiao, build with
+// -PclearscreenTargetSdk=33. This is an A/B-test switch, not a Restricted
+// Settings bypass; Android still decides whether a sideloaded app is covered.
+def clearscreenTargetSdk = (findProperty('clearscreenTargetSdk') ?: rootProject.ext.targetSdkVersion).toInteger()
+
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
  *
@@ -91,9 +97,9 @@ android {
     defaultConfig {
         applicationId 'com.clearscreen.prototype'
         minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 10
-        versionName "1.0.9"
+        targetSdkVersion clearscreenTargetSdk
+        versionCode 11
+        versionName "1.0.10"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

@@ -13,6 +13,7 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -41,6 +42,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     super.onServiceConnected()
     store = ClearScreenStore(this)
     running = true
+    Log.i(
+      TAG,
+      "onServiceConnected component=${ComponentName(this, ClearScreenAccessibilityService::class.java).flattenToString()} " +
+        "pid=${Process.myPid()}",
+    )
     startPersistentForegroundNotification()
   }
 
@@ -100,7 +106,13 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   override fun onInterrupt() = Unit
 
+  override fun onUnbind(intent: Intent?): Boolean {
+    Log.w(TAG, "onUnbind pid=${Process.myPid()}")
+    return super.onUnbind(intent)
+  }
+
   override fun onDestroy() {
+    Log.w(TAG, "onDestroy pid=${Process.myPid()}")
     handler.removeCallbacksAndMessages(null)
     recentActions.clear()
     running = false
@@ -634,8 +646,23 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
       ) ?: return false
       val component = ComponentName(context, ClearScreenAccessibilityService::class.java)
-        .flattenToString()
-      return enabled.split(':').any { it.equals(component, ignoreCase = true) }
+      val fullName = component.flattenToString()
+      val shortName = component.flattenToShortString()
+      return enabled.split(':').any { rawName ->
+        val name = rawName.trim()
+        if (name.equals(fullName, ignoreCase = true) ||
+          name.equals(shortName, ignoreCase = true)
+        ) {
+          true
+        } else {
+          // vivo may persist the short form. Let Android expand it before
+          // comparing so the app and system agree on the same service.
+          ComponentName.unflattenFromString(name)?.let { savedComponent ->
+            savedComponent.packageName.equals(component.packageName, ignoreCase = true) &&
+              savedComponent.className.equals(component.className, ignoreCase = true)
+          } == true
+        }
+      }
     }
 
     private fun readNodeLabel(node: AccessibilityNodeInfo): String =

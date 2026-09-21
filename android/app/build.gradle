@@ -101,7 +101,7 @@ android {
         applicationId clearscreenApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion clearscreenTargetSdk
-        versionCode 14
+        versionCode 19
         versionName "1.0.13"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""

@@ -1,6 +1,9 @@
 package com.clearscreen.prototype.backend
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Activity
+import android.app.ActivityManager
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInstaller
@@ -13,6 +16,7 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Base64
+import android.view.accessibility.AccessibilityManager
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.BaseActivityEventListener
 import com.facebook.react.bridge.Promise
@@ -190,11 +194,13 @@ class ClearScreenNativeModule(
     map.putInt("installedAppCount", apps.size())
     map.putInt("todaySkipCount", store.countToday("skip", reactContext.packageName))
     map.putInt("todayNetworkCount", store.countToday("network", reactContext.packageName))
-    map.putBoolean("accessibilityEnabled", ClearScreenAccessibilityService.isEnabled(reactContext))
-    // The accessibility service runs in its own process, so its in-memory running flag
-    // is not visible from the React Native process. The secure setting is the durable
-    // source of truth for the UI and survives activity/process recreation.
-    map.putBoolean("accessibilityRunning", ClearScreenAccessibilityService.isEnabled(reactContext))
+    val accessibility = readAccessibilityState()
+    map.putBoolean("accessibilityEnabled", accessibility.authorized)
+    map.putBoolean("accessibilityRunning", accessibility.running)
+    map.putBoolean("accessibilitySettingEnabled", accessibility.settingEnabled)
+    map.putBoolean("accessibilityServiceBound", accessibility.serviceBound)
+    map.putBoolean("accessibilityProcessAlive", accessibility.processAlive)
+    map.putString("accessibilityStoredServices", accessibility.storedServices)
     map.putBoolean("vpnPrepared", VpnService.prepare(reactContext) == null)
     map.putBoolean("vpnRunning", ClearScreenVpnService.running)
     map.putBoolean("batteryOptimizationIgnored", isBatteryOptimizationIgnored())
@@ -336,6 +342,47 @@ class ClearScreenNativeModule(
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
     val power = reactContext.getSystemService(PowerManager::class.java)
     return power?.isIgnoringBatteryOptimizations(reactContext.packageName) == true
+  }
+
+  private data class AccessibilityState(
+    val settingEnabled: Boolean,
+    val serviceBound: Boolean,
+    val processAlive: Boolean,
+    val storedServices: String,
+  ) {
+    val authorized: Boolean
+      get() = settingEnabled || serviceBound
+    val running: Boolean
+      get() = serviceBound && processAlive
+  }
+
+  private fun readAccessibilityState(): AccessibilityState {
+    val component = ComponentName(reactContext, ClearScreenAccessibilityService::class.java)
+    val storedServices = Settings.Secure.getString(
+      reactContext.contentResolver,
+      Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+    ).orEmpty()
+    val serviceBound = runCatching {
+      val manager = reactContext.getSystemService(AccessibilityManager::class.java)
+      manager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        ?.any { info ->
+          val serviceInfo = info.resolveInfo?.serviceInfo
+          serviceInfo?.packageName?.equals(component.packageName, ignoreCase = true) == true &&
+            serviceInfo?.name?.equals(component.className, ignoreCase = true) == true
+        } == true
+    }.getOrDefault(false)
+    val processAlive = runCatching {
+      val manager = reactContext.getSystemService(ActivityManager::class.java)
+      manager?.runningAppProcesses.orEmpty().any { process ->
+        process.processName == "${reactContext.packageName}:accessibility"
+      }
+    }.getOrDefault(false)
+    return AccessibilityState(
+      settingEnabled = ClearScreenAccessibilityService.isEnabled(reactContext),
+      serviceBound = serviceBound,
+      processAlive = processAlive,
+      storedServices = storedServices,
+    )
   }
 
   private fun isVivoFamilyDevice(): Boolean {

@@ -19,6 +19,10 @@ type NativeLog = LogItem & { packageName?: string; result?: string; timestamp?: 
 export type BackendPermissions = {
   skip: boolean;
   skipRunning: boolean;
+  accessibilitySettingEnabled: boolean;
+  accessibilityServiceBound: boolean;
+  accessibilityProcessAlive: boolean;
+  accessibilityStoredServices: string;
   network: boolean;
   networkRunning: boolean;
   bg: boolean;
@@ -86,6 +90,10 @@ function fallbackSnapshot(): BackendSnapshot {
     permissions: {
       skip: true,
       skipRunning: false,
+      accessibilitySettingEnabled: true,
+      accessibilityServiceBound: false,
+      accessibilityProcessAlive: false,
+      accessibilityStoredServices: '',
       network: true,
       networkRunning: false,
       bg: false,
@@ -139,6 +147,10 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
     permissions: {
       skip: Boolean(raw.accessibilityEnabled),
       skipRunning: Boolean(raw.accessibilityRunning),
+      accessibilitySettingEnabled: Boolean(raw.accessibilitySettingEnabled ?? raw.accessibilityEnabled),
+      accessibilityServiceBound: Boolean(raw.accessibilityServiceBound ?? raw.accessibilityRunning),
+      accessibilityProcessAlive: Boolean(raw.accessibilityProcessAlive),
+      accessibilityStoredServices: String(raw.accessibilityStoredServices || ''),
       network: Boolean(raw.vpnPrepared),
       networkRunning: Boolean(raw.vpnRunning),
       bg: Boolean(raw.batteryOptimizationIgnored),

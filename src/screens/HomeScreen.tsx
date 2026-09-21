@@ -10,11 +10,13 @@ type HomePermissions={skip:boolean;skipRunning?:boolean;network:boolean;networkR
 export default function HomeScreen({master,onMaster,onTab,onPermissions,onRecords,apps,logs,today,permissions}:{master:boolean;onMaster:()=>void;onTab:(t:'home'|'apps'|'settings')=>void;onPermissions:()=>void;onRecords:()=>void;apps:AppItem[];logs:LogItem[];today:{skip:number;network:number};permissions:HomePermissions}){
  const recent=logs.slice(0,3);
  const backgroundStatus=permissions.isVivoFamily&&!permissions.vendorStartupGuideConfirmed?'需开自启动':permissions.isVivoFamily?'已完成检查':permissions.bg?'已允许':'需设置';
- const rows=[['≫','blue','自动跳过权限',permissions.skip?'已开启':'需设置'],['◆','green','网络过滤状态',permissions.networkRunning?'运行中':permissions.network?'已授权':'未开启'],['▣','purple','后台运行',backgroundStatus]];
+ const skipStatus=permissions.skipRunning?'已开启':permissions.skip?'启动中':'需设置';
+ const rows=[['≫','blue','自动跳过权限',skipStatus],['◆','green','网络过滤状态',permissions.networkRunning?'运行中':permissions.network?'已授权':'未开启'],['▣','purple','后台运行',backgroundStatus]];
  const total=today.skip+today.network;
- const active=master&&(permissions.skip||Boolean(permissions.networkRunning));
+ const active=master&&(Boolean(permissions.skipRunning)||Boolean(permissions.networkRunning));
+ const statusTitle=active?'净屏已开启':master&&permissions.skip?'等待服务启动':master?'等待授权':'净屏已暂停';
  return <Background><View style={s.root}><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}><BrandHeader/>
-  <Card style={s.status}><LinearGradient colors={active?['#16A9F0','#11D3C0']:['#AFC1D9','#C6D1DF']} style={s.orb}><Text style={s.check}>{active?'✓':master?'!':'–'}</Text></LinearGradient><View style={{flex:1}}><Text style={s.statusTitle}>{active?'净屏已开启':master?'等待授权':'净屏已暂停'}</Text></View><Toggle value={master} onChange={onMaster}/></Card>
+  <Card style={s.status}><LinearGradient colors={active?['#16A9F0','#11D3C0']:['#AFC1D9','#C6D1DF']} style={s.orb}><Text style={s.check}>{active?'✓':master?'!':'–'}</Text></LinearGradient><View style={{flex:1}}><Text style={s.statusTitle}>{statusTitle}</Text></View><Toggle value={master} onChange={onMaster}/></Card>
   <View style={s.stats}><Pressable style={{flex:1}} onPress={onRecords}><Card style={s.stat}><SquareIcon symbol="≫" tone="blue" size={62}/><View><Text style={s.statLabel}>今日自动跳过</Text><View style={s.numRow}><Text style={s.num}>{today.skip}</Text><Text style={s.unit}>次</Text></View></View></Card></Pressable><Pressable style={{flex:1}} onPress={onRecords}><Card style={s.stat}><SquareIcon symbol="◎" tone="green" size={62}/><View><Text style={s.statLabel}>今日网络过滤</Text><View style={s.numRow}><Text style={s.num}>{today.network}</Text><Text style={s.unit}>次</Text></View></View></Card></Pressable></View>
   <Card style={s.block}><View style={s.blockHead}><Text style={s.blockTitle}>◷  权限与服务状态</Text><Pressable onPress={onPermissions}><Chevron/></Pressable></View>
    {rows.map((r:any,i)=><Pressable key={i} onPress={onPermissions} style={s.row}><SquareIcon symbol={r[0]} tone={r[1]} size={52}/><View style={{flex:1}}><Text style={s.rowTitle}>{r[2]}</Text></View><Text style={[s.goodPill,(r[3]==='未开启'||r[3]==='需设置')&&{backgroundColor:'#EDF1F6',color:'#7186A3'}]}>{r[3]}</Text><Chevron/></Pressable>)}

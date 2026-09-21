@@ -351,7 +351,7 @@ class ClearScreenNativeModule(
     val storedServices: String,
   ) {
     val authorized: Boolean
-      get() = settingEnabled || serviceBound
+      get() = settingEnabled && serviceBound
     val running: Boolean
       get() = serviceBound && processAlive
   }
@@ -362,7 +362,7 @@ class ClearScreenNativeModule(
       reactContext.contentResolver,
       Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
     ).orEmpty()
-    val serviceBound = runCatching {
+    val serviceEnabled = runCatching {
       val manager = reactContext.getSystemService(AccessibilityManager::class.java)
       manager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
         ?.any { info ->
@@ -374,9 +374,10 @@ class ClearScreenNativeModule(
     val processAlive = runCatching {
       val manager = reactContext.getSystemService(ActivityManager::class.java)
       manager?.runningAppProcesses.orEmpty().any { process ->
-        process.processName == "${reactContext.packageName}:accessibility"
+        process.processName == reactContext.packageName
       }
     }.getOrDefault(false)
+    val serviceBound = serviceEnabled && ClearScreenAccessibilityService.running
     return AccessibilityState(
       settingEnabled = ClearScreenAccessibilityService.isEnabled(reactContext),
       serviceBound = serviceBound,

@@ -1,16 +1,10 @@
 package com.clearscreen.prototype.backend
 
 import android.accessibilityservice.AccessibilityService
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.graphics.Rect
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
@@ -19,7 +13,6 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.clearscreen.prototype.BuildConfig
-import com.clearscreen.prototype.MainActivity
 import java.util.ArrayDeque
 import java.util.LinkedHashMap
 import java.util.Locale
@@ -47,7 +40,6 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       "onServiceConnected component=${ComponentName(this, ClearScreenAccessibilityService::class.java).flattenToString()} " +
         "pid=${Process.myPid()}",
     )
-    startPersistentForegroundNotification()
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -107,6 +99,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   override fun onInterrupt() = Unit
 
   override fun onUnbind(intent: Intent?): Boolean {
+    running = false
     Log.w(TAG, "onUnbind pid=${Process.myPid()}")
     return super.onUnbind(intent)
   }
@@ -116,79 +109,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     handler.removeCallbacksAndMessages(null)
     recentActions.clear()
     running = false
-    stopPersistentForegroundNotification()
     super.onDestroy()
-  }
-
-  /**
-   * The system owns the accessibility binding, but an ongoing notification
-   * gives Android and the user a clear, visible lifetime for the user-enabled
-   * rule service. OEM startup protection is still required on devices that
-   * aggressively stop background packages; this is a resilience layer, not a
-   * bypass for a user's system setting.
-   */
-  private fun startPersistentForegroundNotification() {
-    try {
-      val manager = getSystemService(NotificationManager::class.java)
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        manager.createNotificationChannel(
-          NotificationChannel(
-            FOREGROUND_CHANNEL_ID,
-            "净屏后台服务",
-            NotificationManager.IMPORTANCE_LOW,
-          ).apply {
-            description = "净屏在用户开启服务后保持可用"
-            setShowBadge(false)
-          },
-        )
-      }
-      val openAppIntent = Intent(this, MainActivity::class.java).apply {
-        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-      }
-      val pendingIntent = PendingIntent.getActivity(
-        this,
-        0,
-        openAppIntent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-      )
-      val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        Notification.Builder(this, FOREGROUND_CHANNEL_ID)
-      } else {
-        @Suppress("DEPRECATION")
-        Notification.Builder(this)
-      }
-      val notification = builder
-        .setSmallIcon(android.R.drawable.ic_menu_info_details)
-        .setContentTitle("净屏正在运行")
-        .setContentText("自动跳过服务已由你开启")
-        .setContentIntent(pendingIntent)
-        .setOngoing(true)
-        .setShowWhen(false)
-        .build()
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-        startForeground(
-          FOREGROUND_NOTIFICATION_ID,
-          notification,
-          ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
-        )
-      } else {
-        startForeground(FOREGROUND_NOTIFICATION_ID, notification)
-      }
-    } catch (error: Exception) {
-      // Foreground mode must never crash or self-disable the accessibility
-      // service. The native status page will still guide the user to the
-      // device's startup protection if an OEM refuses background execution.
-      Log.w(TAG, "Unable to promote accessibility service to foreground", error)
-    }
-  }
-
-  private fun stopPersistentForegroundNotification() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-      stopForeground(STOP_FOREGROUND_REMOVE)
-    } else {
-      @Suppress("DEPRECATION")
-      stopForeground(true)
-    }
   }
 
   private fun findAdAction(root: AccessibilityNodeInfo): DetectionAction? {
@@ -531,8 +452,6 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     var running: Boolean = false
 
     private const val TAG = "ClearScreenA11y"
-    private const val FOREGROUND_CHANNEL_ID = "clearscreen_accessibility"
-    private const val FOREGROUND_NOTIFICATION_ID = 301
     private const val ACTION_COOLDOWN_MS = 480L
     private const val ACTION_VERIFY_DELAY_MS = 650L
     private const val ACTION_REPEAT_GUARD_MS = 1_500L

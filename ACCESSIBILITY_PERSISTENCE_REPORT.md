@@ -1,6 +1,6 @@
 # 净屏无障碍服务“返回后自动关闭”问题报告
 
-更新时间：2026-09-20
+更新时间：2026-09-21
 
 ## 一、问题结论
 
@@ -198,4 +198,37 @@ packageSource=1
 - 增加 `-PclearscreenTargetSdk=33` 的兼容测试参数；默认构建仍为 target 36，因此可以把 target 33 与 target 36 在同一台手机上分别验证。
 - 应用信息与无障碍设置之间增加回流引导：从应用信息返回后，会提示继续打开无障碍，而不是让用户重新猜下一步。
 
-这组改动不会绕过 Android 16 / OriginOS 的 Restricted Settings。当前设备未连接，尚未完成这份 A/B 包的真机授权结果验证；如果 target 33 包仍然在返回列表后被系统关闭，根因仍应归于安装来源或 vivo 的系统策略，而不是净屏服务代码。
+这组改动不会绕过 Android 16 / OriginOS 的 Restricted Settings。
+
+## 十一、1.0.11 真机复测结果（2026-09-21）
+
+本轮已经完成 `1.0.11`（`versionCode=12`、`targetSdk=33`）的 Release 包复测。该包的无障碍服务声明已按李跳跳 2.2 的可观测配置对齐，并通过 `aapt2` 检查；安装后仍复现“打开后返回即关闭”。
+
+复测时手机上的实际系统状态为：
+
+```text
+净屏：versionCode=12, versionName=1.0.11, targetSdk=33
+installerPackageName=com.android.packageinstaller
+initiatingPackageName=com.android.packageinstaller
+
+Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES:
+hello.litiaotiao.app/hello.litiaotiao.app.LttService
+com.vivo.dr/com.vivo.dr.LocateBehaviorAnalysisService
+
+dumpsys accessibility:
+Enabled services: 李跳跳、vivo 自带服务
+Crashed services: {}
+```
+
+这次安装是通过手机系统安装器完成的，不是 ADB，也不是 vivo EasyShare；因此“ADB 侧载导致受限设置失败”已经不能作为唯一结论。当前能确定的是：
+
+- 净屏服务声明、单进程、`exported=false`、`targetSdk=33` 以及 API 31+ 的 `isAccessibilityTool=true` 已完成兼容调整。
+- 返回后净屏组件从 `ENABLED_ACCESSIBILITY_SERVICES` 中消失，系统没有报告服务崩溃。
+- 李跳跳稳定开启与“安装包不是通过 EasyShare 传输”并不矛盾：实测李跳跳的安装来源是 `com.android.packageinstaller`，而不是 `com.android.shell`。这说明“安装器来源”与“是否使用 EasyShare”是两个不同维度。
+- 目前剩余差异可能在 vivo 对应用身份、签名、包历史、服务元数据或受限设置白名单的校验上，不能再仅凭 React Native、页面刷新或服务生命周期代码推断。
+
+因此本报告的最终结论是：问题仍未修复，但已经确认不是界面显示缓存、服务进程崩溃或单纯 ADB 安装来源问题。下一步应从 vivo 系统设置返回瞬间抓取 `AccessibilityManagerService`、`AccessibilitySettings` 和 vivo 相关日志，并与李跳跳的完整签名、安装历史、服务元数据做 A/B 对比；应用代码不能强行写入或伪造无障碍授权。
+
+## 十二、仓库合并与推送状态
+
+已检查当前仓库的本地分支、远程分支和 Git worktree：当前只有 `main` 工作树，没有发现其他 Agent 或其他窗口留下的可合并分支；`main` 已包含此前所有已提交修改。本报告的本轮复测结论会作为新的提交推送到 `origin/main`。

@@ -1,0 +1,51 @@
+apply plugin: 'com.android.application'
+
+def clearScreenSigning = rootProject.ext.clearScreenSigning
+def allowDebugSigning = (findProperty('allowDebugSigning') ?: 'false').toBoolean()
+
+android {
+    namespace 'com.clearscreen.probe.pure'
+    compileSdk rootProject.ext.compileSdkVersion
+
+    defaultConfig {
+        applicationId 'com.clearscreen.probe.pure'
+        minSdkVersion rootProject.ext.minSdkVersion
+        def probeTargetSdk = findProperty('probeTargetSdk') ?: (rootProject.ext.has('targetSdkVersion') ? rootProject.ext.targetSdkVersion : 36)
+        targetSdkVersion probeTargetSdk.toInteger()
+        versionCode 1
+        versionName '0.1.0-pure'
+    }
+
+    signingConfigs {
+        debug {
+            storeFile file('../app/debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+        release {
+            if (clearScreenSigning.configured) {
+                storeFile rootProject.file(clearScreenSigning.storeFile)
+                storePassword clearScreenSigning.storePassword
+                keyAlias clearScreenSigning.keyAlias
+                keyPassword clearScreenSigning.keyPassword
+                enableV2Signing true
+                enableV3Signing true
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            if (clearScreenSigning.configured) {
+                signingConfig signingConfigs.release
+            } else if (allowDebugSigning) {
+                signingConfig signingConfigs.debug
+            }
+            minifyEnabled false
+        }
+    }
+}

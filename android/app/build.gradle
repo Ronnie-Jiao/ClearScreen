@@ -142,6 +142,9 @@ android {
         lttCompat {
             initWith release
             matchingFallbacks = ['release']
+            // Keep the comparison APK installable beside the formal diagnostic
+            // package instead of silently replacing it on the test phone.
+            applicationIdSuffix '.lttcompat'
             versionNameSuffix '-ltt-compat'
         }
         diagnostic {

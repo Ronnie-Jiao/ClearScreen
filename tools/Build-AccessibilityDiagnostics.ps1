@@ -20,6 +20,7 @@ try {
     ':app:assembleDiagnostic' `
     ':app:assembleLttCompat' `
     ':probe:assembleRelease' `
+    ':probePure:assembleRelease' `
     "-PclearscreenApplicationId=$ApplicationId" `
     "-PclearscreenTargetSdk=$TargetSdk" `
     "-PprobeTargetSdk=$TargetSdk" `
@@ -33,7 +34,9 @@ try {
 
 Write-Host 'Diagnostic APKs:'
 Get-ChildItem -LiteralPath (Join-Path $androidRoot 'app\build\outputs\apk') -Recurse -Filter '*.apk' |
-  Where-Object { $_.FullName -match 'diagnostic|lttCompat' } |
+  Where-Object { $_.FullName -match '\\(diagnostic|lttCompat)\\' } |
   Select-Object -ExpandProperty FullName
 Get-ChildItem -LiteralPath (Join-Path $androidRoot 'probe\build\outputs\apk') -Recurse -Filter '*.apk' |
+  Select-Object -ExpandProperty FullName
+Get-ChildItem -LiteralPath (Join-Path $androidRoot 'probePure\build\outputs\apk') -Recurse -Filter '*.apk' |
   Select-Object -ExpandProperty FullName

@@ -237,11 +237,12 @@ Crashed services: {}
 
 已按后续分析建立独立分支 `accessibility-diagnostics`，暂不覆盖普通发布分支。当前已完成：
 
-- 正式 Release 签名配置：`android/keystore.properties.example`、`tools/New-ClearScreenSigning.ps1` 和 Gradle 的正式签名读取逻辑。实际 keystore 与密码只保存在本机并被 Git 忽略；三种诊断 APK 已验证使用同一 SHA-256 签名证书。
-- 1.0.12 诊断包：通过 `-PclearscreenApplicationId=com.clearscreen.app` 生成新包身份，并在 `diagnostic` 构建类型中移除 VPN、悬浮窗、后台、电池优化和旧存储等可选能力。APK 级 Manifest 校验只保留 `INTERNET` 与系统动态接收器权限。
-- `lttCompat` 对照构建：只在该测试变体保留 `isAccessibilityTool=true`；普通配置不再依赖这个语义字段。
+- 正式 Release 签名配置：`android/keystore.properties.example`、`tools/New-ClearScreenSigning.ps1` 和 Gradle 的正式签名读取逻辑。实际 keystore 与密码只保存在本机并被 Git 忽略；四个诊断 APK 已验证使用同一 SHA-256 签名证书。
+- 1.0.14 诊断包：通过 `-PclearscreenApplicationId=com.clearscreen.app` 生成正式测试包身份，并在 `diagnostic` 构建类型中移除 VPN、悬浮窗、后台、电池优化和旧存储等可选能力。APK 级 Manifest 校验只保留 `INTERNET` 与系统动态接收器权限。
+- `lttCompat` 对照构建：包名固定为 `com.clearscreen.app.lttcompat`，不会覆盖诊断包；只在该测试变体保留 `isAccessibilityTool=true`。
 - 无障碍 XML：把 `typeAllMask` 收窄为 `typeWindowContentChanged|typeWindowStateChanged`，降低无关系统事件干扰；保留净屏识别所需的窗口、资源 ID 和手势能力。
-- `com.clearscreen.probe` 极简探针：只有一个 Activity 和一个空的 AccessibilityService，使用同一正式签名，不包含 React Native、Expo、VPN、悬浮窗或后台能力。
+- `com.clearscreen.probe` 生命周期对照探针：保留前台通知，用来验证“前台保活”是否影响结果。
+- `com.clearscreen.probe.pure` 纯无障碍探针：只有一个 Activity 和一个空的 AccessibilityService，不声明任何应用权限，不包含 React Native、Expo、VPN、悬浮窗、前台服务或后台能力。
 - A/B 脚本：`tools/Build-AccessibilityDiagnostics.ps1`、`tools/Collect-AccessibilityDiagnostics.ps1`、`tools/Compare-AccessibilityPackages.ps1`，用于采集安装来源、`packageSource`、首次安装时间、最近更新时间、签名摘要、无障碍列表和返回瞬间日志。
 
 同时用脚本对当前手机上的旧包做了只读对比：
@@ -262,12 +263,23 @@ Crashed services: {}
 
 这组数据说明：当前净屏与李跳跳的安装器和 `packageSource` 已经相同，且李跳跳并非旧系统遗留安装；两者最明显的未对齐变量确实是签名身份。当前手机上的净屏 1.0.11 仍使用旧 Debug 证书，新诊断包已经切换到固定正式证书，适合进行下一轮 A/B 授权测试。
 
-构建验证已通过：
+本轮构建验证已通过：
 
 ```text
 android/app/build/outputs/apk/diagnostic/app-diagnostic.apk
 android/app/build/outputs/apk/lttCompat/app-lttCompat.apk
 android/probe/build/outputs/apk/release/probe-release.apk
+android/probePure/build/outputs/apk/release/probePure-release.apk
 ```
 
-目前还没有把这三个实验包的授权结果写成“已修复”。下一步必须用手机系统安装器分别安装新包和探针，完成一次打开后返回列表的复现，再运行采集脚本；只有这样才能判断问题来自完整净屏应用能力、应用身份/签名，还是 vivo 对所有新无障碍服务的策略。
+四个包的实际身份和签名已静态核验：
+
+```text
+净屏（诊断版）       com.clearscreen.app           targetSdk=33
+净屏兼容测试         com.clearscreen.app.lttcompat targetSdk=33
+净屏前台保活对照探针 com.clearscreen.probe        targetSdk=33
+净屏纯无障碍探针     com.clearscreen.probe.pure    targetSdk=33
+签名 SHA-256          93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999
+```
+
+目前还没有把这些实验包的授权结果写成“已修复”。构建已完成，但本轮 USB 安装时电脑暂未发现手机（`adb devices` 没有设备），所以还没有进行手机上的 A/B 授权操作。下一步必须用手机系统安装器分别安装纯探针、前台保活探针、诊断版和兼容版，完成一次打开后返回列表的复现，再运行采集脚本；只有这样才能判断问题来自完整净屏应用能力、应用身份/签名，还是 vivo 对所有新无障碍服务的策略。

@@ -22,6 +22,13 @@ export type BackendPermissions = {
   network: boolean;
   networkRunning: boolean;
   bg: boolean;
+  isVivoFamily: boolean;
+  vendorStartupSettingsAvailable: boolean;
+  // Android has no public API for vivo/iQOO's self-start switch. This field
+  // means the user completed the guided check, not that the system exposed a
+  // verifiable permission grant to the app.
+  vendorStartupGuideConfirmed: boolean;
+  deviceManufacturer: string;
   restrictedSettingsLikely: boolean;
 };
 
@@ -76,7 +83,18 @@ function fallbackSnapshot(): BackendSnapshot {
     installedAppCount: APPS.length,
     todaySkipCount: 28,
     todayNetworkCount: 136,
-    permissions: { skip: true, skipRunning: false, network: true, networkRunning: false, bg: false, restrictedSettingsLikely: false },
+    permissions: {
+      skip: true,
+      skipRunning: false,
+      network: true,
+      networkRunning: false,
+      bg: false,
+      isVivoFamily: false,
+      vendorStartupSettingsAvailable: false,
+      vendorStartupGuideConfirmed: false,
+      deviceManufacturer: 'unknown',
+      restrictedSettingsLikely: false,
+    },
     installSource: {
       installingPackageName: null,
       initiatingPackageName: null,
@@ -124,6 +142,10 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
       network: Boolean(raw.vpnPrepared),
       networkRunning: Boolean(raw.vpnRunning),
       bg: Boolean(raw.batteryOptimizationIgnored),
+      isVivoFamily: Boolean(raw.isVivoFamily),
+      vendorStartupSettingsAvailable: Boolean(raw.vendorStartupSettingsAvailable),
+      vendorStartupGuideConfirmed: Boolean(raw.vendorStartupGuideConfirmed),
+      deviceManufacturer: String(raw.deviceManufacturer || 'unknown'),
       restrictedSettingsLikely: installSource.restrictedSettingsLikely,
     },
     installSource,
@@ -166,4 +188,8 @@ export const ClearScreenNative = {
   startVpn: async () => native?.startVpn?.(),
   stopVpn: async () => native?.stopVpn?.(),
   openBatterySettings: async () => native?.openBatterySettings?.(),
+  confirmVendorStartupGuide: async (): Promise<BackendSnapshot | undefined> => {
+    if (!native?.confirmVendorStartupGuide) return undefined;
+    return normalizeSnapshot(await native.confirmVendorStartupGuide());
+  },
 };

@@ -135,7 +135,22 @@ class ClearScreenNativeModule(
 
   @ReactMethod
   fun openBatterySettings(promise: Promise) {
-    openSettings(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS), promise)
+    // On vivo/iQOO, the documented Android battery-exemption screen does not
+    // control the vendor's "自启动" gate that is responsible for terminating
+    // user-enabled accessibility services. Prefer the verified OEM entrypoint
+    // when it exists, and retain the standard Android fallback elsewhere.
+    openSettings(
+      vendorStartupSettingsIntent() ?: Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+      promise,
+    )
+  }
+
+  @ReactMethod
+  fun confirmVendorStartupGuide(promise: Promise) = runAsync(promise) {
+    // This is an acknowledgement of the guided check, not a fabricated claim
+    // that Android exposed the OEM switch to us.
+    store.setVendorStartupGuideConfirmed(true)
+    snapshot()
   }
 
   override fun invalidate() {
@@ -183,6 +198,10 @@ class ClearScreenNativeModule(
     map.putBoolean("vpnPrepared", VpnService.prepare(reactContext) == null)
     map.putBoolean("vpnRunning", ClearScreenVpnService.running)
     map.putBoolean("batteryOptimizationIgnored", isBatteryOptimizationIgnored())
+    map.putBoolean("isVivoFamily", isVivoFamilyDevice())
+    map.putBoolean("vendorStartupSettingsAvailable", vendorStartupSettingsIntent() != null)
+    map.putBoolean("vendorStartupGuideConfirmed", store.isVendorStartupGuideConfirmed())
+    map.putString("deviceManufacturer", Build.MANUFACTURER ?: "unknown")
     map.putArray("apps", apps)
     map.putArray("logs", logs)
     map.putMap("settings", settings)
@@ -319,6 +338,21 @@ class ClearScreenNativeModule(
     return power?.isIgnoringBatteryOptimizations(reactContext.packageName) == true
   }
 
+  private fun isVivoFamilyDevice(): Boolean {
+    val identity = listOf(Build.MANUFACTURER, Build.BRAND, Build.PRODUCT)
+      .joinToString(" ")
+      .lowercase(Locale.ROOT)
+    return identity.contains("vivo") || identity.contains("iqoo")
+  }
+
+  private fun vendorStartupSettingsIntent(): Intent? {
+    if (!isVivoFamilyDevice()) return null
+    val intent = Intent(VIVO_BG_STARTUP_ACTION)
+    return intent.takeIf { candidate ->
+      candidate.resolveActivity(reactContext.packageManager) != null
+    }
+  }
+
   private fun startVpnService() {
     val intent = Intent(reactContext, ClearScreenVpnService::class.java)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) reactContext.startForegroundService(intent)
@@ -356,5 +390,8 @@ class ClearScreenNativeModule(
 
   companion object {
     private const val VPN_REQUEST_CODE = 771
+    // Resolved on the affected V2502DA device to
+    // com.vivo.permissionmanager/.activity.BgStartUpManagerActivity.
+    private const val VIVO_BG_STARTUP_ACTION = "com.iqoo.secure.BGSTARTUPMANAGER"
   }
 }

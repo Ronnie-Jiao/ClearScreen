@@ -111,6 +111,19 @@ class ClearScreenStore(context: Context) {
     preferences.edit().putBoolean(key, enabled).apply()
   }
 
+  /**
+   * vivo/iQOO expose their startup protection in a vendor-owned settings page.
+   * Android does not provide a public API to read that switch, so this only
+   * records that the user completed the guided check. It is deliberately not
+   * used as proof that the system has granted any permission.
+   */
+  fun isVendorStartupGuideConfirmed(): Boolean =
+    preferences.getBoolean(KEY_VENDOR_STARTUP_GUIDE_CONFIRMED, false)
+
+  fun setVendorStartupGuideConfirmed(confirmed: Boolean) {
+    preferences.edit().putBoolean(KEY_VENDOR_STARTUP_GUIDE_CONFIRMED, confirmed).apply()
+  }
+
   fun getRecentEvents(
     limit: Int = 100,
     excludedPackageName: String? = null,
@@ -190,6 +203,7 @@ class ClearScreenStore(context: Context) {
     const val KEY_STARTUP = "startupEnabled"
     const val KEY_AUTO_UPDATE = "autoUpdateEnabled"
     const val KEY_DEBUG = "debugEnabled"
+    private const val KEY_VENDOR_STARTUP_GUIDE_CONFIRMED = "vendorStartupGuideConfirmed"
     const val MAX_EVENTS = 200
     private val LEGACY_DATA_KEYS = setOf(
       KEY_MASTER_ENABLED,

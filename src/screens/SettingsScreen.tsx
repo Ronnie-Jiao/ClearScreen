@@ -3,15 +3,17 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Background, BrandHeader, Card, Chevron, SquareIcon, Toggle } from '../components/UI';
 import { BottomNav } from '../components/BottomNav';
 import { C } from '../theme';
-type PermissionState={skip:boolean;network:boolean;networkRunning?:boolean;bg:boolean};
+type PermissionState={skip:boolean;network:boolean;networkRunning?:boolean;bg:boolean;isVivoFamily?:boolean;vendorStartupGuideConfirmed?:boolean};
 export default function SettingsScreen({startup,autoUpdate,debug,permissions,backendReady,onToggle,onTab,onAppearance,onPermissions,onClear,onRules}:{startup:boolean;autoUpdate:boolean;debug:boolean;permissions:PermissionState;backendReady:boolean;onToggle:(k:'startup'|'autoUpdate'|'debug')=>void;onTab:(t:'home'|'apps'|'settings')=>void;onAppearance:()=>void;onPermissions:()=>void;onClear:()=>void;onRules:()=>void}){
  const skipStatus=permissions.skip?'已开启':'需设置';
  const networkStatus=permissions.networkRunning?'运行中':permissions.network?'已授权':'未开启';
- const backgroundStatus=permissions.bg?'已允许':'需设置';
+ const vendorStartupPending=Boolean(permissions.isVivoFamily&&!permissions.vendorStartupGuideConfirmed);
+ const backgroundStatus=vendorStartupPending?'需开自启动':permissions.isVivoFamily?'已完成检查':permissions.bg?'已允许':'需设置';
+ const backgroundGood=!vendorStartupPending&&(Boolean(permissions.isVivoFamily)||permissions.bg);
  const row=(symbol:string,tone:any,title:string,right?:React.ReactNode,onPress?:()=>void)=><Pressable onPress={onPress} style={s.row}><SquareIcon symbol={symbol} tone={tone} size={50}/><Text style={s.rowTitle}>{title}</Text>{right}</Pressable>;
  return <Background><View style={{flex:1}}><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}><BrandHeader/>
   <Card style={s.group}><Text style={s.groupTitle}>⚙  基础</Text>{row('⏻','blue','开机后恢复上次状态',<Toggle value={startup} onChange={()=>onToggle('startup')}/>)}{row('↻','green','规则自动更新',<Toggle value={autoUpdate} onChange={()=>onToggle('autoUpdate')}/>)}{row('◉','purple','外观',<View style={s.segment}><Text style={[s.seg,s.segOn]}>跟随系统</Text><Text style={s.seg}>浅色</Text><Text style={s.seg}>深色</Text></View>,onAppearance)}</Card>
-  <Card style={s.group}><Text style={s.groupTitle}>◆  权限与服务</Text>{row('≫','blue','自动跳过权限状态',<View style={s.right}><Text style={[s.good,!permissions.skip&&s.meta]}>{skipStatus}</Text><Chevron/></View>,onPermissions)}{row('◆','green','网络过滤状态',<View style={s.right}><Text style={[s.good,!permissions.networkRunning&&s.meta]}>{networkStatus}</Text><Chevron/></View>,onPermissions)}{row('▣','purple','电池 / 后台运行指引',<View style={s.right}><Text style={[s.good,!permissions.bg&&s.meta]}>{backgroundStatus}</Text><Chevron/></View>,onPermissions)}</Card>
+  <Card style={s.group}><Text style={s.groupTitle}>◆  权限与服务</Text>{row('≫','blue','自动跳过权限状态',<View style={s.right}><Text style={[s.good,!permissions.skip&&s.meta]}>{skipStatus}</Text><Chevron/></View>,onPermissions)}{row('◆','green','网络过滤状态',<View style={s.right}><Text style={[s.good,!permissions.networkRunning&&s.meta]}>{networkStatus}</Text><Chevron/></View>,onPermissions)}{row('▣','purple','电池 / 后台运行指引',<View style={s.right}><Text style={[s.good,!backgroundGood&&s.meta]}>{backgroundStatus}</Text><Chevron/></View>,onPermissions)}</Card>
   <Card style={s.group}><Text style={s.groupTitle}>▣  隐私与数据</Text>{row('▣','blue','日志保留周期',<View style={s.right}><Text style={s.meta}>30 天</Text><Chevron/></View>)}{row('♜','red','清空记录',<Chevron/>,onClear)}</Card>
   <Card style={s.group}><Text style={s.groupTitle}>ⓘ  高级与关于</Text>{row('≡','blue','规则管理',<Chevron/>,onRules)}{row('⚗','purple','调试模式',<Toggle value={debug} onChange={()=>onToggle('debug')}/>)}{row('ⓘ','green','本地后端',<View style={s.right}><Text style={[s.good,!backendReady&&s.meta]}>{backendReady?'已连接':'未连接'}</Text><Chevron/></View>)}{row('▤','blue','隐私政策',<Chevron/>)}{row('</>','purple','开源许可证',<Chevron/>)}</Card>
  </ScrollView><BottomNav active="settings" onChange={onTab}/></View></Background>

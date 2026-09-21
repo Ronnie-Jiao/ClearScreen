@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ comparison fixture.  It deliberately mirrors the observable
+  AccessibilityService declaration of the locally installed LiTiaotiao APK.
+  This is an authorization-persistence diagnostic only, not a production
+  declaration for ClearScreen.
+-->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:settingsActivity="com.clearscreen.probe.MainActivity"
     android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:notificationTimeout="100"
+    android:accessibilityFlags="flagDefault"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
-    android:accessibilityFlags="flagDefault"
+    android:isAccessibilityTool="true"
     android:description="@string/probe_service_description" />

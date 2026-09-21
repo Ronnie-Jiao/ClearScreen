@@ -17,7 +17,7 @@ import { BackendSnapshot, ClearScreenNative } from './src/native/ClearScreenNati
 const UI_SCALE = .84;
 
 type Page='splash'|'welcome'|'permissions'|'home'|'apps'|'appDetail'|'records'|'settings'|'appearance'|'whitelist';
-type AccessibilityHandoff='accessibility'|'appInfo'|null;
+type AccessibilityHandoff='accessibility'|'background'|null;
 export default function App(){
  const [page,setPage]=useState<Page>('splash');
  const [history,setHistory]=useState<Page[]>([]);
@@ -26,7 +26,7 @@ export default function App(){
  const [selectedId,setSelectedId]=useState('');
  const [onboardingCompleted,setOnboardingCompleted]=useState(false);
  const [master,setMaster]=useState(false);
- const [permissions,setPermissions]=useState({skip:false,skipRunning:false,network:false,networkRunning:false,bg:false,restrictedSettingsLikely:false});
+ const [permissions,setPermissions]=useState({skip:false,skipRunning:false,network:false,networkRunning:false,bg:false,isVivoFamily:false,vendorStartupSettingsAvailable:false,vendorStartupGuideConfirmed:false,deviceManufacturer:'unknown',restrictedSettingsLikely:false});
  const [today,setToday]=useState({skip:0,network:0});
  const [settings,setSettings]=useState({startup:true,autoUpdate:true,debug:false});
  const [backendReady,setBackendReady]=useState(false);
@@ -55,33 +55,41 @@ export default function App(){
        const handoff=accessibilityHandoff.current;
        if(!alive||!handoff||!snapshot)return;
        accessibilityHandoff.current=null;
+       const vivo=snapshot.permissions.isVivoFamily;
+       if(handoff==='background'){
+         if(!vivo)return;
+         setTimeout(()=>alive&&Alert.alert(
+           '完成 vivo 后台保护',
+           '请在“自启动管理”中找到“净屏”并打开“自启动”。如果该页还提供电量或后台限制选项，也请允许后台运行。系统不允许应用代替你打开这些开关。',
+           [
+             {text:'稍后',style:'cancel'},
+             {text:'我已完成检查',onPress:()=>{ClearScreenNative.confirmVendorStartupGuide().then(next=>{if(next)applySnapshot(next)}).catch(error=>console.warn('Vendor startup guide confirmation failed',error))}},
+             {text:'重新打开自启动',onPress:()=>{accessibilityHandoff.current='background';ClearScreenNative.openBatterySettings().catch(error=>console.warn('Background settings open failed',error))}},
+           ],
+         ),200);
+         return;
+       }
        if(snapshot.permissions.skip)return;
-        const restricted=snapshot.permissions.restrictedSettingsLikely;
-        const returnedFromAppInfo=handoff==='appInfo';
-        setTimeout(()=>alive&&Alert.alert(
-          returnedFromAppInfo?'还差最后一步':'还没有完成授权',
-          restricted
-            ? returnedFromAppInfo
-              ? '如果刚才已经在“应用信息”右上角选择“允许受限设置”，现在点击“打开无障碍”并开启净屏；如果菜单里没有这个选项，请改用 vivo EasyShare 或可信应用商店重新安装。'
-              : '当前安装来源可能触发 Android 的“受限设置”。先到“应用信息”右上角选择“允许受限设置”，返回后再打开净屏的无障碍开关。'
-            : returnedFromAppInfo
-              ? '应用信息步骤已完成，现在打开系统无障碍设置并开启净屏；如果返回后仍关闭，请检查后台运行和电池限制。'
-              : '系统无障碍开关没有保持开启，请重新打开净屏的无障碍开关；如果仍然自动关闭，请检查系统的后台运行和电池限制。',
-          restricted
-            ? [
-              {text:'稍后',style:'cancel'},
-              {text:'重新打开应用信息',onPress:()=>{accessibilityHandoff.current='appInfo';ClearScreenNative.openAppDetailsSettings().catch(error=>console.warn('App details settings open failed',error))}},
-              {text:'打开无障碍',onPress:()=>{accessibilityHandoff.current='accessibility';ClearScreenNative.openAccessibilitySettings().catch(error=>console.warn('Accessibility settings open failed',error))}},
-            ]
-            : [
-              {text:'稍后',style:'cancel'},
-              {text:'打开无障碍',onPress:()=>{accessibilityHandoff.current='accessibility';ClearScreenNative.openAccessibilitySettings().catch(error=>console.warn('Accessibility settings open failed',error))}},
-            ],
-        ),200);
+       setTimeout(()=>alive&&Alert.alert(
+         vivo?'vivo 已停止净屏服务':'无障碍开关没有保持开启',
+         vivo
+           ? '已确认系统没有保留净屏的无障碍开关。请先打开“自启动”，再重新开启无障碍；这是 vivo 的后台保护开关，净屏无法自行代开。'
+           : '请重新打开净屏的无障碍开关；如果返回后仍关闭，请检查系统的后台运行和电池限制。',
+         vivo
+           ? [
+             {text:'稍后',style:'cancel'},
+             {text:'打开自启动',onPress:()=>{accessibilityHandoff.current='background';ClearScreenNative.openBatterySettings().catch(error=>console.warn('Background settings open failed',error))}},
+             {text:'打开无障碍',onPress:()=>{accessibilityHandoff.current='accessibility';ClearScreenNative.openAccessibilitySettings().catch(error=>console.warn('Accessibility settings open failed',error))}},
+           ]
+           : [
+             {text:'稍后',style:'cancel'},
+             {text:'打开无障碍',onPress:()=>{accessibilityHandoff.current='accessibility';ClearScreenNative.openAccessibilitySettings().catch(error=>console.warn('Accessibility settings open failed',error))}},
+           ],
+       ),200);
      });
    });
    return()=>{alive=false;subscription.remove()};
- },[refresh]);
+ },[applySnapshot,refresh]);
  const completeOnboarding=useCallback(()=>{
    setOnboardingCompleted(true);
    ClearScreenNative.setOnboardingCompleted(true).catch(error=>console.warn('ClearScreen onboarding update failed',error));
@@ -104,23 +112,20 @@ export default function App(){
  },[master,refresh]);
  const openPermission=useCallback(async(key:'skip'|'network'|'bg')=>{
    if(key==='skip'){
-     if(!permissions.skip&&permissions.restrictedSettingsLikely){
-       Alert.alert(
-         '需要先确认系统限制',
-         '当前安装来源可能触发 Android 的“受限设置”。如果“应用信息”右上角有“允许受限设置”，请先允许；如果没有，请通过 vivo EasyShare 或可信应用商店重新安装后再授权。',
-         [
-           {text:'取消',style:'cancel'},
-           {text:'打开应用信息',onPress:()=>{accessibilityHandoff.current='appInfo';ClearScreenNative.openAppDetailsSettings().catch(error=>console.warn('App details settings open failed',error))}},
-           {text:'直接去无障碍',onPress:()=>{accessibilityHandoff.current='accessibility';ClearScreenNative.openAccessibilitySettings().catch(error=>console.warn('Accessibility settings open failed',error))}},
-         ],
-       );
-       return;
-     }
      accessibilityHandoff.current='accessibility';
      await ClearScreenNative.openAccessibilitySettings();
    }
    else if(key==='network')await ClearScreenNative.startVpn();
-   else await ClearScreenNative.openBatterySettings();
+   else if(permissions.isVivoFamily){
+     Alert.alert(
+       '开启 vivo 后台保护',
+       '净屏会打开系统的“自启动管理”。请找到“净屏”并打开“自启动”，这样 vivo 才不会在返回后清理无障碍服务。',
+       [
+         {text:'取消',style:'cancel'},
+         {text:'打开自启动',onPress:()=>{accessibilityHandoff.current='background';ClearScreenNative.openBatterySettings().catch(error=>console.warn('Background settings open failed',error))}},
+       ],
+     );
+   } else await ClearScreenNative.openBatterySettings();
  },[permissions]);
  const toggleSetting=useCallback((key:'startup'|'autoUpdate'|'debug')=>{
    setSettings(value=>{const next={...value,[key]:!value[key]};ClearScreenNative.setSetting(key,next[key]).catch(error=>console.warn('ClearScreen setting update failed',error));return next});
@@ -128,7 +133,7 @@ export default function App(){
  let screen:React.ReactNode;
  if(page==='splash')screen=<SplashScreen/>;
  else if(page==='welcome')screen=<WelcomeScreen onStart={()=>{completeOnboarding();go('permissions')}} onLater={()=>{completeOnboarding();tab('home')}}/>;
- else if(page==='permissions')screen=<PermissionsScreen onBack={back} onContinue={()=>{completeOnboarding();refresh();tab('home')}} permissions={{skip:permissions.skip,network:permissions.network,bg:permissions.bg,restrictedSettingsLikely:permissions.restrictedSettingsLikely}} onToggle={openPermission}/>;
+ else if(page==='permissions')screen=<PermissionsScreen onBack={back} onContinue={()=>{completeOnboarding();refresh();tab('home')}} permissions={{skip:permissions.skip,network:permissions.network,bg:permissions.bg,isVivoFamily:permissions.isVivoFamily,vendorStartupGuideConfirmed:permissions.vendorStartupGuideConfirmed}} onToggle={openPermission}/>;
  else if(page==='home')screen=<HomeScreen master={master} onMaster={toggleMaster} onTab={tab} onPermissions={()=>go('permissions')} onRecords={()=>go('records')} apps={apps} logs={logs} today={today} permissions={permissions}/>;
  else if(page==='apps')screen=<AppsScreen apps={apps} onChangeApps={updateApps} onTab={tab} onOpen={id=>{setSelectedId(id);go('appDetail')}} onWhitelist={()=>go('whitelist')}/>;
  else if(page==='appDetail'&&selected)screen=<AppDetailScreen app={selected} logs={logs} onBack={back} onChange={a=>updateApps(apps.map(x=>x.id===a.id?a:x))} onRecords={()=>go('records')}/>;

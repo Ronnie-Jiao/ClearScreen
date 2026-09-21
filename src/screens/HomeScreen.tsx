@@ -6,10 +6,11 @@ import { AppIcon, Background, BrandHeader, Card, Chevron, SquareIcon, Toggle } f
 import { BottomNav } from '../components/BottomNav';
 import { C } from '../theme';
 
-type HomePermissions={skip:boolean;skipRunning?:boolean;network:boolean;networkRunning?:boolean;bg:boolean};
+type HomePermissions={skip:boolean;skipRunning?:boolean;network:boolean;networkRunning?:boolean;bg:boolean;isVivoFamily?:boolean;vendorStartupGuideConfirmed?:boolean};
 export default function HomeScreen({master,onMaster,onTab,onPermissions,onRecords,apps,logs,today,permissions}:{master:boolean;onMaster:()=>void;onTab:(t:'home'|'apps'|'settings')=>void;onPermissions:()=>void;onRecords:()=>void;apps:AppItem[];logs:LogItem[];today:{skip:number;network:number};permissions:HomePermissions}){
  const recent=logs.slice(0,3);
- const rows=[['≫','blue','自动跳过权限',permissions.skip?'已开启':'需设置'],['◆','green','网络过滤状态',permissions.networkRunning?'运行中':permissions.network?'已授权':'未开启'],['▣','purple','后台运行',permissions.bg?'已允许':'需设置']];
+ const backgroundStatus=permissions.isVivoFamily&&!permissions.vendorStartupGuideConfirmed?'需开自启动':permissions.isVivoFamily?'已完成检查':permissions.bg?'已允许':'需设置';
+ const rows=[['≫','blue','自动跳过权限',permissions.skip?'已开启':'需设置'],['◆','green','网络过滤状态',permissions.networkRunning?'运行中':permissions.network?'已授权':'未开启'],['▣','purple','后台运行',backgroundStatus]];
  const total=today.skip+today.network;
  const active=master&&(permissions.skip||Boolean(permissions.networkRunning));
  return <Background><View style={s.root}><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}><BrandHeader/>

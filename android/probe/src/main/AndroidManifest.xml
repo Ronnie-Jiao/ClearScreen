@@ -1,7 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
   <application
       android:allowBackup="false"
-      android:label="净屏授权探针"
+      android:label="@string/app_name"
       android:supportsRtl="true"
       android:theme="@android:style/Theme.Material.Light.NoActionBar">
     <activity
@@ -16,7 +19,7 @@
         android:name=".ProbeAccessibilityService"
         android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
         android:exported="false"
-        android:label="净屏授权探针">
+        android:label="@string/probe_service_label">
       <intent-filter>
         <action android:name="android.accessibilityservice.AccessibilityService" />
       </intent-filter>

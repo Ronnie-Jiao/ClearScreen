@@ -1,9 +1,16 @@
 package com.clearscreen.prototype.backend
 
 import android.accessibilityservice.AccessibilityService
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Rect
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -11,6 +18,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.clearscreen.prototype.BuildConfig
+import com.clearscreen.prototype.MainActivity
 import java.util.ArrayDeque
 import java.util.LinkedHashMap
 import java.util.Locale
@@ -33,6 +41,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     super.onServiceConnected()
     store = ClearScreenStore(this)
     running = true
+    startPersistentForegroundNotification()
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -95,7 +104,79 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     handler.removeCallbacksAndMessages(null)
     recentActions.clear()
     running = false
+    stopPersistentForegroundNotification()
     super.onDestroy()
+  }
+
+  /**
+   * The system owns the accessibility binding, but an ongoing notification
+   * gives Android and the user a clear, visible lifetime for the user-enabled
+   * rule service. OEM startup protection is still required on devices that
+   * aggressively stop background packages; this is a resilience layer, not a
+   * bypass for a user's system setting.
+   */
+  private fun startPersistentForegroundNotification() {
+    try {
+      val manager = getSystemService(NotificationManager::class.java)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        manager.createNotificationChannel(
+          NotificationChannel(
+            FOREGROUND_CHANNEL_ID,
+            "净屏后台服务",
+            NotificationManager.IMPORTANCE_LOW,
+          ).apply {
+            description = "净屏在用户开启服务后保持可用"
+            setShowBadge(false)
+          },
+        )
+      }
+      val openAppIntent = Intent(this, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+      }
+      val pendingIntent = PendingIntent.getActivity(
+        this,
+        0,
+        openAppIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+      val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Notification.Builder(this, FOREGROUND_CHANNEL_ID)
+      } else {
+        @Suppress("DEPRECATION")
+        Notification.Builder(this)
+      }
+      val notification = builder
+        .setSmallIcon(android.R.drawable.ic_menu_info_details)
+        .setContentTitle("净屏正在运行")
+        .setContentText("自动跳过服务已由你开启")
+        .setContentIntent(pendingIntent)
+        .setOngoing(true)
+        .setShowWhen(false)
+        .build()
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        startForeground(
+          FOREGROUND_NOTIFICATION_ID,
+          notification,
+          ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+        )
+      } else {
+        startForeground(FOREGROUND_NOTIFICATION_ID, notification)
+      }
+    } catch (error: Exception) {
+      // Foreground mode must never crash or self-disable the accessibility
+      // service. The native status page will still guide the user to the
+      // device's startup protection if an OEM refuses background execution.
+      Log.w(TAG, "Unable to promote accessibility service to foreground", error)
+    }
+  }
+
+  private fun stopPersistentForegroundNotification() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+      stopForeground(STOP_FOREGROUND_REMOVE)
+    } else {
+      @Suppress("DEPRECATION")
+      stopForeground(true)
+    }
   }
 
   private fun findAdAction(root: AccessibilityNodeInfo): DetectionAction? {
@@ -158,15 +239,18 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (ancestorHasAdSignal) score += 18
     if (snapshot.context.hasAdSignal) score += 24
     if (snapshot.context.hasStrongAdSignal) score += 12
+    if (snapshot.context.hasCommercialAdSignal) score += 12
 
     // A bare "跳过/Skip" is intentionally accepted only when its position or
     // surrounding screen makes it look like an ad action. This prevents ordinary
     // tutorial/settings controls from being clicked just because they contain a
     // common verb.
     if (plainLabel && !countdownLabel && !explicitResource &&
-      !nearTopRight && !ancestorHasAdSignal
+      !nearTopRight && !ancestorHasAdSignal && !snapshot.context.hasAdSignal
     ) return null
-    if (plainLabel && !compactControl && !snapshot.context.hasAdSignal && !explicitResource) return null
+    if (plainLabel && !compactControl &&
+      !snapshot.context.hasAdSignal && !explicitResource
+    ) return null
 
     if (snapshot.context.hasAdSignal || ancestorHasAdSignal) {
       ruleId += ".ad-context"
@@ -175,7 +259,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       target = target,
       targetBounds = targetBounds,
       score = score,
-      minimumScore = if (plainLabel) 102 else 96,
+      minimumScore = if (plainLabel && snapshot.context.hasAdSignal) 86 else if (plainLabel) 102 else 96,
       actionPriority = 2,
       allowDismiss = false,
       ruleId = ruleId,
@@ -189,29 +273,39 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     snapshot: AccessibilitySnapshot,
   ): DetectionAction? {
     if (!node.isEnabled) return null
-    val target = clickableTarget(node.node) ?: return null
+    val dismissTarget = node.node.takeIf { target ->
+      target.isVisibleToUser && target.actionList.any { action ->
+        action.id == AccessibilityNodeInfo.ACTION_DISMISS
+      }
+    }
+    val target = dismissTarget ?: clickableTarget(node.node) ?: return null
     if (!target.isVisibleToUser || !target.isEnabled) return null
 
     val compact = node.compactLabel
     val resourceId = node.resourceId
     val closeLabel = isPopupCloseLabel(compact)
     val explicitAdResource = hasAdCloseResourceId(resourceId)
-    if (!closeLabel && !explicitAdResource) return null
+    val dismissAction = dismissTarget != null
+    if (!closeLabel && !explicitAdResource && !dismissAction) return null
 
     val targetBounds = Rect().also(target::getBoundsInScreen)
     if (!hasUsableBounds(targetBounds)) return null
     val nearTopRight = isNearTopRight(targetBounds, snapshot.rootBounds)
+    val nearPopupEdge = isNearPopupEdge(targetBounds, snapshot.rootBounds)
     val compactControl = isCompactControl(targetBounds, snapshot.rootBounds)
     val ancestorHasAdSignal = node.ancestorLabels.any(::hasStrongAdSignal)
-    val hasAdContext = snapshot.context.hasAdSignal || ancestorHasAdSignal
+    val hasAdContext = snapshot.context.hasAdSignal ||
+      snapshot.context.hasCommercialAdSignal || ancestorHasAdSignal
 
-    // A generic close icon is too dangerous to click without ad context. A
-    // resource id explicitly mentioning an interstitial/splash/ad is stronger,
-    // but it still must be a small control near the edge of the screen.
-    if (!nearTopRight || !compactControl) return null
+    // A generic close icon is too dangerous to click without ad context. The
+    // close button can be in the top-right, on a modal's bottom edge, or be
+    // exposed as ACTION_DISMISS by a native Dialog.
     if (!hasAdContext && !explicitAdResource) return null
+    if (!dismissAction && !nearPopupEdge && !explicitAdResource) return null
+    if (!dismissAction && !compactControl && !explicitAdResource) return null
 
     var score = when {
+      dismissAction -> 106
       explicitAdResource -> 92
       compact == "关闭广告" || compact == "关闭弹窗" -> 88
       compact == "关闭" || compact == "close" -> 76
@@ -219,6 +313,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     }
     if (explicitAdResource) score += 30
     if (nearTopRight) score += 18
+    if (nearPopupEdge) score += 18
     if (compactControl) score += 8
     if (hasAdContext) score += 26
 
@@ -226,11 +321,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       target = target,
       targetBounds = targetBounds,
       score = score,
-      minimumScore = 106,
+      minimumScore = if (dismissAction) 96 else 106,
       actionPriority = 1,
-      allowDismiss = true,
+      allowDismiss = dismissAction,
       ruleId = if (explicitAdResource) "builtin.popup.close.resource-id" else "builtin.popup.close.context",
-      label = node.label.take(MAX_LOG_LABEL_LENGTH),
+      label = node.label.ifBlank { node.className }.take(MAX_LOG_LABEL_LENGTH),
       successText = "已关闭弹窗广告",
     )
   }
@@ -307,6 +402,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
           val node = current.node
           val label = readNodeLabel(node)
           val resourceId = node.viewIdResourceName.orEmpty().lowercase(Locale.ROOT)
+          val className = node.className?.toString().orEmpty().lowercase(Locale.ROOT)
           val bounds = Rect().also(node::getBoundsInScreen)
           val visible = node.isVisibleToUser && hasUsableBounds(bounds)
           nodes += ScreenNode(
@@ -314,6 +410,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
             label = label,
             compactLabel = normalizeLabel(label),
             resourceId = resourceId,
+            className = className,
             ancestorLabels = current.ancestorLabels,
             bounds = bounds,
             isVisible = visible,
@@ -348,6 +445,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val label: String,
     val compactLabel: String,
     val resourceId: String,
+    val className: String,
     val ancestorLabels: List<String>,
     val bounds: Rect,
     val isVisible: Boolean,
@@ -358,22 +456,33 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   private data class AdContext(
     val strongSignals: Int,
     val mediumSignals: Int,
+    val commercialSignals: Int,
+    val popupSignals: Int,
   ) {
     val hasStrongAdSignal: Boolean get() = strongSignals > 0
-    val hasAdSignal: Boolean get() = hasStrongAdSignal || mediumSignals >= 2
+    val hasCommercialAdSignal: Boolean get() =
+      commercialSignals >= 2 || (commercialSignals > 0 && popupSignals > 0)
+    val hasAdSignal: Boolean get() =
+      hasStrongAdSignal || mediumSignals >= 2 || hasCommercialAdSignal
 
     companion object {
       fun from(nodes: List<ScreenNode>): AdContext {
         var strong = 0
         var medium = 0
+        var commercial = 0
+        var popup = 0
         nodes.forEach { node ->
           if (!node.isVisible) return@forEach
           if (hasStrongAdSignal(node.label, node.resourceId)) strong++
           if (hasMediumAdSignal(node.compactLabel)) medium++
+          if (hasCommercialAdSignal(node.compactLabel)) commercial++
+          if (hasPopupSignal(node.compactLabel, node.resourceId, node.className)) popup++
         }
         return AdContext(
           strongSignals = strong.coerceAtMost(3),
           mediumSignals = medium.coerceAtMost(4),
+          commercialSignals = commercial.coerceAtMost(6),
+          popupSignals = popup.coerceAtMost(4),
         )
       }
     }
@@ -410,6 +519,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     var running: Boolean = false
 
     private const val TAG = "ClearScreenA11y"
+    private const val FOREGROUND_CHANNEL_ID = "clearscreen_accessibility"
+    private const val FOREGROUND_NOTIFICATION_ID = 301
     private const val ACTION_COOLDOWN_MS = 480L
     private const val ACTION_VERIFY_DELAY_MS = 650L
     private const val ACTION_REPEAT_GUARD_MS = 1_500L
@@ -470,6 +581,33 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       "红包",
       "svip",
     )
+    private val COMMERCIAL_AD_MARKERS = listOf(
+      "vip",
+      "会员",
+      "年卡",
+      "权益",
+      "特权",
+      "商城",
+      "折扣",
+      "促销",
+      "特惠",
+      "优惠",
+      "礼包",
+      "开通",
+      "充值",
+      "立即购买",
+      "购买",
+    )
+    private val POPUP_MARKERS = listOf(
+      "落地页",
+      "第三方app",
+      "第三方应用",
+      "弹窗",
+      "dialog",
+      "popup",
+      "modal",
+      "interstitial",
+    )
     private val SKIP_RESOURCE_MARKERS = listOf(
       "skip",
       "jump",
@@ -479,6 +617,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       "skipad",
     )
     private val AD_CLOSE_RESOURCE_MARKERS = listOf(
+      "close",
+      "dismiss",
       "ad_close",
       "close_ad",
       "closebtn_ad",
@@ -545,6 +685,18 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     private fun hasMediumAdSignal(compactLabel: String): Boolean =
       MEDIUM_AD_MARKERS.any(compactLabel::contains)
 
+    private fun hasCommercialAdSignal(compactLabel: String): Boolean =
+      COMMERCIAL_AD_MARKERS.any(compactLabel::contains)
+
+    private fun hasPopupSignal(
+      compactLabel: String,
+      resourceId: String,
+      className: String,
+    ): Boolean =
+      POPUP_MARKERS.any(compactLabel::contains) ||
+        POPUP_MARKERS.any(resourceId::contains) ||
+        POPUP_MARKERS.any(className::contains)
+
     private fun hasUsableBounds(bounds: Rect): Boolean =
       bounds.width() > 0 && bounds.height() > 0
 
@@ -554,6 +706,21 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       return bounds.centerX() >= rootBounds.left + width * 0.55f &&
         bounds.top <= rootBounds.top + height * 0.48f &&
         bounds.right >= rootBounds.left + width * 0.70f
+    }
+
+    private fun isNearPopupEdge(bounds: Rect, rootBounds: Rect): Boolean {
+      val width = rootBounds.width().coerceAtLeast(1)
+      val height = rootBounds.height().coerceAtLeast(1)
+      val centerX = bounds.centerX()
+      val centerY = bounds.centerY()
+      val nearBottomCenter = centerY >= rootBounds.top + height * 0.62f &&
+        centerX >= rootBounds.left + width * 0.28f &&
+        centerX <= rootBounds.left + width * 0.72f
+      val nearSide = (centerX <= rootBounds.left + width * 0.18f ||
+        centerX >= rootBounds.left + width * 0.82f) &&
+        centerY >= rootBounds.top + height * 0.08f &&
+        centerY <= rootBounds.top + height * 0.92f
+      return isNearTopRight(bounds, rootBounds) || nearBottomCenter || nearSide
     }
 
     private fun isCompactControl(bounds: Rect, rootBounds: Rect): Boolean {

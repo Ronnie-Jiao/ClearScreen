@@ -231,4 +231,43 @@ Crashed services: {}
 
 ## 十二、仓库合并与推送状态
 
-已检查当前仓库的本地分支、远程分支和 Git worktree：当前只有 `main` 工作树，没有发现其他 Agent 或其他窗口留下的可合并分支；`main` 已包含此前所有已提交修改。本报告的本轮复测结论会作为新的提交推送到 `origin/main`。
+此前已检查当前仓库的本地分支、远程分支和 Git worktree：当时只有 `main` 工作树，没有发现其他 Agent 或其他窗口留下的可合并分支；1.0.11 复测结论已由提交 `c702774` 推送到 `origin/main`。本轮诊断改造在独立的 `accessibility-diagnostics` 分支上进行。
+
+## 十三、诊断分支执行结果（2026-09-21）
+
+已按后续分析建立独立分支 `accessibility-diagnostics`，暂不覆盖普通发布分支。当前已完成：
+
+- 正式 Release 签名配置：`android/keystore.properties.example`、`tools/New-ClearScreenSigning.ps1` 和 Gradle 的正式签名读取逻辑。实际 keystore 与密码只保存在本机并被 Git 忽略；三种诊断 APK 已验证使用同一 SHA-256 签名证书。
+- 1.0.12 诊断包：通过 `-PclearscreenApplicationId=com.clearscreen.app` 生成新包身份，并在 `diagnostic` 构建类型中移除 VPN、悬浮窗、后台、电池优化和旧存储等可选能力。APK 级 Manifest 校验只保留 `INTERNET` 与系统动态接收器权限。
+- `lttCompat` 对照构建：只在该测试变体保留 `isAccessibilityTool=true`；普通配置不再依赖这个语义字段。
+- 无障碍 XML：把 `typeAllMask` 收窄为 `typeWindowContentChanged|typeWindowStateChanged`，降低无关系统事件干扰；保留净屏识别所需的窗口、资源 ID 和手势能力。
+- `com.clearscreen.probe` 极简探针：只有一个 Activity 和一个空的 AccessibilityService，使用同一正式签名，不包含 React Native、Expo、VPN、悬浮窗或后台能力。
+- A/B 脚本：`tools/Build-AccessibilityDiagnostics.ps1`、`tools/Collect-AccessibilityDiagnostics.ps1`、`tools/Compare-AccessibilityPackages.ps1`，用于采集安装来源、`packageSource`、首次安装时间、最近更新时间、签名摘要、无障碍列表和返回瞬间日志。
+
+同时用脚本对当前手机上的旧包做了只读对比：
+
+```text
+净屏 1.0.11：installerPackageName=com.android.packageinstaller
+净屏 1.0.11：packageSource=3（本地文件）
+净屏首次安装：2026-09-20 15:33:13
+净屏当前证书 SHA-256：fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+
+李跳跳 2.2：installerPackageName=com.android.packageinstaller
+李跳跳 2.2：packageSource=3（本地文件）
+李跳跳首次安装：2026-09-21 01:00:01
+李跳跳当前证书 SHA-256：7a8896226fa1239e60114cb2de411cc9fa688fd2fb0d26b4c49597d858bfac86
+
+诊断包正式证书 SHA-256：93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999
+```
+
+这组数据说明：当前净屏与李跳跳的安装器和 `packageSource` 已经相同，且李跳跳并非旧系统遗留安装；两者最明显的未对齐变量确实是签名身份。当前手机上的净屏 1.0.11 仍使用旧 Debug 证书，新诊断包已经切换到固定正式证书，适合进行下一轮 A/B 授权测试。
+
+构建验证已通过：
+
+```text
+android/app/build/outputs/apk/diagnostic/app-diagnostic.apk
+android/app/build/outputs/apk/lttCompat/app-lttCompat.apk
+android/probe/build/outputs/apk/release/probe-release.apk
+```
+
+目前还没有把这三个实验包的授权结果写成“已修复”。下一步必须用手机系统安装器分别安装新包和探针，完成一次打开后返回列表的复现，再运行采集脚本；只有这样才能判断问题来自完整净屏应用能力、应用身份/签名，还是 vivo 对所有新无障碍服务的策略。

@@ -30,6 +30,18 @@
 - 无障碍实现参考了李跳跳 APK 的服务声明形态：服务不再单独运行在 `:accessibility` 进程，使用单进程、`exported=false`、`settingsActivity`、通用反馈类型和 Android 12+ 的 `isAccessibilityTool` 配置；这不会伪造或绕过系统授权。
 - 为便于与李跳跳的 `targetSdk=33` 做真机 A/B 测试，支持 `cd android; .\\gradlew.bat :app:assembleRelease -PclearscreenTargetSdk=33`。手机单独安装必须使用 `assembleRelease` 生成的 APK；`assembleDebug` 仅用于连接 Metro 调试，未启动 8081 服务时会显示 `Unable to load script`。未传该参数时仍使用当前 Android/Expo 目标 SDK；Android 16 的受限设置最终仍由系统根据安装来源决定。
 
+## 无障碍授权诊断构建
+
+当前仓库提供独立的授权诊断分支构建，不把未经真机验证的身份实验混入普通发布包：
+
+1. 首次在本机生成固定 Release 签名：`powershell -ExecutionPolicy Bypass -File .\\tools\\New-ClearScreenSigning.ps1`。`android/keystore.properties` 与 `android/clearscreen-release.keystore` 已加入忽略列表，不能提交到 Git；正式更新必须继续使用同一份证书。
+2. 构建正式签名的诊断包、兼容包和极简探针：`powershell -ExecutionPolicy Bypass -File .\\tools\\Build-AccessibilityDiagnostics.ps1`。
+3. 诊断包默认使用新的 `com.clearscreen.app` 包名，并移除 VPN、悬浮窗、后台和旧存储等可选能力；极简探针包为 `com.clearscreen.probe`，只有 Activity 和一个空的无障碍服务。
+4. 在手机上完成一次“打开 → 返回列表”的复现后，运行 `powershell -ExecutionPolicy Bypass -File .\\tools\\Collect-AccessibilityDiagnostics.ps1 -PackageName com.clearscreen.app -ClearLogcat`，脚本会保存安装来源、首次安装时间、包信息、无障碍列表和 logcat。
+5. 用 `powershell -ExecutionPolicy Bypass -File .\\tools\\Compare-AccessibilityPackages.ps1` 对比净屏与李跳跳的安装历史和来源字段。
+
+普通 Release 构建现在要求本机存在正式签名配置；仅用于临时开发的 Debug 签名需要显式传 `-PallowDebugSigning=true`。`lttCompat` 构建只保留李跳跳风格的 `isAccessibilityTool=true` 变体，正式配置不再把该语义字段当作授权保活开关。
+
 ## 已实现页面
 
 1. 启动页

@@ -23,7 +23,9 @@ import com.facebook.react.bridge.WritableArray
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.bridge.Arguments
 import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
 import java.util.concurrent.Executors
+import java.util.Locale
 
 class ClearScreenNativeModule(
   private val reactContext: ReactApplicationContext,
@@ -191,6 +193,15 @@ class ClearScreenNativeModule(
   private fun installSourceDiagnostics(): WritableMap {
     val map = Arguments.createMap()
     val packageManager = reactContext.packageManager
+    val packageInfo = runCatching {
+      val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        PackageManager.GET_SIGNING_CERTIFICATES
+      } else {
+        @Suppress("DEPRECATION")
+        PackageManager.GET_SIGNATURES
+      }
+      packageManager.getPackageInfo(reactContext.packageName, flags)
+    }.getOrNull()
     val sourceInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
       runCatching { packageManager.getInstallSourceInfo(reactContext.packageName) }.getOrNull()
     } else {
@@ -224,7 +235,24 @@ class ClearScreenNativeModule(
     map.putString("packageSourceLabel", packageSourceLabel(packageSource))
     map.putBoolean("adbInstallLikely", adbInstallLikely)
     map.putBoolean("restrictedSettingsLikely", restrictedSettingsLikely)
+    map.putDouble("firstInstallTime", packageInfo?.firstInstallTime?.toDouble() ?: 0.0)
+    map.putDouble("lastUpdateTime", packageInfo?.lastUpdateTime?.toDouble() ?: 0.0)
+    putNullableString(map, "signingCertificateSha256", packageInfo?.let(::signingCertificateSha256))
     return map
+  }
+
+  private fun signingCertificateSha256(packageInfo: android.content.pm.PackageInfo): String? {
+    val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+      packageInfo.signingInfo?.apkContentsSigners
+    } else {
+      @Suppress("DEPRECATION")
+      packageInfo.signatures
+    }
+    val signature = signatures?.firstOrNull() ?: return null
+    val digest = MessageDigest.getInstance("SHA-256").digest(signature.toByteArray())
+    return digest.joinToString(":") { byte ->
+      "%02X".format(Locale.ROOT, byte.toInt() and 0xFF)
+    }
   }
 
   private fun packageSourceLabel(source: Int): String = when (source) {

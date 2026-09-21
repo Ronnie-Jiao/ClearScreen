@@ -1,5 +1,31 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
+import java.util.Properties
+
+def clearScreenSigningProperties = new Properties()
+def clearScreenSigningFile = file("${rootDir}/keystore.properties")
+if (clearScreenSigningFile.exists()) {
+  clearScreenSigningFile.withInputStream { clearScreenSigningProperties.load(it) }
+}
+
+def clearScreenSigningValue = { String key, String envKey = key ->
+  clearScreenSigningProperties.getProperty(key) ?: System.getenv(envKey)
+}
+
+def clearScreenStoreFile = clearScreenSigningValue('storeFile', 'CLEARSCREEN_STORE_FILE')
+def clearScreenStorePassword = clearScreenSigningValue('storePassword', 'CLEARSCREEN_STORE_PASSWORD')
+def clearScreenKeyAlias = clearScreenSigningValue('keyAlias', 'CLEARSCREEN_KEY_ALIAS')
+def clearScreenKeyPassword = clearScreenSigningValue('keyPassword', 'CLEARSCREEN_KEY_PASSWORD')
+
+ext.clearScreenSigning = [
+  configured: [clearScreenStoreFile, clearScreenStorePassword, clearScreenKeyAlias, clearScreenKeyPassword]
+    .every { it != null && !it.toString().trim().isEmpty() },
+  storeFile: clearScreenStoreFile,
+  storePassword: clearScreenStorePassword,
+  keyAlias: clearScreenKeyAlias,
+  keyPassword: clearScreenKeyPassword,
+]
+
 buildscript {
   repositories {
     google()

@@ -1,0 +1,4 @@
+<resources>
+  <string name="app_name">净屏授权探针</string>
+  <string name="probe_service_description">用于验证设备是否允许保存无障碍服务授权。</string>
+</resources>

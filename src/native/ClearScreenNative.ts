@@ -33,6 +33,9 @@ export type InstallSourceDiagnostics = {
   packageSourceLabel: string;
   adbInstallLikely: boolean;
   restrictedSettingsLikely: boolean;
+  firstInstallTime: number;
+  lastUpdateTime: number;
+  signingCertificateSha256: string | null;
 };
 
 export type BackendSnapshot = {
@@ -82,6 +85,9 @@ function fallbackSnapshot(): BackendSnapshot {
       packageSourceLabel: 'unknown',
       adbInstallLikely: false,
       restrictedSettingsLikely: false,
+      firstInstallTime: 0,
+      lastUpdateTime: 0,
+      signingCertificateSha256: null,
     },
     apps: APPS,
     logs: LOGS,
@@ -101,6 +107,9 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
     packageSourceLabel: String(raw.installSource?.packageSourceLabel || 'unknown'),
     adbInstallLikely: Boolean(raw.installSource?.adbInstallLikely),
     restrictedSettingsLikely: Boolean(raw.installSource?.restrictedSettingsLikely),
+    firstInstallTime: Number(raw.installSource?.firstInstallTime || 0),
+    lastUpdateTime: Number(raw.installSource?.lastUpdateTime || 0),
+    signingCertificateSha256: raw.installSource?.signingCertificateSha256 ?? null,
   };
   return {
     backendReady: Boolean(raw.backendReady),

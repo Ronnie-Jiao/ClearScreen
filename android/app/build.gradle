@@ -3,6 +3,9 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
+def clearScreenSigning = rootProject.ext.clearScreenSigning
+def allowDebugSigning = (findProperty('allowDebugSigning') ?: 'false').toBoolean()
+def clearscreenApplicationId = findProperty('clearscreenApplicationId') ?: 'com.clearscreen.prototype'
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -95,11 +98,11 @@ android {
 
     namespace 'com.clearscreen.prototype'
     defaultConfig {
-        applicationId 'com.clearscreen.prototype'
+        applicationId clearscreenApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion clearscreenTargetSdk
-        versionCode 12
-        versionName "1.0.11"
+        versionCode 13
+        versionName "1.0.12"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -110,21 +113,41 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (clearScreenSigning.configured) {
+                storeFile rootProject.file(clearScreenSigning.storeFile)
+                storePassword clearScreenSigning.storePassword
+                keyAlias clearScreenSigning.keyAlias
+                keyPassword clearScreenSigning.keyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            if (clearScreenSigning.configured) {
+                signingConfig signingConfigs.release
+            } else if (allowDebugSigning) {
+                signingConfig signingConfigs.debug
+            }
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
             crunchPngs enablePngCrunchInRelease.toBoolean()
+        }
+        lttCompat {
+            initWith release
+            matchingFallbacks = ['release']
+            versionNameSuffix '-ltt-compat'
+        }
+        diagnostic {
+            initWith release
+            matchingFallbacks = ['release']
+            versionNameSuffix '-diagnostic'
         }
     }
     packagingOptions {

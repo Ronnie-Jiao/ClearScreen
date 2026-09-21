@@ -7,4 +7,5 @@
     android:canPerformGestures="true"
     android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews|flagReportViewIds|flagRetrieveInteractiveWindows"
     android:settingsActivity="com.clearscreen.prototype.MainActivity"
+    android:isAccessibilityTool="true"
     android:description="@string/accessibility_service_description" />

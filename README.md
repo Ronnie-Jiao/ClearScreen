@@ -27,7 +27,7 @@
 - 无障碍规则默认覆盖新发现的应用：会优先识别倒计时“跳过/3跳过”等控件；广告弹窗同时出现广告标记与关闭控件时也会尝试处理；无法确认是广告的普通关闭按钮不会自动点击
 - vivo 等系统如果在返回设置列表后仍把服务改回“已关闭”，还需要在系统设置中允许净屏自启动、后台运行并关闭电池优化；这属于系统对无障碍服务的管控，应用本身不能绕过系统授权。
 - Android 16 对 ADB/本地侧载应用的无障碍可能启用“受限设置”；净屏会读取安装来源并先引导用户尝试系统无障碍页。如果 vivo 没有提供“应用信息 → 允许受限设置”入口，则必须通过 vivo EasyShare 或可信应用商店重新安装，应用自身不能绕过系统校验。
-- 无障碍实现参考了李跳跳 APK 的简化服务形态：服务不再单独运行在 `:accessibility` 进程，配置中移除了当前未使用的按键过滤和手势能力；这不会伪造或绕过系统授权。
+- 无障碍实现参考了李跳跳 APK 的服务声明形态：服务不再单独运行在 `:accessibility` 进程，使用单进程、`exported=false`、`settingsActivity`、通用反馈类型和 Android 12+ 的 `isAccessibilityTool` 配置；这不会伪造或绕过系统授权。
 - 为便于与李跳跳的 `targetSdk=33` 做真机 A/B 测试，支持 `cd android; .\\gradlew.bat :app:assembleRelease -PclearscreenTargetSdk=33`。手机单独安装必须使用 `assembleRelease` 生成的 APK；`assembleDebug` 仅用于连接 Metro 调试，未启动 8081 服务时会显示 `Unable to load script`。未传该参数时仍使用当前 Android/Expo 目标 SDK；Android 16 的受限设置最终仍由系统根据安装来源决定。
 
 ## 已实现页面

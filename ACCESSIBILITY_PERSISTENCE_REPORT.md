@@ -190,10 +190,11 @@ packageSource=1
 
 对公开的李跳跳 2.2 APK 做了静态对比：其 `targetSdkVersion=33`，无障碍服务没有声明单独进程；仓库中公开的主要是规则文件和成品 APK，并没有可直接移植的授权实现。
 
-净屏 `1.0.10` 已做以下改动：
+净屏 `1.0.11` 已做以下改动：
 
 - 无障碍服务移除 `android:process=":accessibility"`，回到与主界面相同的应用进程，减少 vivo 对额外服务进程的兼容变量。
-- 移除当前代码没有使用的按键过滤和手势能力，保留读取窗口内容、交互窗口和节点点击所需配置。
+- 对齐李跳跳 2.2 的服务声明兼容点：服务使用单进程、`exported=false`、`settingsActivity`、通用反馈类型和 `canPerformGestures=true`；保留净屏识别窗口所需的 `flagReportViewIds`、`flagRetrieveInteractiveWindows` 等 flags。
+- 在 `res/xml-v31/accessibility_service_config.xml` 中声明 `isAccessibilityTool=true`，与李跳跳在 Android 12+ 的配置一致；API 30 及以下继续使用不含该属性的基础配置。
 - 增加 `-PclearscreenTargetSdk=33` 的兼容测试参数；默认构建仍为 target 36，因此可以把 target 33 与 target 36 在同一台手机上分别验证。
 - 应用信息与无障碍设置之间增加回流引导：从应用信息返回后，会提示继续打开无障碍，而不是让用户重新猜下一步。
 

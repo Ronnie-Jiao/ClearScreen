@@ -124,11 +124,11 @@ ClearScreenA11y: onServiceConnected
 3. AccessibilityService XML 仍有与李跳跳不一致、被 vivo 特殊处理的配置；
 4. vivo 自带的无障碍/清理组件在授权确认后移除了 ClearScreen。
 
-目前没有证据表明是 ClearScreen 服务代码启动后崩溃，因为本次失败时没有 `onServiceConnected`，也没有 ClearScreen 崩溃记录。
+纯探针测试进一步排除了服务代码启动后崩溃：日志有 `onServiceConnected` 和随后正常的 `onDestroy`，没有 `FATAL EXCEPTION`，系统也没有把它列入 `Crashed services`。这更像是服务被系统策略解绑并移除，而不是应用自身崩溃。
 
 ## 六、建议交给后续 AI 的继续排查方案
 
-### A. 做一个最小探针 APK
+### A. 做一个最小探针 APK（已完成）
 
 只保留一个最简单的 AccessibilityService：
 
@@ -138,7 +138,7 @@ ClearScreenA11y: onServiceConnected
 - 不读取广告规则；
 - 只在 `onServiceConnected` 写一条日志。
 
-如果最小探针也会被 vivo 返回后关闭，问题基本可以确定在安装来源、签名或 vivo 系统策略，而不是 ClearScreen 业务代码。
+已完成的 `com.clearscreen.probe.pure` 在真机上复现了同样问题：服务先触发 `onServiceConnected`，随后触发 `onDestroy`，最终从系统授权名单中消失；因此问题基本可以确定不在 ClearScreen 业务代码，而在安装来源、签名/包身份或 vivo 系统策略。
 
 ### B. 用与李跳跳完全相同的安装链路测试
 
@@ -186,4 +186,3 @@ ClearScreenA11y: onServiceConnected
 现在不是“你没有点对”，也不是净屏页面单纯显示错了。系统确实没有把这个 App 的无障碍权限最终保存下来。
 
 李跳跳能用，说明 vivo 手机并不是完全禁止这类软件。下一步必须把李跳跳和净屏的“安装身份”和“无障碍服务登记信息”逐项对比，不能再只依靠猜测互传、后台或前台服务。
-

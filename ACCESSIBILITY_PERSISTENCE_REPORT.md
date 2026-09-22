@@ -282,4 +282,40 @@ android/probePure/build/outputs/apk/release/probePure-release.apk
 签名 SHA-256          93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999
 ```
 
-目前还没有把这些实验包的授权结果写成“已修复”。构建已完成，但本轮 USB 安装时电脑暂未发现手机（`adb devices` 没有设备），所以还没有进行手机上的 A/B 授权操作。下一步必须用手机系统安装器分别安装纯探针、前台保活探针、诊断版和兼容版，完成一次打开后返回列表的复现，再运行采集脚本；只有这样才能判断问题来自完整净屏应用能力、应用身份/签名，还是 vivo 对所有新无障碍服务的策略。
+本轮已在实体 vivo 手机上完成 USB A/B 授权操作。四个实验包均已安装，但纯探针仍然出现“打开后返回即关闭”，详细证据见下一节。由于纯探针本轮由 USB 调试安装，下一步仍需用手机系统安装器或 EasyShare 安装同一个纯探针，比较不同安装来源是否改变结果。
+
+## 十四、纯无障碍探针真机结果（2026-09-22）
+
+本轮使用实体设备 `10AG4M2KGF00527`，安装并测试了不包含 React Native、Expo、VPN、悬浮窗、前台服务、后台能力和业务逻辑的最小包：
+
+```text
+包名：com.clearscreen.probe.pure
+安装方式：USB 调试安装
+installerPackageName：null
+initiatingPackageName：com.android.shell
+packageSource：1
+```
+
+用户在系统无障碍设置中打开纯探针后返回，日志明确记录：
+
+```text
+09-22 09:35:13.109  I ClearScreenPureProbe: onServiceConnected
+09-22 09:35:55.202  W ClearScreenPureProbe: onDestroy
+```
+
+也就是说，系统曾经真正启动并连接了纯探针服务；约 42 秒后服务被销毁。随后系统最终保存的 `enabled_accessibility_services` 只剩：
+
+```text
+hello.litiaotiao.app/hello.litiaotiao.app.LttService
+com.vivo.dr/com.vivo.dr.LocateBehaviorAnalysisService
+```
+
+纯探针已经不在授权名单中。同时 `dumpsys accessibility` 显示：
+
+```text
+Bound services：只有李跳跳和 vivo 位置引擎
+Binding services：{}
+Crashed services：{}
+```
+
+这次结果排除了“净屏主界面进程太重”“React/Expo 导致服务崩溃”“广告识别代码导致服务退出”“前台保活或额外权限不足”等解释。当前最强结论是：vivo 在 USB/ADB 侧载的这个新包上，曾允许服务启动，但随后没有保留该无障碍授权，或由系统策略主动移除了它。由于本次纯探针是 ADB 安装，仍需通过手机系统安装器/EasyShare 再做一次相同测试，才能最终区分“ADB 安装来源限制”和“包名/签名等身份限制”。

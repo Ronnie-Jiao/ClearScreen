@@ -5,11 +5,11 @@ import { AppIcon, Background, Badge, Card, Chevron, SquareIcon, Toggle, TopBar }
 import { C } from '../theme';
 export default function AppDetailScreen({app,logs,onBack,onChange,onRecords}:{app:AppItem;logs:LogItem[];onBack:()=>void;onChange:(a:AppItem)=>void;onRecords:()=>void}){
  const recent=logs.filter(l=>l.appId===app.id).slice(0,3);
- const set=(k:'skip'|'network'|'whitelist')=>onChange({...app,[k]:!app[k],...(k==='whitelist'&&!app.whitelist?{skip:false,network:false}:{}),...((k==='skip'||k==='network')&&!app[k]?{whitelist:false}:{})});
+ const set=(k:'skip'|'whitelist')=>onChange({...app,[k]:!app[k],...(k==='whitelist'&&!app.whitelist?{skip:false}:{}),...(k==='skip'&&!app[k]?{whitelist:false}:{})});
  return <Background><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.page}><TopBar title="应用详情" onBack={onBack}/>
   <Card style={s.hero}><AppIcon source={app.icon} size={96}/><View><Text style={s.appName}>{app.name}</Text><Badge>✓  已安装</Badge></View></Card>
-  <Card style={s.options}>{[['≫','blue','自动跳过','skip'],['◎','green','网络过滤','network'],['★','purple','加入白名单','whitelist']].map((r:any,i)=><View key={i} style={[s.option,i===2&&{borderBottomWidth:0}]}><SquareIcon symbol={r[0]} tone={r[1]} size={60}/><Text style={s.optTitle}>{r[2]}</Text><Toggle value={(app as any)[r[3]]} onChange={()=>set(r[3])}/></View>)}</Card>
-  <View style={s.info}><Text style={s.bulb}>💡</Text><Text style={s.infoText}>双重去广告</Text><Chevron/></View>
+   <Card style={s.options}>{[['≫','blue','自动跳过','skip'],['★','purple','加入白名单','whitelist']].map((r:any,i)=><View key={i} style={[s.option,i===1&&{borderBottomWidth:0}]}><SquareIcon symbol={r[0]} tone={r[1]} size={60}/><Text style={s.optTitle}>{r[2]}</Text><Toggle value={(app as any)[r[3]]} onChange={()=>set(r[3])}/></View>)}</Card>
+   <View style={s.info}><Text style={s.bulb}>💡</Text><Text style={s.infoText}>自动跳过广告，不接管 VPN</Text><Chevron/></View>
   <Card style={s.logs}><View style={s.head}><Text style={s.headTitle}>◷  最近记录</Text><Pressable onPress={onRecords}><Text style={s.link}>查看全部  ›</Text></Pressable></View>{recent.length?recent.map((l,i)=><View key={i} style={s.log}><Text style={s.time}>{l.time}</Text><Text style={[s.logText,l.type==='fail'&&{color:C.red}]}>●  {l.text}</Text></View>):<Text style={s.empty}>暂无记录</Text>}</Card>
   <Card style={s.advanced}><SquareIcon symbol="◇" tone="purple" size={58}/><Text style={s.advText}>高级设置</Text><Chevron/></Card>
  </ScrollView></Background>

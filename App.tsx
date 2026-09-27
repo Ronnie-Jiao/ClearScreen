@@ -171,16 +171,15 @@ export default function App(){
    const next=!master;setMaster(next);
    try{await ClearScreenNative.setMasterEnabled(next);await refresh()}catch(error){setMaster(!next);console.warn('ClearScreen master update failed',error)}
  },[master,refresh]);
- const openPermission=useCallback(async(key:'skip'|'network'|'bg')=>{
-   if(key==='skip'){
-     if(permissions.restrictedSettingsLikely&&!permissions.skip){
-       showRestrictedSettingsGuide();
-       return;
-     }
-     openAccessibilitySettings();
-   }
-   else if(key==='network')await ClearScreenNative.startVpn();
-   else if(permissions.isVivoFamily){
+  const openPermission=useCallback(async(key:'skip'|'bg')=>{
+    if(key==='skip'){
+      if(permissions.restrictedSettingsLikely&&!permissions.skip){
+        showRestrictedSettingsGuide();
+        return;
+      }
+      openAccessibilitySettings();
+    }
+    else if(permissions.isVivoFamily){
      Alert.alert(
        '开启 vivo 后台保护',
        '净屏会打开系统的“自启动管理”。请找到“净屏”并打开“自启动”，这样 vivo 才不会在返回后清理无障碍服务。',
@@ -197,7 +196,7 @@ export default function App(){
  let screen:React.ReactNode;
  if(page==='splash')screen=<SplashScreen/>;
  else if(page==='welcome')screen=<WelcomeScreen onStart={()=>{completeOnboarding();go('permissions')}} onLater={()=>{completeOnboarding();tab('home')}}/>;
- else if(page==='permissions')screen=<PermissionsScreen onBack={back} onContinue={()=>{completeOnboarding();refresh();tab('home')}} permissions={{skip:permissions.skip,skipRunning:permissions.skipRunning,network:permissions.network,bg:permissions.bg,isVivoFamily:permissions.isVivoFamily,vendorStartupGuideConfirmed:permissions.vendorStartupGuideConfirmed}} onToggle={openPermission}/>;
+  else if(page==='permissions')screen=<PermissionsScreen onBack={back} onContinue={()=>{completeOnboarding();refresh();tab('home')}} permissions={{skip:permissions.skip,skipRunning:permissions.skipRunning,bg:permissions.bg,isVivoFamily:permissions.isVivoFamily,vendorStartupGuideConfirmed:permissions.vendorStartupGuideConfirmed}} onToggle={openPermission}/>;
  else if(page==='home')screen=<HomeScreen master={master} onMaster={toggleMaster} onTab={tab} onPermissions={()=>go('permissions')} onRecords={()=>go('records')} apps={apps} logs={logs} today={today} permissions={permissions}/>;
  else if(page==='apps')screen=<AppsScreen apps={apps} onChangeApps={updateApps} onTab={tab} onOpen={id=>{setSelectedId(id);go('appDetail')}} onWhitelist={()=>go('whitelist')}/>;
  else if(page==='appDetail'&&selected)screen=<AppDetailScreen app={selected} logs={logs} onBack={back} onChange={a=>updateApps(apps.map(x=>x.id===a.id?a:x))} onRecords={()=>go('records')}/>;

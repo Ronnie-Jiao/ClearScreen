@@ -72,7 +72,9 @@ function normalizeApp(app: NativeApp): AppItem {
     name: app.name || app.packageName || '未知应用',
     icon: app.iconUri ? { uri: app.iconUri } : LOGO,
     skip: Boolean(app.skip),
-    network: Boolean(app.network),
+    // Network filtering is intentionally disabled so ClearScreen never owns a
+    // VPN slot needed by the user's separate VPN client.
+    network: false,
     whitelist: Boolean(app.whitelist),
     isSystemApp: Boolean(app.isSystemApp),
     versionName: app.versionName,
@@ -86,7 +88,7 @@ function fallbackSnapshot(): BackendSnapshot {
     masterEnabled: true,
     installedAppCount: APPS.length,
     todaySkipCount: 28,
-    todayNetworkCount: 136,
+    todayNetworkCount: 0,
     permissions: {
       skip: true,
       skipRunning: false,
@@ -94,7 +96,7 @@ function fallbackSnapshot(): BackendSnapshot {
       accessibilityServiceBound: false,
       accessibilityProcessAlive: false,
       accessibilityStoredServices: '',
-      network: true,
+      network: false,
       networkRunning: false,
       bg: false,
       isVivoFamily: false,
@@ -116,7 +118,7 @@ function fallbackSnapshot(): BackendSnapshot {
       signingCertificateSha256: null,
     },
     apps: APPS,
-    logs: LOGS,
+    logs: LOGS.filter(log => log.type !== 'network'),
     settings: { startup: true, autoUpdate: true, debug: false },
   };
 }
@@ -124,7 +126,9 @@ function fallbackSnapshot(): BackendSnapshot {
 export function normalizeSnapshot(raw: any): BackendSnapshot {
   if (!raw || !native) return fallbackSnapshot();
   const apps = Array.isArray(raw.apps) ? raw.apps.map(normalizeApp) : [];
-  const logs = Array.isArray(raw.logs) ? raw.logs as LogItem[] : [];
+  const logs = Array.isArray(raw.logs)
+    ? (raw.logs as LogItem[]).filter(log => log.type !== 'network')
+    : [];
   const installSource: InstallSourceDiagnostics = {
     installingPackageName: raw.installSource?.installingPackageName ?? null,
     initiatingPackageName: raw.installSource?.initiatingPackageName ?? null,
@@ -143,7 +147,7 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
     masterEnabled: Boolean(raw.masterEnabled),
     installedAppCount: Number(raw.installedAppCount || apps.length),
     todaySkipCount: Number(raw.todaySkipCount || 0),
-    todayNetworkCount: Number(raw.todayNetworkCount || 0),
+    todayNetworkCount: 0,
     permissions: {
       skip: Boolean(raw.accessibilityEnabled),
       skipRunning: Boolean(raw.accessibilityRunning),
@@ -151,8 +155,8 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
       accessibilityServiceBound: Boolean(raw.accessibilityServiceBound ?? raw.accessibilityRunning),
       accessibilityProcessAlive: Boolean(raw.accessibilityProcessAlive),
       accessibilityStoredServices: String(raw.accessibilityStoredServices || ''),
-      network: Boolean(raw.vpnPrepared),
-      networkRunning: Boolean(raw.vpnRunning),
+      network: false,
+      networkRunning: false,
       bg: Boolean(raw.batteryOptimizationIgnored),
       isVivoFamily: Boolean(raw.isVivoFamily),
       vendorStartupSettingsAvailable: Boolean(raw.vendorStartupSettingsAvailable),
@@ -185,7 +189,7 @@ export const ClearScreenNative = {
   },
   setAppRule: async (app: AppItem) => {
     if (native?.setAppRule) {
-      await native.setAppRule(app.packageName || app.id, app.skip, app.network, app.whitelist);
+      await native.setAppRule(app.packageName || app.id, app.skip, false, app.whitelist);
     }
   },
   setSetting: async (key: 'startup' | 'autoUpdate' | 'debug', enabled: boolean) => {
@@ -197,8 +201,6 @@ export const ClearScreenNative = {
   },
   openAccessibilitySettings: async () => native?.openAccessibilitySettings?.(),
   openAppDetailsSettings: async () => native?.openAppDetailsSettings?.(),
-  startVpn: async () => native?.startVpn?.(),
-  stopVpn: async () => native?.stopVpn?.(),
   openBatterySettings: async () => native?.openBatterySettings?.(),
   confirmVendorStartupGuide: async (): Promise<BackendSnapshot | undefined> => {
     if (!native?.confirmVendorStartupGuide) return undefined;

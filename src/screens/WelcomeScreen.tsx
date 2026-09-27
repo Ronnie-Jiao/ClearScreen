@@ -19,7 +19,7 @@ export default function WelcomeScreen({onStart,onLater}:{onStart:()=>void;onLate
   </View>
   <View style={[s.features,{gap:px(11),marginBottom:px(14)}]}>
    <Card style={[s.feature,{paddingVertical:px(12)}]}><SquareIcon symbol="≫" tone="blue" size={px(70)}/><Text style={[s.featureText,{fontSize:px(17),lineHeight:px(22),marginTop:px(8)}]}>自动跳过</Text></Card>
-   <Card style={[s.feature,{paddingVertical:px(12)}]}><SquareIcon symbol="◎" tone="green" size={px(70)}/><Text style={[s.featureText,{fontSize:px(17),lineHeight:px(22),marginTop:px(8)}]}>网络过滤</Text></Card>
+   <Card style={[s.feature,{paddingVertical:px(12)}]}><SquareIcon symbol="◎" tone="green" size={px(70)}/><Text style={[s.featureText,{fontSize:px(17),lineHeight:px(22),marginTop:px(8)}]}>不占用 VPN</Text></Card>
    <Card style={[s.feature,{paddingVertical:px(12)}]}><SquareIcon symbol="★" tone="purple" size={px(70)}/><Text style={[s.featureText,{fontSize:px(17),lineHeight:px(22),marginTop:px(8)}]}>白名单</Text></Card>
   </View>
   <View style={{width:'100%'}}><PrimaryButton title="开始使用  ›" onPress={onStart}/></View>

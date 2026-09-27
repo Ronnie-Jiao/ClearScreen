@@ -1,7 +1,6 @@
 package com.clearscreen.prototype.backend
 
 import android.accessibilityservice.AccessibilityServiceInfo
-import android.app.Activity
 import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Intent
@@ -11,14 +10,11 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
-import android.net.VpnService
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Base64
 import android.view.accessibility.AccessibilityManager
-import com.facebook.react.bridge.ActivityEventListener
-import com.facebook.react.bridge.BaseActivityEventListener
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -37,17 +33,6 @@ class ClearScreenNativeModule(
   private val store = ClearScreenStore(reactContext)
   private val executor = Executors.newSingleThreadExecutor()
 
-  private val activityEventListener: ActivityEventListener = object : BaseActivityEventListener() {
-    override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
-      if (requestCode != VPN_REQUEST_CODE || resultCode != android.app.Activity.RESULT_OK) return
-      if (store.isMasterEnabled()) startVpnService()
-    }
-  }
-
-  init {
-    reactContext.addActivityEventListener(activityEventListener)
-  }
-
   override fun getName(): String = "ClearScreenBackend"
 
   @ReactMethod
@@ -64,8 +49,6 @@ class ClearScreenNativeModule(
   @ReactMethod
   fun setMasterEnabled(enabled: Boolean, promise: Promise) = runAsync(promise) {
     store.setMasterEnabled(enabled)
-    if (!enabled) stopVpnService()
-    else if (VpnService.prepare(reactContext) == null) startVpnService()
     snapshot()
   }
 
@@ -115,29 +98,6 @@ class ClearScreenNativeModule(
   }
 
   @ReactMethod
-  fun startVpn(promise: Promise) {
-    val prepareIntent = VpnService.prepare(reactContext)
-    if (prepareIntent != null) {
-      val activity = reactContext.currentActivity
-      if (activity == null) {
-        promise.reject("NO_ACTIVITY", "无法打开 VPN 授权页面")
-        return
-      }
-      activity.startActivityForResult(prepareIntent, VPN_REQUEST_CODE)
-      promise.resolve("consent_required")
-    } else {
-      if (store.isMasterEnabled()) startVpnService()
-      promise.resolve(if (store.isMasterEnabled()) "started" else "prepared")
-    }
-  }
-
-  @ReactMethod
-  fun stopVpn(promise: Promise) {
-    stopVpnService()
-    promise.resolve(true)
-  }
-
-  @ReactMethod
   fun openBatterySettings(promise: Promise) {
     // On vivo/iQOO, the documented Android battery-exemption screen does not
     // control the vendor's "自启动" gate that is responsible for terminating
@@ -159,7 +119,6 @@ class ClearScreenNativeModule(
 
   override fun invalidate() {
     executor.shutdownNow()
-    reactContext.removeActivityEventListener(activityEventListener)
     super.invalidate()
   }
 
@@ -180,6 +139,7 @@ class ClearScreenNativeModule(
         putString("type", event.type)
         putString("text", event.text)
         putString("result", event.result)
+        putString("ruleId", event.ruleId.orEmpty())
         putDouble("timestamp", event.timestamp.toDouble())
       })
     }
@@ -201,8 +161,10 @@ class ClearScreenNativeModule(
     map.putBoolean("accessibilityServiceBound", accessibility.serviceBound)
     map.putBoolean("accessibilityProcessAlive", accessibility.processAlive)
     map.putString("accessibilityStoredServices", accessibility.storedServices)
-    map.putBoolean("vpnPrepared", VpnService.prepare(reactContext) == null)
-    map.putBoolean("vpnRunning", ClearScreenVpnService.running)
+    // ClearScreen deliberately does not request or own a VPN. Keep these
+    // fields false for older JS clients that still read them.
+    map.putBoolean("vpnPrepared", false)
+    map.putBoolean("vpnRunning", false)
     map.putBoolean("batteryOptimizationIgnored", isBatteryOptimizationIgnored())
     map.putBoolean("isVivoFamily", isVivoFamilyDevice())
     map.putBoolean("vendorStartupSettingsAvailable", vendorStartupSettingsIntent() != null)
@@ -401,18 +363,6 @@ class ClearScreenNativeModule(
     }
   }
 
-  private fun startVpnService() {
-    val intent = Intent(reactContext, ClearScreenVpnService::class.java)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) reactContext.startForegroundService(intent)
-    else reactContext.startService(intent)
-  }
-
-  private fun stopVpnService() {
-    reactContext.stopService(Intent(reactContext, ClearScreenVpnService::class.java).apply {
-      action = ClearScreenVpnService.ACTION_STOP
-    })
-  }
-
   private fun openSettings(intent: Intent, promise: Promise) {
     try {
       intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -437,7 +387,6 @@ class ClearScreenNativeModule(
   }
 
   companion object {
-    private const val VPN_REQUEST_CODE = 771
     // Resolved on the affected V2502DA device to
     // com.vivo.permissionmanager/.activity.BgStartUpManagerActivity.
     private const val VIVO_BG_STARTUP_ACTION = "com.iqoo.secure.BGSTARTUPMANAGER"

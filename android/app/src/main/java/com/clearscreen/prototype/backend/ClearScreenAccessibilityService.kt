@@ -503,13 +503,30 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       val screen = rootBounds.toAdBox()
       return nodes.any { panel ->
         val box = panel.bounds
-        panel.isVisible &&
-          AdGeometryRules.isModalCorner(close.toAdBox(), box.toAdBox(), screen) &&
-          nodes.any { signal ->
-            signal.isVisible && signal !== panel &&
-              hasStrongAdSignal(signal.label, signal.resourceId) &&
-              box.contains(signal.bounds.centerX(), signal.bounds.centerY())
-          }
+        if (!panel.isVisible ||
+          !AdGeometryRules.isModalCorner(close.toAdBox(), box.toAdBox(), screen)
+        ) return@any false
+
+        val panelEvidence = nodes.filter { signal ->
+          signal.isVisible && signal !== panel &&
+            box.contains(signal.bounds.centerX(), signal.bounds.centerY())
+        }
+        // Promotional banners do not always carry a machine-readable "广告"
+        // badge. Two distinct commercial cues INSIDE the same modal also count,
+        // but never on a privacy / permission / payment confirmation dialog.
+        val isSensitive = panelEvidence.any { evidence ->
+          AdSemanticRules.isSensitiveUiContext(evidence.label)
+        }
+        !isSensitive && (
+          panelEvidence.any { evidence ->
+            hasStrongAdSignal(evidence.label, evidence.resourceId)
+          } ||
+            panelEvidence
+              .map { evidence -> AdSemanticRules.normalize(evidence.label) }
+              .filter { label -> AdSemanticRules.hasMediumAdSignal(label) }
+              .distinct()
+              .size >= MIN_PROMO_CUES_IN_MODAL
+          )
       }
     }
 
@@ -649,6 +666,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     private const val MAX_ANCESTOR_LABELS = 8
     private const val MAX_REMEMBERED_ACTIONS = 80
     private const val MAX_LOG_LABEL_LENGTH = 80
+    private const val MIN_PROMO_CUES_IN_MODAL = 2
 
     fun isEnabled(context: Context): Boolean {
       val enabled = Settings.Secure.getString(

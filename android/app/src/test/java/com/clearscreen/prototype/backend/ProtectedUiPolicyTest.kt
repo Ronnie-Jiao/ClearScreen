@@ -29,7 +29,7 @@ class ProtectedUiPolicyTest {
 
   @Test fun neverClosesAlarmsRemindersOrCountdownScreens() {
     val protected = listOf(
-      "闹钟", "正在响铃", "稍后提醒", "定时提醒", "计时器",
+      "闹钟", "正在响铃", "提醒", "稍后提醒", "定时提醒", "计时器",
       "倒计时", "秒表", "计时已结束", "时间到了",
       "Snooze", "Alarm ringing", "Timer", "Reminder", "Stopwatch",
     )

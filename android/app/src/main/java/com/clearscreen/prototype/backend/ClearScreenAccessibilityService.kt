@@ -368,6 +368,9 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (active != null) {
       val activePackage = active.packageName?.toString()
       if (activePackage.isNullOrBlank() || activePackage == packageName) return active
+      // Never tap an old app's window while another app or a permission dialog
+      // is in the foreground. Delayed probe callbacks must obey this too.
+      return null
     }
     return runCatching {
       windows.asSequence()

@@ -60,7 +60,7 @@ internal object ProtectedUiPolicy {
     return lower.split('.', '_', '-').any { token ->
       token in clockTokens ||
         listOf("alarm", "deskclock", "timer", "countdown", "stopwatch", "reminder")
-          .any(token::startsWith)
+          .any { prefix -> token.startsWith(prefix) }
     }
   }
 
@@ -69,19 +69,19 @@ internal object ProtectedUiPolicy {
     return listOf(
       "alarm", "timer", "countdown", "stopwatch", "reminder",
       "snooze", "ringing",
-    ).any(lower::contains)
+    ).any { term -> lower.contains(term) }
   }
 
   fun isProtectedText(text: String): Boolean {
     val lower = text.lowercase(Locale.ROOT)
-    return timekeepingLabels.any(lower::contains)
+    return timekeepingLabels.any { term -> lower.contains(term) }
   }
 
   fun isProtectedResourceId(resourceId: String): Boolean {
     val lower = resourceId.lowercase(Locale.ROOT)
     // Matching meaningful control names avoids blocking "countdown_skip"
     // inside legitimate advertising SDKs.
-    return protectedControlIds.any(lower::contains)
+    return protectedControlIds.any { term -> lower.contains(term) }
   }
 
   fun isProtectedScreen(

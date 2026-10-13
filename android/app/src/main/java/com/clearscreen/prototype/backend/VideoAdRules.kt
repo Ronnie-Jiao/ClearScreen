@@ -71,6 +71,9 @@ internal object VideoAdRules {
 
   fun isUnsafePlaybackControl(label: String): Boolean {
     val compact = AdSemanticRules.normalize(label)
+    // "关闭视频" means exit player, while "关闭视频广告" is an explicit
+    // ad action. Exact, supported ad labels take precedence over substrings.
+    if (compact in skipLabels || compact in closeLabels) return false
     return unsafePlaybackTokens.any(compact::contains) ||
       notYetSkippable.any(compact::contains)
   }

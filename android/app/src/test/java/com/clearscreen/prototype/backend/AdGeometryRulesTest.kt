@@ -51,6 +51,16 @@ class AdGeometryRulesTest {
     assertFalse(AdGeometryRules.isModalCorner(close, fullWindow, screen))
   }
 
+  @Test fun labelledVideoAdCanUseTightLowerRightGestureOnLandscapeScreen() {
+    val landscape = AdGeometryRules.Box(0, 0, 1846, 852)
+    val bottomRightSkip = AdGeometryRules.Box(1570, 737, 1785, 817)
+    assertTrue(AdGeometryRules.isVideoAdGestureTarget(bottomRightSkip, landscape))
+    val centerPurchase = AdGeometryRules.Box(700, 360, 1150, 490)
+    assertFalse(AdGeometryRules.isVideoAdGestureTarget(centerPurchase, landscape))
+    val bigPlayerSurface = AdGeometryRules.Box(0, 0, 1846, 852)
+    assertFalse(AdGeometryRules.isVideoAdGestureTarget(bigPlayerSurface, landscape))
+  }
+
   @Test fun nonTopRightControlNeedsIndependentModalEvidence() {
     val leftClose = AdGeometryRules.Box(40, 800, 90, 850)
     assertFalse(AdGeometryRules.isNearTopRight(leftClose, screen))

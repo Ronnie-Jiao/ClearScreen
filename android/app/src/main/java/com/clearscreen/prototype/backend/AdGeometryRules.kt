@@ -42,6 +42,22 @@ internal object AdGeometryRules {
       target.top <= screen.top + height * 0.43f
   }
 
+  /**
+   * Video players can be landscape and place a *labelled* ad Skip at either
+   * right-hand corner. This is used ONLY for explicit ad-labelled controls
+   * with independent nearby evidence, never for a generic video player X.
+   */
+  fun isVideoAdGestureTarget(target: Box, screen: Box): Boolean {
+    val width = screen.width.coerceAtLeast(1)
+    val height = screen.height.coerceAtLeast(1)
+    return target.width > 0 && target.height > 0 &&
+      target.width <= width * 0.29f &&
+      target.height <= height * 0.18f &&
+      target.centerX >= screen.left + width * 0.66f &&
+      (target.top <= screen.top + height * 0.36f ||
+        target.bottom >= screen.top + height * 0.70f)
+  }
+
   fun isSmallModalClose(target: Box, screen: Box): Boolean {
     val width = screen.width.coerceAtLeast(1)
     val height = screen.height.coerceAtLeast(1)

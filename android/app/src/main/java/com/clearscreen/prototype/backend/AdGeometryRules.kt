@@ -58,8 +58,8 @@ internal object AdGeometryRules {
       panel.top >= screen.top + height * 0.10f &&
       panel.top <= screen.top + height * 0.60f &&
       close.centerX >= panel.right - width * 0.23f &&
-      close.centerX <= panel.right + width * 0.04f &&
-      close.centerY >= panel.top - height * 0.05f &&
+      close.centerX <= panel.right + width * 0.10f &&
+      close.centerY >= panel.top - height * 0.14f &&
       close.centerY <= panel.top + height * 0.14f
   }
 }

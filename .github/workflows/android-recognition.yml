@@ -28,7 +28,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      # Ubuntu GitHub-hosted runners already provide the Android SDK.
+      # setup-android@v3 currently tries to install the removed SDK package
+      # "tools" and exits before tests even start (2026-10-13).
+      - name: Check preinstalled Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -d "$ANDROID_HOME/platforms"
       - name: Install Expo and React Native dependencies
         run: npm install --no-audit --no-fund
       - name: Compile Android and run recognition tests

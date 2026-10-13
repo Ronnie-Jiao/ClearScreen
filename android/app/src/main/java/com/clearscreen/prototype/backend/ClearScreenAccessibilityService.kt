@@ -105,8 +105,10 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val root = findRootForPackage(packageName) ?: return
     // Screen-wide veto comes BEFORE candidate scoring and applies even when
     // the alarm / reminder contains a marketing banner or a "3 跳过" label.
-    if (isProtectedScreen(root, packageName)) return
-    val action = findAdAction(root) ?: return
+    if (ProtectedUiPolicy.isProtectedWindowClass(root.className?.toString().orEmpty())) return
+    val snapshot = AccessibilitySnapshot.capture(root)
+    if (snapshot.isTimeSensitiveScreen()) return
+    val action = findAdAction(snapshot) ?: return
     val fingerprint = action.targetFingerprint(packageName)
     if (wasRecentlyAttempted(fingerprint, now)) return
     if (!tryReserveAttempt(fingerprint, now)) return
@@ -230,8 +232,10 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     super.onDestroy()
   }
 
-  private fun findAdAction(root: AccessibilityNodeInfo): DetectionAction? {
-    val snapshot = AccessibilitySnapshot.capture(root)
+  private fun findAdAction(root: AccessibilityNodeInfo): DetectionAction? =
+    findAdAction(AccessibilitySnapshot.capture(root))
+
+  private fun findAdAction(snapshot: AccessibilitySnapshot): DetectionAction? {
     if (snapshot.nodes.isEmpty() || snapshot.isTimeSensitiveScreen()) return null
 
     val candidates = snapshot.nodes.mapNotNull { node ->
@@ -462,15 +466,12 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   private fun isProtectedScreen(
     root: AccessibilityNodeInfo,
     packageName: String,
-  ): Boolean =
-    ProtectedUiPolicy.isProtectedScreen(
-      packageName = packageName,
-      windowClassName = root.className?.toString().orEmpty(),
-      visibleLabels = AccessibilitySnapshot.capture(root).nodes
-        .filter { it.isVisible }.map { it.label },
-      visibleResourceIds = AccessibilitySnapshot.capture(root).nodes
-        .filter { it.isVisible }.map { it.resourceId },
-    )
+  ): Boolean {
+    if (ProtectedUiPolicy.isProtectedPackage(packageName) ||
+      ProtectedUiPolicy.isProtectedWindowClass(root.className?.toString().orEmpty())
+    ) return true
+    return AccessibilitySnapshot.capture(root).isTimeSensitiveScreen()
+  }
 
   private fun mayInteractWithForeground(packageName: String): Boolean {
     if (isProtectedPackage(packageName)) return false

@@ -17,6 +17,9 @@ import java.util.ArrayDeque
 import java.util.LinkedHashMap
 import java.util.Locale
 
+private fun Rect.toAdBox(): AdGeometryRules.Box =
+  AdGeometryRules.Box(left, top, right, bottom)
+
 /**
  * Accessibility-based ad action detector.
  *
@@ -497,25 +500,16 @@ class ClearScreenAccessibilityService : AccessibilityService() {
      * from an unrelated background card as authorization to click a random X.
      */
     fun hasAdModalPanel(close: Rect): Boolean {
-      val width = rootBounds.width().coerceAtLeast(1)
-      val height = rootBounds.height().coerceAtLeast(1)
-      val x = close.centerX()
-      val y = close.centerY()
+      val screen = rootBounds.toAdBox()
       return nodes.any { panel ->
         val box = panel.bounds
-        if (!panel.isVisible ||
-          box.width() < width * 0.52f || box.width() > width * 0.93f ||
-          box.height() < height * 0.22f || box.height() > height * 0.76f ||
-          box.top < rootBounds.top + height * 0.10f ||
-          box.top > rootBounds.top + height * 0.60f ||
-          x < box.right - width * 0.23f || x > box.right + width * 0.04f ||
-          y < box.top - height * 0.05f || y > box.top + height * 0.14f
-        ) return@any false
-        nodes.any { signal ->
-          signal.isVisible && signal !== panel &&
-            hasStrongAdSignal(signal.label, signal.resourceId) &&
-            box.contains(signal.bounds.centerX(), signal.bounds.centerY())
-        }
+        panel.isVisible &&
+          AdGeometryRules.isModalCorner(close.toAdBox(), box.toAdBox(), screen) &&
+          nodes.any { signal ->
+            signal.isVisible && signal !== panel &&
+              hasStrongAdSignal(signal.label, signal.resourceId) &&
+              box.contains(signal.bounds.centerX(), signal.bounds.centerY())
+          }
       }
     }
 
@@ -701,34 +695,17 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     private fun hasUsableBounds(bounds: Rect): Boolean =
       bounds.width() > 0 && bounds.height() > 0
 
-    private fun isNearTopRight(bounds: Rect, rootBounds: Rect): Boolean {
-      val width = rootBounds.width().coerceAtLeast(1)
-      val height = rootBounds.height().coerceAtLeast(1)
-      return bounds.centerX() >= rootBounds.left + width * 0.55f &&
-        bounds.top <= rootBounds.top + height * 0.48f &&
-        bounds.right >= rootBounds.left + width * 0.70f
-    }
+    private fun isNearTopRight(bounds: Rect, rootBounds: Rect): Boolean =
+      AdGeometryRules.isNearTopRight(bounds.toAdBox(), rootBounds.toAdBox())
 
-    private fun isTightTapTarget(bounds: Rect, rootBounds: Rect): Boolean {
-      val width = rootBounds.width().coerceAtLeast(1)
-      val height = rootBounds.height().coerceAtLeast(1)
-      return bounds.width() <= width * 0.30f &&
-        bounds.height() <= height * 0.11f &&
-        bounds.centerX() >= rootBounds.left + width * 0.63f &&
-        bounds.top <= rootBounds.top + height * 0.43f
-    }
+    private fun isTightTapTarget(bounds: Rect, rootBounds: Rect): Boolean =
+      AdGeometryRules.isTightTapTarget(bounds.toAdBox(), rootBounds.toAdBox())
 
-    private fun isSmallModalClose(bounds: Rect, rootBounds: Rect): Boolean {
-      val width = rootBounds.width().coerceAtLeast(1)
-      val height = rootBounds.height().coerceAtLeast(1)
-      return bounds.width() <= width * 0.18f &&
-        bounds.height() <= height * 0.10f
-    }
+    private fun isSmallModalClose(bounds: Rect, rootBounds: Rect): Boolean =
+      AdGeometryRules.isSmallModalClose(bounds.toAdBox(), rootBounds.toAdBox())
 
-    private fun isCompactControl(bounds: Rect, rootBounds: Rect): Boolean {
-      val width = rootBounds.width().coerceAtLeast(1)
-      val height = rootBounds.height().coerceAtLeast(1)
-      return bounds.width() <= width * 0.36f && bounds.height() <= height * 0.22f
-    }
+    private fun isCompactControl(bounds: Rect, rootBounds: Rect): Boolean =
+      AdGeometryRules.isCompactControl(bounds.toAdBox(), rootBounds.toAdBox())
+
   }
 }

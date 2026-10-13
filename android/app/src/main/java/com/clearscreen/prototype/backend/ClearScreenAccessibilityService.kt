@@ -225,8 +225,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     snapshot: AccessibilitySnapshot,
   ): DetectionAction? {
     if (!node.isEnabled) return null
-    val clickable = clickableTarget(node.node)
-    val target = clickable ?: node.node
+    val target = preferredActionTarget(node, snapshot.rootBounds)
     if (!target.isVisibleToUser || !target.isEnabled) return null
 
     val compact = node.compactLabel
@@ -243,6 +242,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (!hasUsableBounds(targetBounds)) return null
     val nearTopRight = isNearTopRight(targetBounds, snapshot.rootBounds)
     val compactControl = isCompactControl(targetBounds, snapshot.rootBounds)
+    if (!compactControl) return null
     val ancestorHasAdSignal = node.ancestorLabels.any(::hasStrongAdSignal)
 
     var score = when {
@@ -305,8 +305,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     snapshot: AccessibilitySnapshot,
   ): DetectionAction? {
     if (!node.isEnabled) return null
-    val clickable = clickableTarget(node.node)
-    val target = clickable ?: node.node
+    val target = preferredActionTarget(node, snapshot.rootBounds)
     if (!target.isVisibleToUser || !target.isEnabled) return null
 
     val compact = node.compactLabel
@@ -377,6 +376,20 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         .mapNotNull { window -> runCatching { window.root }.getOrNull() }
         .firstOrNull { root -> root.packageName?.toString() == packageName }
     }.getOrNull()
+  }
+
+  /**
+   * Some SDKs make the entire splash layout clickable. Never promote a tiny
+   * skip label into a full-screen ACTION_CLICK target; prefer the tiny leaf and
+   * apply the guarded gesture fallback instead.
+   */
+  private fun preferredActionTarget(
+    node: ScreenNode,
+    rootBounds: Rect,
+  ): AccessibilityNodeInfo {
+    val clickable = clickableTarget(node.node) ?: return node.node
+    val box = Rect().also(clickable::getBoundsInScreen)
+    return if (isCompactControl(box, rootBounds)) clickable else node.node
   }
 
   private fun clickableTarget(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {

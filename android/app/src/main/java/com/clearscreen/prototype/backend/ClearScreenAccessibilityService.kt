@@ -317,7 +317,9 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       // No blind pixel taps inside a player. Only exposed, high-confidence
       // explicit ad actions near the top-right can use gesture fallback.
       allowGestureFallback = explicit && nearbyAdEvidence &&
-        isTightTapTarget(targetBounds, snapshot.rootBounds),
+        AdGeometryRules.isVideoAdGestureTarget(
+          targetBounds.toAdBox(), snapshot.rootBounds.toAdBox()
+        ),
       ruleId = when (action) {
         VideoAdRules.Action.EXPLICIT_SKIP -> "builtin.video.ad-skip"
         VideoAdRules.Action.EXPLICIT_CLOSE -> "builtin.video.ad-close"

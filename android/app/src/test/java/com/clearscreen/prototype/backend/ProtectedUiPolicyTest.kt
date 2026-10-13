@@ -17,6 +17,8 @@ class ProtectedUiPolicyTest {
       "com.example.timer",
       "com.example.countdown",
       "com.example.reminder",
+      "com.example.alarmplus",
+      "com.example.timerpro",
       "com.google.android.calendar",
     )
     packages.forEach { pkg ->
@@ -63,6 +65,8 @@ class ProtectedUiPolicyTest {
       "com.foo.TimerExpiredActivity",
       "com.foo.ReminderAlertDialog",
       "com.foo.RingingAlarmActivity",
+      "com.foo.AlarmActivity",
+      "com.foo.TimerActivity",
     )) {
       assertTrue(clazz, ProtectedUiPolicy.isProtectedScreen(
         packageName = "com.foo",

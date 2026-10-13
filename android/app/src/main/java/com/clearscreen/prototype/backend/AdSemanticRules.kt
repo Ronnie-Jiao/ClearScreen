@@ -41,7 +41,7 @@ internal object AdSemanticRules {
   private val mediumAdSignals = listOf(
     "立即下载", "立即打开", "立即办理", "点击跳转",
     "详情页面", "免费领取", "福利", "优惠", "促销",
-    "特惠", "红包", "svip",
+    "特惠", "红包", "svip", "低至", "限时", "领券", "折扣",
   )
   private val sensitiveSignals = listOf(
     "隐私政策", "用户协议", "个人信息", "权限申请", "权限管理",

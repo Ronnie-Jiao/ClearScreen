@@ -288,8 +288,10 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val screenWidth = snapshot.rootBounds.width().coerceAtLeast(1)
     val atRightEdge = targetBounds.centerX() >= snapshot.rootBounds.left +
       screenWidth * VIDEO_SKIP_RIGHT_EDGE_RATIO
-    val nearbyAdEvidence = snapshot.hasNearbyVideoAdEvidence(targetBounds) ||
-      node.ancestorLabels.any { VideoAdRules.hasAdEvidence(it) }
+    // Generic "跳过" MUST have independent evidence physically near its
+    // button. A broad ancestor may contain an unrelated ad banner elsewhere
+    // on the same video page and must not authorize a player action.
+    val nearbyAdEvidence = snapshot.hasNearbyVideoAdEvidence(targetBounds)
     val action = VideoAdRules.classify(
       labels = node.labelVariants,
       resourceId = node.resourceId,

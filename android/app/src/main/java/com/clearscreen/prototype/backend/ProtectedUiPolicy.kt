@@ -39,9 +39,9 @@ internal object ProtectedUiPolicy {
   )
   private val timekeepingLabels = listOf(
     "闹钟", "闹铃", "响铃", "起床铃", "计时器", "倒计时", "秒表",
-    "定时提醒", "日程提醒", "事件提醒", "待办提醒", "事项提醒",
+    "提醒", "定时提醒", "日程提醒", "事件提醒", "待办提醒", "事项提醒",
     "稍后提醒", "延后提醒", "稍后再响", "重复提醒", "停止计时",
-    "时间到了", "时间到", "计时结束", "计时已结束", "暂停计时",
+    "时间到了", "时间到", "计时结束", "计时已结束", "暂停计时", "叫醒",
     "alarm", "snooze", "reminder", "stopwatch", "timer",
     "countdown", "wakeupalarm", "alarmringing",
   )

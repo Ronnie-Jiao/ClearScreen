@@ -480,7 +480,9 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val active = rootInActiveWindow
     if (active != null) {
       val activePackage = active.packageName?.toString()
-      if (activePackage.isNullOrBlank() || activePackage == packageName) return active
+      // An unknown foreground package may be a system alarm, call or overlay.
+      // Fail closed rather than acting on a stale or unowned node tree.
+      if (activePackage == packageName) return active
       // Never tap an old app's window while another app or a permission dialog
       // is in the foreground. Delayed probe callbacks must obey this too.
       return null

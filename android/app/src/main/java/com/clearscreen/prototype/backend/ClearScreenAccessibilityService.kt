@@ -108,7 +108,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (ProtectedUiPolicy.isProtectedWindowClass(root.className?.toString().orEmpty())) return
     val snapshot = AccessibilitySnapshot.capture(root)
     if (snapshot.isTimeSensitiveScreen()) return
-    val action = findAdAction(snapshot) ?: return
+    val action = findAdAction(snapshot, packageName) ?: return
     val fingerprint = action.targetFingerprint(packageName)
     if (wasRecentlyAttempted(fingerprint, now)) return
     if (!tryReserveAttempt(fingerprint, now)) return
@@ -211,7 +211,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
       // Countdown digits may change between frames (3跳过 -> 2跳过).
       // Fingerprints intentionally ignore the changing number.
-      val stillPresent = findAdAction(root)?.targetFingerprint(packageName) == fingerprint
+      val stillPresent = findAdAction(root, packageName)?.targetFingerprint(packageName) == fingerprint
       if (stillPresent) {
         appendActionEvent(packageName, action, "failed", "动作后仍显示广告控件")
       } else {
@@ -232,13 +232,23 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     super.onDestroy()
   }
 
-  private fun findAdAction(root: AccessibilityNodeInfo): DetectionAction? =
-    findAdAction(AccessibilitySnapshot.capture(root))
+  private fun findAdAction(
+    root: AccessibilityNodeInfo,
+    packageName: String,
+  ): DetectionAction? = findAdAction(AccessibilitySnapshot.capture(root), packageName)
 
-  private fun findAdAction(snapshot: AccessibilitySnapshot): DetectionAction? {
+  private fun findAdAction(
+    snapshot: AccessibilitySnapshot,
+    packageName: String,
+  ): DetectionAction? {
     if (snapshot.nodes.isEmpty() || snapshot.isTimeSensitiveScreen()) return null
 
-    val candidates = snapshot.nodes.mapNotNull { node ->
+    // Video playback has different controls from an app splash screen. Never
+    // feed a video's ordinary "skip intro", player X, or timer through the
+    // generic splash/popup close detector.
+    val candidates = if (VideoAdRules.isSupported(packageName)) {
+      snapshot.nodes.mapNotNull { node -> findVideoAdCandidate(node, snapshot) }
+    } else snapshot.nodes.mapNotNull { node ->
       findSkipCandidate(node, snapshot)
     } + snapshot.nodes.mapNotNull { node ->
       findPopupCloseCandidate(node, snapshot)
@@ -251,6 +261,70 @@ class ClearScreenAccessibilityService : AccessibilityService() {
           .thenBy { it.actionPriority }
           .thenBy { -it.targetBounds.top },
       )
+  }
+
+  /**
+   * Video-platform advertisements are in-player overlays, not app-launch ads.
+   * Only a clearly ad-labelled skip/close control, or a right-side skip with
+   * independently visible nearby ad evidence, is eligible for a click.
+   *
+   * Generic X / Close, VIP purchase, episode skipping and player controls are
+   * intentionally excluded. A timer with "5秒后可跳过" is not actionable yet.
+   */
+  private fun findVideoAdCandidate(
+    node: ScreenNode,
+    snapshot: AccessibilitySnapshot,
+  ): DetectionAction? {
+    if (!node.isVisible || !node.isEnabled ||
+      node.ancestorLabels.any(AdSemanticRules::isSensitiveUiContext)
+    ) return null
+    val target = preferredActionTarget(node, snapshot.rootBounds)
+    if (!target.isVisibleToUser || !target.isEnabled) return null
+    val targetBounds = Rect().also(target::getBoundsInScreen)
+    if (!hasUsableBounds(targetBounds) || !isCompactControl(targetBounds, snapshot.rootBounds)) {
+      return null
+    }
+
+    val screenWidth = snapshot.rootBounds.width().coerceAtLeast(1)
+    val atRightEdge = targetBounds.centerX() >= snapshot.rootBounds.left +
+      screenWidth * VIDEO_SKIP_RIGHT_EDGE_RATIO
+    val nearbyAdEvidence = snapshot.hasNearbyVideoAdEvidence(targetBounds) ||
+      node.ancestorLabels.any { VideoAdRules.hasAdEvidence(it) }
+    val action = VideoAdRules.classify(
+      labels = node.labelVariants,
+      resourceId = node.resourceId,
+      nearbyAdEvidence = nearbyAdEvidence,
+      atRightEdge = atRightEdge,
+    )
+    if (action == VideoAdRules.Action.NONE) return null
+
+    val explicit = action == VideoAdRules.Action.EXPLICIT_SKIP ||
+      action == VideoAdRules.Action.EXPLICIT_CLOSE
+    // A bare "跳过" belongs to a video ad only when the local overlay
+    // actually shows advertising context, and it is positioned at the edge.
+    if (!explicit && !nearbyAdEvidence) return null
+
+    val closing = action == VideoAdRules.Action.EXPLICIT_CLOSE
+    return DetectionAction(
+      target = target,
+      targetBounds = targetBounds,
+      score = if (explicit) 160 else 120,
+      minimumScore = if (explicit) 140 else 115,
+      actionPriority = 2,
+      allowDismiss = closing,
+      // No blind pixel taps inside a player. Only exposed, high-confidence
+      // explicit ad actions near the top-right can use gesture fallback.
+      allowGestureFallback = explicit && nearbyAdEvidence &&
+        isTightTapTarget(targetBounds, snapshot.rootBounds),
+      ruleId = when (action) {
+        VideoAdRules.Action.EXPLICIT_SKIP -> "builtin.video.ad-skip"
+        VideoAdRules.Action.EXPLICIT_CLOSE -> "builtin.video.ad-close"
+        VideoAdRules.Action.CONTEXTUAL_SKIP -> "builtin.video.contextual-skip"
+        else -> return null
+      },
+      label = node.label.take(MAX_LOG_LABEL_LENGTH),
+      successText = if (closing) "已执行视频广告关闭" else "已执行视频广告跳过",
+    )
   }
 
   private fun findSkipCandidate(
@@ -522,6 +596,23 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         visibleResourceIds = nodes.asSequence().filter { it.isVisible }.map { it.resourceId }.asIterable(),
       )
 
+    /**
+     * Advertiser labels must belong to the same local playback area, rather
+     * than an unrelated ad banner hidden elsewhere on the video platform.
+     */
+    fun hasNearbyVideoAdEvidence(bounds: Rect): Boolean {
+      val screenWidth = rootBounds.width().coerceAtLeast(1)
+      val screenHeight = rootBounds.height().coerceAtLeast(1)
+      return nodes.any { peer ->
+        peer.isVisible && peer.bounds != bounds &&
+          VideoAdRules.hasAdEvidence(peer.label, peer.resourceId) &&
+          kotlin.math.abs(peer.bounds.centerX() - bounds.centerX()) <=
+            screenWidth * VIDEO_AD_EVIDENCE_X_RATIO &&
+          kotlin.math.abs(peer.bounds.centerY() - bounds.centerY()) <=
+            screenHeight * VIDEO_AD_EVIDENCE_Y_RATIO
+      }
+    }
+
     fun hasNearbyAdSignal(bounds: Rect): Boolean {
       val width = rootBounds.width().coerceAtLeast(1)
       val height = rootBounds.height().coerceAtLeast(1)
@@ -708,6 +799,9 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     private const val MAX_REMEMBERED_ACTIONS = 80
     private const val MAX_LOG_LABEL_LENGTH = 80
     private const val MIN_PROMO_CUES_IN_MODAL = 2
+    private const val VIDEO_SKIP_RIGHT_EDGE_RATIO = 0.65f
+    private const val VIDEO_AD_EVIDENCE_X_RATIO = 0.42f
+    private const val VIDEO_AD_EVIDENCE_Y_RATIO = 0.18f
 
     fun isEnabled(context: Context): Boolean {
       val enabled = Settings.Secure.getString(

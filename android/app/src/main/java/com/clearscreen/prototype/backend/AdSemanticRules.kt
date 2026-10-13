@@ -76,7 +76,12 @@ internal object AdSemanticRules {
 
   fun isExplicitAdClose(compact: String): Boolean = compact in explicitAdClose
 
-  fun isSkipResource(id: String): Boolean = skipId.containsMatchIn(id)
+  fun isSkipResource(id: String): Boolean =
+    !listOf(
+      "skip_intro", "skip_tutorial", "skip_guide", "skip_onboard",
+      "skip_welcome", "skip_login", "skip_auth", "skip_verify",
+      "skip_payment", "skip_permission", "skip_privacy",
+    ).any(id::contains) && skipId.containsMatchIn(id)
 
   fun isAdCloseResource(id: String): Boolean = adCloseId.containsMatchIn(id)
 

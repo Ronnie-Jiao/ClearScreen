@@ -1,0 +1,5 @@
+<resources>
+  <string name="app_name">净屏前台保活对照探针</string>
+  <string name="probe_service_label">净屏前台保活对照探针</string>
+  <string name="probe_service_description">仅用于比对前台保活是否能让设备持续连接无障碍服务；不执行任何点击或广告处理。</string>
+</resources>

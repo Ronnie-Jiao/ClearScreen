@@ -36,4 +36,6 @@ rootProject.name = '净屏 ClearScreen'
 expoAutolinking.useExpoVersionCatalog()
 
 include ':app'
+include ':probe'
+include ':probePure'
 includeBuild(expoAutolinking.reactNativeGradlePlugin)

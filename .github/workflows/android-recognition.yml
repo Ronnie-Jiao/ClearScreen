@@ -1,0 +1,54 @@
+name: Android recognition regression
+
+concurrency:
+  group: android-recognition-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/**'
+      - 'package.json'
+      - '.github/workflows/android-recognition.yml'
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'package.json'
+      - '.github/workflows/android-recognition.yml'
+  workflow_dispatch:
+
+jobs:
+  android-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      # Ubuntu GitHub-hosted runners already provide the Android SDK.
+      # setup-android@v3 currently tries to install the removed SDK package
+      # "tools" and exits before tests even start (2026-10-13).
+      - name: Check preinstalled Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -d "$ANDROID_HOME/platforms"
+      - name: Install Expo and React Native dependencies
+        run: npm install --no-audit --no-fund
+      - name: Create ephemeral CI debug signing key
+        run: |
+          keytool -genkeypair -v -keystore android/app/debug.keystore \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 3650 \
+            -dname "CN=Android Debug,O=Android,C=US" -noprompt
+      - name: Compile Android and run recognition tests
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace --no-daemon

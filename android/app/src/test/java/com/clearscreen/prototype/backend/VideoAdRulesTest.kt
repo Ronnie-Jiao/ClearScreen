@@ -28,7 +28,7 @@ class VideoAdRulesTest {
       assertEquals(text, VideoAdRules.Action.EXPLICIT_SKIP,
         VideoAdRules.classify(listOf(text), "", false, false))
     }
-    for (text in listOf("关闭广告", "关闭此广告", "关闭贴片广告", "Close ad")) {
+    for (text in listOf("关闭广告", "关闭此广告", "关闭贴片广告", "关闭视频广告", "Close ad")) {
       assertEquals(text, VideoAdRules.Action.EXPLICIT_CLOSE,
         VideoAdRules.classify(listOf(text), "", false, false))
     }

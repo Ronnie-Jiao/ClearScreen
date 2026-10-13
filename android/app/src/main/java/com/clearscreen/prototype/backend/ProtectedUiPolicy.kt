@@ -57,15 +57,18 @@ internal object ProtectedUiPolicy {
     if (lower in clockPackages) return true
     // Protect third-party alarm, timer and calendar apps as well, even if they
     // don't show a machine-readable title on their full-screen alert.
-    return lower.split('.', '_', '-').any { it in clockTokens }
+    return lower.split('.', '_', '-').any { token ->
+      token in clockTokens ||
+        listOf("alarm", "deskclock", "timer", "countdown", "stopwatch", "reminder")
+          .any(token::startsWith)
+    }
   }
 
   fun isProtectedWindowClass(className: String): Boolean {
     val lower = className.lowercase(Locale.ROOT)
     return listOf(
-      "alarmalert", "alarmring", "snooze", "timeralert",
-      "timerexpired", "countdown", "stopwatch", "reminderalert",
-      "ringingalarm",
+      "alarm", "timer", "countdown", "stopwatch", "reminder",
+      "snooze", "ringing",
     ).any(lower::contains)
   }
 

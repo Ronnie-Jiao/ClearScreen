@@ -154,6 +154,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val now = System.currentTimeMillis()
     if (now - lastActionAt < ACTION_COOLDOWN_MS) return false
     val root = findRootForPackage(packageName) ?: return false
+    if (isProtectedTimeSensitiveWindow(root, packageName)) return false
     val action = findAdAction(root, ocrFrame) ?: return false
     if (!action.target.isVisibleToUser || !action.target.isEnabled || !action.target.isClickable ||
       action.target.packageName?.toString() != packageName
@@ -161,6 +162,10 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val fingerprint = action.targetFingerprint(packageName)
     if (wasRecentlyAttempted(fingerprint, now)) return false
 
+    // Re-check the live foreground window before acting on a node collected
+    // earlier: a timer, alarm or reminder can interrupt an advertisement.
+    val liveRoot = findRootForPackage(packageName) ?: return false
+    if (isProtectedTimeSensitiveWindow(liveRoot, packageName)) return false
     lastActionAt = now
     // Only click a deliberately identified control. ACTION_DISMISS is exposed by
     // many ordinary dialogs and would close user-required popups even when no ad
@@ -224,7 +229,9 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   private fun isEligibleForegroundPackage(packageName: String): Boolean =
     packageName.isNotBlank() && packageName != applicationContext.packageName &&
-      !AdDecisionPolicy.isProtectedPackage(packageName) && isCurrentForegroundPackage(packageName)
+      !AdDecisionPolicy.isProtectedPackage(packageName) &&
+      !ProtectedUiPolicy.isProtectedPackage(packageName) &&
+      isCurrentForegroundPackage(packageName)
 
   private fun maybeStartMediaWatch(packageName: String, eventType: Int) {
     if (!ensureConsentAndStore() || !store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true) ||
@@ -506,7 +513,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     ocrFrame: OcrFrame? = null,
   ): DetectionAction? {
     val snapshot = AccessibilitySnapshot.capture(root)
-    if (snapshot.nodes.isEmpty()) return null
+    if (snapshot.nodes.isEmpty() || isProtectedTimeSensitiveSnapshot(root, snapshot)) return null
     if (AdDecisionPolicy.isProtectedConfirmation(
         snapshot.nodes.asSequence().filter { it.isVisible }.map { it.compactLabel }.toList()
       )
@@ -517,14 +524,23 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         System.currentTimeMillis() - frame.capturedAt <= OCR_FRAME_MAX_AGE_MS
     }
 
-    val candidates = snapshot.nodes.mapNotNull { node ->
-      findSkipCandidate(node, snapshot, currentOcrFrame)
-    } + snapshot.nodes.mapNotNull { node ->
-      findPopupCloseCandidate(node, snapshot, currentOcrFrame)
-    } + snapshot.nodes.mapNotNull { node ->
-      findEmbeddedAdCloseCandidate(node, snapshot, currentOcrFrame)
-    } + snapshot.nodes.mapNotNull { node ->
-      findFeedCloseCandidate(node, snapshot, currentOcrFrame)
+    // A video player exposes "跳过片头", "下一集" and generic close buttons.
+    // When a player surface exists on a known video platform, use a separate,
+    // conservative ad-control classifier rather than the generic popup path.
+    val candidates = if (VideoAdRules.isSupported(snapshot.packageName) &&
+      hasPlayerSurface(snapshot)
+    ) {
+      snapshot.nodes.mapNotNull { node -> findVideoAdControl(node, snapshot) }
+    } else {
+      snapshot.nodes.mapNotNull { node ->
+        findSkipCandidate(node, snapshot, currentOcrFrame)
+      } + snapshot.nodes.mapNotNull { node ->
+        findPopupCloseCandidate(node, snapshot, currentOcrFrame)
+      } + snapshot.nodes.mapNotNull { node ->
+        findEmbeddedAdCloseCandidate(node, snapshot, currentOcrFrame)
+      } + snapshot.nodes.mapNotNull { node ->
+        findFeedCloseCandidate(node, snapshot, currentOcrFrame)
+      }
     }
 
     return candidates
@@ -534,6 +550,85 @@ class ClearScreenAccessibilityService : AccessibilityService() {
           .thenByDescending { it.actionPriority }
           .thenBy { it.targetBounds.top },
       )
+  }
+
+  /**
+   * Runtime guard shared by all node and OCR recognition paths.
+   * A real alarm or countdown must always win over a putative ad action.
+   */
+  private fun isProtectedTimeSensitiveWindow(
+    root: AccessibilityNodeInfo,
+    packageName: String,
+  ): Boolean =
+    isProtectedTimeSensitiveSnapshot(root, AccessibilitySnapshot.capture(root)) ||
+      ProtectedUiPolicy.isProtectedPackage(packageName)
+
+  private fun isProtectedTimeSensitiveSnapshot(
+    root: AccessibilityNodeInfo,
+    snapshot: AccessibilitySnapshot,
+  ): Boolean =
+    ProtectedUiPolicy.isProtectedScreen(
+      packageName = snapshot.packageName,
+      windowClassName = root.className?.toString().orEmpty(),
+      visibleLabels = snapshot.nodes.asSequence().filter { it.isVisible }
+        .map { it.label }.asIterable(),
+      visibleResourceIds = snapshot.nodes.asSequence().filter { it.isVisible }
+        .map { it.resourceId }.asIterable(),
+    )
+
+  private fun findVideoAdControl(
+    node: ScreenNode,
+    snapshot: AccessibilitySnapshot,
+  ): DetectionAction? {
+    if (!store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true) ||
+      !node.isVisible || !node.isEnabled ||
+      node.ancestorLabels.any(AdSemanticRules::isSensitiveUiContext)
+    ) return null
+    val target = clickableTarget(node.node) ?: return null
+    val bounds = Rect().also(target::getBoundsInScreen)
+    if (!hasUsableBounds(bounds) ||
+      !AdGeometryRules.isCompactControl(
+        AdGeometryRules.Box(bounds.left, bounds.top, bounds.right, bounds.bottom),
+        AdGeometryRules.Box(snapshot.rootBounds.left, snapshot.rootBounds.top,
+          snapshot.rootBounds.right, snapshot.rootBounds.bottom),
+      )
+    ) return null
+    val w = snapshot.rootBounds.width().coerceAtLeast(1)
+    val h = snapshot.rootBounds.height().coerceAtLeast(1)
+    val localAdContext = snapshot.nodes.any { peer ->
+      peer.isVisible && peer.path != node.path &&
+        VideoAdRules.hasAdEvidence(peer.label, peer.resourceId) &&
+        kotlin.math.abs(peer.bounds.centerX() - bounds.centerX()) <= w * 0.42f &&
+        kotlin.math.abs(peer.bounds.centerY() - bounds.centerY()) <= h * 0.18f
+    }
+    val classifier = VideoAdRules.classify(
+      labels = listOfNotNull(
+        node.node.text?.toString(),
+        node.node.contentDescription?.toString(),
+      ).ifEmpty { listOf(node.label) },
+      resourceId = node.resourceId,
+      nearbyAdEvidence = localAdContext,
+      atRightEdge = bounds.centerX() >= snapshot.rootBounds.left + w * 0.65f,
+    )
+    if (classifier == VideoAdRules.Action.NONE) return null
+    val explicit = classifier == VideoAdRules.Action.EXPLICIT_SKIP ||
+      classifier == VideoAdRules.Action.EXPLICIT_CLOSE
+    return DetectionAction(
+      target = target,
+      targetBounds = bounds,
+      score = if (explicit) 175 else 128,
+      minimumScore = if (explicit) 140 else 116,
+      actionPriority = 2,
+      ruleId = when (classifier) {
+        VideoAdRules.Action.EXPLICIT_SKIP -> "builtin.video.ad-skip"
+        VideoAdRules.Action.EXPLICIT_CLOSE -> "builtin.video.ad-close"
+        VideoAdRules.Action.CONTEXTUAL_SKIP -> "builtin.video.contextual-skip"
+        else -> return null
+      },
+      label = node.label.take(MAX_LOG_LABEL_LENGTH),
+      successText = "已执行视频广告操作",
+      category = DetectionCategory.SPLASH_VIDEO,
+    )
   }
 
   private fun findSkipCandidate(

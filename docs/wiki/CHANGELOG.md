@@ -4,6 +4,14 @@
 
 ## 2026-10-13
 
+### 2026-10-13 16:57:12 +08:00 — 汇入远端 main 的其他 Agent 改动并完成联合验证
+
+- 将远端 `origin/main` 合并到 `accessibility-diagnostics`，纳入此前集成的通用广告语义/几何判断、视频广告专用规则、闹钟/计时器保护、GitHub Android 回归工作流及配套测试/文档；与本地 Android 隐私合规、iOS/Safari、HarmonyOS 试验及 Wiki 改动共同保留。
+- 合并无冲突。当前仓库仅有一个 Git worktree；本任务没有发现其他 ClearScreen 活跃任务或额外挂载工作区。工作区未发现凭据格式匹配项。
+- 验证：`npx tsc --noEmit` 通过；`npm run test:safari` 6 项通过；`android/gradlew.bat :app:testReleaseUnitTest` 通过；Harmony 试验 `npm run typecheck` 与 Jest 1 项通过；`git diff --cached --check` 通过。
+- 尚未执行 Release APK 构建、HAP 构建或 Android/HarmonyOS 真机验收；本次仅整合提交并推送 Git。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/AdGeometryRules.kt`、`AdSemanticRules.kt`、`ProtectedUiPolicy.kt`、`VideoAdRules.kt`、`ClearScreenAccessibilityService.kt`、`android/app/src/test/java/com/clearscreen/prototype/backend/`、`.github/workflows/android-recognition.yml`、`docs/AD_DETECTION_ARCHITECTURE.md`、`docs/AD_DETECTION_V2_TEST_PLAN.md`、`docs/VIDEO_AD_SUPPORT.md`、`docs/wiki/CHANGELOG.md`。
+
 ### 2026-10-13 16:50:29 +08:00 — 完成纯 RNOH 共享界面隔离试验的打包验证
 
 - 新建 `targets/harmony-bare-pilot/`，以 RNOH 官方 `0.84-main` 模板为工程骨架（上游提交 `f1ed468c5427ca92fcd4d0b79c0073cd3fad3b11`；React Native/RNOH `0.84.1`），并保留 MIT 许可文本与来源说明。

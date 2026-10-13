@@ -1,13 +1,6 @@
 name: Android recognition regression
 
 on:
-  push:
-    branches:
-      - feature/ad-detection-v2
-    paths:
-      - 'android/**'
-      - 'package.json'
-      - '.github/workflows/android-recognition.yml'
   pull_request:
     paths:
       - 'android/**'

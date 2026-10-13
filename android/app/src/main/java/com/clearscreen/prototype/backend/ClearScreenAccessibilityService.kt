@@ -36,6 +36,7 @@ import java.util.concurrent.TimeUnit
  */
 class ClearScreenAccessibilityService : AccessibilityService() {
   private lateinit var store: ClearScreenStore
+  private val privacyConsentStore by lazy { ClearScreenPrivacyConsentStore(this) }
   private val handler = Handler(Looper.getMainLooper())
   // ML Kit may dispatch completion callbacks after the service is destroyed.
   // Keep this daemon worker alive long enough to drain them, then let it time out.
@@ -65,10 +66,10 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   private var ocrScreenshotPending = false
   private var ocrSignatureRetryPending = false
   private var serviceDestroyed = false
+  private var privacyPaused = false
 
   override fun onServiceConnected() {
     super.onServiceConnected()
-    store = ClearScreenStore(this)
     serviceDestroyed = false
     running = true
     Log.i(
@@ -76,11 +77,13 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       "onServiceConnected component=${ComponentName(this, ClearScreenAccessibilityService::class.java).flattenToString()} " +
         "pid=${Process.myPid()}",
     )
-    handler.postDelayed({ scanCurrentForegroundPackage() }, INITIAL_FOREGROUND_SCAN_DELAY_MS)
+    if (ensureConsentAndStore()) {
+      handler.postDelayed({ scanCurrentForegroundPackage() }, INITIAL_FOREGROUND_SCAN_DELAY_MS)
+    }
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-    if (event == null || !::store.isInitialized || !store.isMasterEnabled()) return
+    if (event == null || !ensureConsentAndStore() || !store.isMasterEnabled()) return
     val packageName = event.packageName?.toString()?.takeIf { it.isNotBlank() } ?: return
     if (mediaWatch != null && !isCurrentForegroundPackage(mediaWatch!!.packageName)) {
       stopMediaWatch()
@@ -130,7 +133,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   }
 
   private fun scanCurrentForegroundPackage() {
-    if (serviceDestroyed || !::store.isInitialized || !store.isMasterEnabled()) return
+    if (serviceDestroyed || !ensureConsentAndStore() || !store.isMasterEnabled()) return
     val packageName = rootInActiveWindow?.packageName?.toString()
       ?.takeIf(::isEligibleForegroundPackage)
       ?: return
@@ -143,7 +146,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   }
 
   private fun tryHandlePackage(packageName: String, ocrFrame: OcrFrame? = null): Boolean {
-    if (serviceDestroyed || !::store.isInitialized || !store.isMasterEnabled()) return false
+    if (serviceDestroyed || !ensureConsentAndStore() || !store.isMasterEnabled()) return false
     if (!isEligibleForegroundPackage(packageName)) return false
     val rule = store.getAppRule(packageName)
     if (!rule.skipEnabled || rule.whitelist) return false
@@ -182,7 +185,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     // the same target shortly afterwards so a stale/non-operational node does
     // not inflate the success counter.
     handler.postDelayed({
-      if (!::store.isInitialized || !store.isMasterEnabled()) return@postDelayed
+      if (!ensureConsentAndStore() || !store.isMasterEnabled()) return@postDelayed
       if (!isEligibleForegroundPackage(packageName)) {
         appendActionEvent(packageName, action, "failed", "前台已切换，关闭结果未确认")
         return@postDelayed
@@ -200,7 +203,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         appendActionEvent(packageName, action, "success", action.successText)
         if (action.category == DetectionCategory.FEED) {
           handler.postDelayed({
-            if (!::store.isInitialized || !store.isMasterEnabled() ||
+            if (!ensureConsentAndStore() || !store.isMasterEnabled() ||
               !isCurrentForegroundPackage(packageName)
             ) return@postDelayed
             if (!tryHandlePackage(packageName)) requestOcrScan(packageName)
@@ -224,7 +227,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       !AdDecisionPolicy.isProtectedPackage(packageName) && isCurrentForegroundPackage(packageName)
 
   private fun maybeStartMediaWatch(packageName: String, eventType: Int) {
-    if (!store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true) ||
+    if (!ensureConsentAndStore() || !store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true) ||
       !isEligibleForegroundPackage(packageName) || mediaWatch?.packageName == packageName
     ) return
     val root = findRootForPackage(packageName) ?: return
@@ -250,7 +253,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   private fun pollMediaWatch() {
     val watch = mediaWatch ?: return
     val now = System.currentTimeMillis()
-    if (serviceDestroyed || !::store.isInitialized || !store.isMasterEnabled() ||
+    if (serviceDestroyed || !ensureConsentAndStore() || !store.isMasterEnabled() ||
       !store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true) ||
       !isEligibleForegroundPackage(watch.packageName) ||
       !store.getAppRule(watch.packageName).let { it.skipEnabled && !it.whitelist } ||
@@ -297,7 +300,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     }
 
   private fun requestOcrScan(packageName: String, retryOnSignatureMismatch: Boolean = true) {
-    if (serviceDestroyed || Build.VERSION.SDK_INT < Build.VERSION_CODES.R || ocrScreenshotPending) return
+    if (serviceDestroyed || !ensureConsentAndStore() || Build.VERSION.SDK_INT < Build.VERSION_CODES.R || ocrScreenshotPending) return
     if (!isEligibleForegroundPackage(packageName)) return
     if (ocrSignatureRetryPending && retryOnSignatureMismatch) return
     if (!store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true) &&
@@ -322,6 +325,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         object : TakeScreenshotCallback {
           override fun onSuccess(screenshot: ScreenshotResult) {
             val hardwareBuffer = screenshot.hardwareBuffer
+            if (!privacyConsentStore.hasCurrentConsent()) {
+              hardwareBuffer.close()
+              handler.post { pauseForMissingConsent() }
+              return
+            }
             val hardwareBitmap = runCatching {
               Bitmap.wrapHardwareBuffer(hardwareBuffer, screenshot.colorSpace)
             }.getOrNull()
@@ -350,6 +358,13 @@ class ClearScreenAccessibilityService : AccessibilityService() {
             }
             recognitionTask
               .addOnSuccessListener(ocrExecutor) { recognized ->
+                if (!privacyConsentStore.hasCurrentConsent()) {
+                  handler.post {
+                    ocrScreenshotPending = false
+                    pauseForMissingConsent()
+                  }
+                  return@addOnSuccessListener
+                }
                 val lines = recognized.textBlocks.flatMap { block ->
                   block.lines.mapNotNull { line ->
                     val bounds = line.boundingBox ?: return@mapNotNull null
@@ -375,7 +390,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
                   .toList()
                 handler.post {
                   ocrScreenshotPending = false
-                  if (serviceDestroyed) return@post
+                  if (serviceDestroyed || !ensureConsentAndStore()) return@post
                   if (isCurrentForegroundPackage(packageName) && lines.isNotEmpty()) {
                     val currentSignature = findRootForPackage(packageName)?.let { currentRoot ->
                       AccessibilitySnapshot.capture(currentRoot).signature
@@ -388,7 +403,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
                         ocrSignatureRetryPending = true
                         handler.postDelayed({
                           ocrSignatureRetryPending = false
-                          if (isCurrentForegroundPackage(packageName)) {
+                          if (ensureConsentAndStore() && isCurrentForegroundPackage(packageName)) {
                             requestOcrScan(packageName, retryOnSignatureMismatch = false)
                           }
                         }, OCR_SIGNATURE_RETRY_DELAY_MS)
@@ -427,6 +442,36 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   private fun isCurrentForegroundPackage(packageName: String): Boolean =
     rootInActiveWindow?.packageName?.toString() == packageName
+
+  /**
+   * The system may bind this service before consent, or keep it bound after
+   * consent is withdrawn. Read only the isolated consent record until the
+   * user agrees; do not open the rules/log store or inspect another app's UI.
+   */
+  private fun ensureConsentAndStore(): Boolean {
+    if (!privacyConsentStore.hasCurrentConsent()) {
+      pauseForMissingConsent()
+      return false
+    }
+    privacyPaused = false
+    if (!::store.isInitialized) {
+      store = ClearScreenStore(this).apply { prepareAfterConsent() }
+    }
+    return true
+  }
+
+  private fun pauseForMissingConsent() {
+    if (privacyPaused) return
+    privacyPaused = true
+    handler.removeCallbacksAndMessages(null)
+    scheduledAdRetries.clear()
+    recentActions.clear()
+    stopMediaWatch()
+    observedPlayerPackage = null
+    observedPlayerVisible = false
+    ocrScreenshotPending = false
+    ocrSignatureRetryPending = false
+  }
 
   private fun mapOcrBounds(bounds: Rect, imageWidth: Int, imageHeight: Int, rootBounds: Rect): Rect {
     val width = imageWidth.coerceAtLeast(1)

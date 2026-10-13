@@ -1,0 +1,22 @@
+// 由 expo-harmony 生成：entry 模块 build-profile。
+{
+  "apiType": "stageMode",
+  "buildOption": {},
+  "buildOptionSet": [
+    {
+      "name": "release",
+      "arkOptions": {
+        "obfuscation": {
+          "ruleOptions": {
+            "enable": false,
+            "files": ["./obfuscation-rules.txt"]
+          }
+        }
+      }
+    }
+  ],
+  "targets": [
+    { "name": "default" },
+    { "name": "ohosTest" }
+  ]
+}

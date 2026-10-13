@@ -1,6 +1,6 @@
 # 净屏
 
-高保真 React Native + Expo 前端原型，当前以 **Android** 为目标平台。仓库同时保留早期 Hatchable Web 原型在 `public/` 目录。
+React Native + Expo 应用，Android 通过无障碍服务处理用户授权的应用界面；iOS 复用 React Native 界面，并通过 Safari Web Extension 处理用户授权的网站。仓库同时保留早期 Hatchable Web 原型在 `public/` 目录。
 
 ## 应用命名与打包约定
 
@@ -21,7 +21,11 @@
 ## 当前状态
 
 - Android 前端高保真 UI 已实现
-- iOS / HarmonyOS 暂不开发
+- iOS 共用 React Native 视觉组件；Safari 网页扩展为当前已接入能力，系统级广告网址过滤仍未接入
+- iOS 26 的系统 URL Filter 是原生 App 广告处理的目标路线：系统可按网址拦截部分广告资源，但不是识别屏幕或点击关闭；覆盖范围取决于广告资源名单和应用的网络实现
+- 系统 URL Filter 需要 URL Filter 控制扩展、Bloom 预过滤数据、PIR 服务及苹果侧配置/授权；这些条件完成前，iOS 页面不会显示“已开启”，也不会宣称系统级广告已被拦截
+- Safari 扩展仍只作用于 Safari 网页，不读取或点击其他 iPhone App 界面；网页文字和控件只在本机临时检查
+- HarmonyOS 正在做隔离复用验证：[`targets/harmony-bare-pilot`](targets/harmony-bare-pilot/README.md) 已接入主工程共享的首页、应用页和设置页，但只是 RNOH UI 试验；鸿蒙无障碍、后台服务和广告处理尚未实现。本机缺少 DevEco/ohpm/hvigorw/hdc，未构建或安装 HAP。独立 Expo 骨架保留在 [`targets/harmony-pilot`](targets/harmony-pilot/README.md)，Android/iOS 主工程依赖未升级。
 - 不包含账号、会员、订阅或支付
 - 仅接入 AccessibilityService 等本地 Android 能力；不申请、不启动、不接管系统 VPN，首次使用仍需用户在系统设置中授权无障碍
 - 广告识别以避免误关为先：不能只凭 X/叉号、屏幕角落、单个商业词或屏幕其他位置的广告标记点击。广告证据、卡片/弹窗归属和独立的小型可点击关闭控件必须能在同一容器内对应；证据不完整、页面结构变化或点击目标过大时不操作。未知应用需要同时做广告正例和业务页面负例回归；这能降低误点风险，但不能承诺绝对零误点或全覆盖。
@@ -32,15 +36,16 @@
 - 暂停广告和内嵌广告卡片：同一无障碍子树必须有明确“广告/推荐广告”等小徽标和独立的小型关闭节点；一般 X 只能位于卡片右上边缘，底部居中按钮还需明确的“关闭广告”文字或广告关闭资源 ID。只凭图片控件的外观、页面其他位置的广告文字或普通播放器按钮不会点击。普通弹窗也必须有所属广告浮层证据；系统权限/安装确认界面不自动操作。不使用坐标点击、通用 `ACTION_DISMISS` 或 VPN。
 - vivo 等系统如果在返回设置列表后仍把服务改回“已关闭”，还需要在系统设置中允许净屏自启动、后台运行并关闭电池优化；这属于系统对无障碍服务的管控，应用本身不能绕过系统授权。
 - Android 16 对 ADB/本地侧载应用的无障碍可能启用“受限设置”；净屏会读取安装来源并先引导用户尝试系统无障碍页。如果 vivo 没有提供“应用信息 → 允许受限设置”入口，则必须通过 vivo EasyShare 或可信应用商店重新安装，应用自身不能绕过系统校验。
-- 无障碍实现参考了李跳跳 APK 的服务声明形态：服务使用 `exported=false`、`settingsActivity`、通用反馈类型和 Android 12+ 的 `isAccessibilityTool` 配置，并在独立的 `:accessibility` 进程中运行；主界面的 React Native/Expo 进程不会被无障碍服务加载。这不会伪造或绕过系统授权。
+- 无障碍服务当前运行在 Android 应用默认进程中；只有 Android 清单显式配置 `android:process=":accessibility"` 才会改为独立进程。服务只在用户同意当前隐私政策后初始化本地规则并处理其他应用界面，不伪造或绕过系统授权。
 - 为便于与李跳跳的 `targetSdk=33` 做真机 A/B 测试，支持 `cd android; .\\gradlew.bat :app:assembleRelease -PclearscreenTargetSdk=33`。手机单独安装必须使用 `assembleRelease` 生成的 APK；`assembleDebug` 仅用于连接 Metro 调试，未启动 8081 服务时会显示 `Unable to load script`。未传该参数时仍使用当前 Android/Expo 目标 SDK；Android 16 的受限设置最终仍由系统根据安装来源决定。
 
-1.0.18 在 Android 11 及以上增加 APK 内置中文 OCR，与无障碍节点结构和卡片区域结合识别弹窗、信息流/瀑布流广告；当时首页曾提供开屏/视频、弹窗和信息流分类开关。1.0.19 增加 OCR 识别卡片内独立 X 的辅助路径、树变化时的一次性新截图重试，并收紧广告证据的容器归属。1.0.20–1.0.21 增加特定顶部居中开屏广告的 OCR 组合证据及开屏独立 OCR 调度。1.0.23–1.0.24 为彩云天气两种已见样式增加资源 ID、局部结构和文案联合校验；后一种插屏的真机动作归因及安全性尚未验证。1.0.25 增加有时限的视频广告监测、明确徽标和关闭节点同子树的内嵌/暂停广告处理、系统界面保护及误点门槛收紧。1.0.26 增加跨应用的全屏开屏 OCR 证据和局部弹窗容器兜底，以覆盖应用未标注弹窗类型的广告结构。1.0.27 调整底部导航、首页高频控制、应用筛选和排除应用入口。图像只在本机内存识别，不保存、不上传、不使用 VPN。此方案是 OCR 与结构规则融合，不是专用训练模型；Canvas、受保护窗口、强制观看广告或没有可访问关闭节点的广告仍可能漏过，不能承诺零误点或全覆盖。
+1.0.18 在 Android 11 及以上增加 APK 内置中文 OCR，与无障碍节点结构和卡片区域结合识别弹窗、信息流/瀑布流广告；当时首页曾提供开屏/视频、弹窗和信息流分类开关。1.0.19 增加 OCR 识别卡片内独立 X 的辅助路径、树变化时的一次性新截图重试，并收紧广告证据的容器归属。1.0.20–1.0.21 增加特定顶部居中开屏广告的 OCR 组合证据及开屏独立 OCR 调度。1.0.23–1.0.24 为彩云天气两种已见样式增加资源 ID、局部结构和文案联合校验；后一种插屏的真机动作归因及安全性尚未验证。1.0.25 增加有时限的视频广告监测、明确徽标和关闭节点同子树的内嵌/暂停广告处理、系统界面保护及误点门槛收紧。1.0.26 增加跨应用的全屏开屏 OCR 证据和局部弹窗容器兜底，以覆盖应用未标注弹窗类型的广告结构。1.0.27 调整底部导航、首页高频控制、应用筛选和排除应用入口。1.0.28 在首次读取应用列表或其他应用界面前展示隐私政策并取得同意；撤回时停止相关处理并删除本地规则、记录和设置。OCR 图片与识别结果在设备端处理、不保存；Google ML Kit 可能联系 Google 服务器获取组件信息并发送诊断/使用指标，详见[隐私政策](docs/wiki/隐私政策.md)。Release 不声明 Android `INTERNET` 权限，但尚未对所有设备的 SDK 网络行为做运行时抓包验证。此方案是 OCR 与结构规则融合，不是专用训练模型；Canvas、受保护窗口、强制观看广告或没有可访问关闭节点的广告仍可能漏过，不能承诺零误点或全覆盖。
 
 ## 项目 Wiki
 
 - [净屏 Wiki](docs/wiki/README.md)：项目架构、无障碍识别边界、vivo 授权、USB 数据线安装、构建和发布检查清单。
 - [修改记录](docs/wiki/CHANGELOG.md)：按中国标准时间倒序记录近期代码和文档变化；AI 每次开始修改前先读最新条目（仓库指引见 `AGENTS.md`）。
+- [隐私政策](docs/wiki/隐私政策.md)与[应用商店合规核查](docs/wiki/应用商店合规核查.md)：应用内告知、公开政策和各平台待办。
 
 ## 无障碍授权诊断构建
 
@@ -65,6 +70,7 @@
 7. 设置
 8. 排除应用
 9. 故障诊断
+10. 首次启动隐私同意与设置中的隐私政策
 
 ## 已实现交互
 
@@ -103,11 +109,23 @@ ClearScreen/
 │  ├─ assets.ts       # 内嵌 Logo / App 图标，便于 GitHub 单仓库同步
 │  ├─ data.ts
 │  └─ theme.ts
+├─ targets/safari/     # iOS Safari Web Extension
+│  └─ assets/          # manifest、网页识别逻辑与扩展开关
 ├─ public/             # 早期 Hatchable Web 交互原型
 ├─ package.json
 ├─ app.json
 └─ tsconfig.json
 ```
+
+### iOS 广告处理
+
+iOS 首页区分“系统广告过滤”和 Safari 扩展。系统广告过滤目前仅显示目标能力和最低版本要求，状态保持“尚未接入”；不会创建空规则或虚假开关。Apple 的 URL Filter API 需要 iOS 26 及以上，系统按 Bloom 过滤器和 PIR 服务匹配网址；它阻止的是已知广告网络请求，不会识别屏幕上的关闭按钮。仅使用非 WebKit/非 `URLSession` 网络接口的 App 不会自动进入该过滤路径。过滤准确率取决于经过验证的广告网址数据，且不能覆盖所有广告。
+
+开始正式实现前，需要完成控制扩展与主 App 的原生集成、Bloom 数据生成、PIR 服务与认证、CloudKit Identity & Trust 配置、Network Extension entitlement/签名，并按苹果要求申请 OHTTP Relay 服务资格。尚未配置 PIR 数据服务、苹果授权或 Xcode 签名时，不得将该状态标作已启用。官方资料：[URL filters](https://developer.apple.com/documentation/networkextension/url-filters)、[Filtering traffic by URL](https://developer.apple.com/documentation/NetworkExtension/filtering-traffic-by-url)、[WWDC25 NetworkExtension](https://developer.apple.com/videos/play/wwdc2025/234/)。
+
+### Safari 网页扩展
+
+Safari 页面识别只在用户启用扩展、打开扩展过滤开关并授予相应网站访问权限后运行。仅对同一广告区域中有明确广告标记的“跳过/关闭”控件执行点击；普通关闭、取消、下载和购买按钮不会作为广告动作。图片/Canvas广告、嵌入框架中的广告、没有明确可点击按钮的广告，以及网页结构不兼容的页面可能无法处理；这不是完整的网页广告拦截器。iOS 构建需要 macOS、Xcode 和 Apple 签名配置；当前 Windows 环境只能验证共享 TypeScript、扩展脚本和 Expo 配置，不能代替 Xcode 构建及 iPhone Safari 真机验收。
 
 ## 视觉
 

@@ -1,0 +1,7 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "ClearScreen module" },
+    { "name": "EntryAbility_desc", "value": "ClearScreen" },
+    { "name": "EntryAbility_label", "value": "ClearScreen" }
+  ]
+}

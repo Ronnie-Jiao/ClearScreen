@@ -1,0 +1,44 @@
+{
+  "generatedAt": "2026-10-13T08:24:04.070Z",
+  "toolVersion": "0.1.1",
+  "checks": [
+    {
+      "id": "env.node",
+      "title": "Node.js v24.18.0",
+      "severity": "pass"
+    },
+    {
+      "id": "env.pkg-manager",
+      "title": "包管理器 npm",
+      "severity": "pass"
+    },
+    {
+      "id": "env.ohpm",
+      "title": "ohpm 未找到",
+      "severity": "error",
+      "hint": "安装 DevEco Studio 并把 ohpm/bin 加入 PATH（或设置 DEVECO_HOME）"
+    },
+    {
+      "id": "env.deveco",
+      "title": "DevEco Studio 未找到",
+      "severity": "warn",
+      "hint": "构建/运行 HAP 需要 DevEco Studio（含 HarmonyOS SDK）；可设置 DEVECO_HOME"
+    },
+    {
+      "id": "env.hvigor",
+      "title": "hvigorw 未找到（可用工程内 harmony/hvigorw）",
+      "severity": "warn",
+      "hint": "构建 HAP 需要 Hvigor；工程内 harmony/ 目录会生成本地 hvigorw"
+    },
+    {
+      "id": "env.hdc",
+      "title": "hdc 未找到（真机/模拟器调试用）",
+      "severity": "warn",
+      "hint": "设置 HDC_PATH 或安装 HarmonyOS SDK toolchains"
+    }
+  ],
+  "env": {
+    "nodeVersion": "v24.18.0",
+    "packageManager": "npm"
+  }
+}

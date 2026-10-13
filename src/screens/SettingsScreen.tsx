@@ -8,7 +8,7 @@ type MainTab='home'|'apps'|'settings';
 type PermissionState={skip:boolean;skipRunning:boolean;bg:boolean;isVivoFamily?:boolean};
 const RETENTION_OPTIONS:[number,string][]=[[0,'关闭记录'],[1,'1 天'],[7,'7 天'],[30,'30 天']];
 
-export default function SettingsScreen({logRetentionDays,versionName,permissions,onTab,onPermissions,onBackground,onDiagnostics,onClear,onRetentionChange}:{
+export default function SettingsScreen({logRetentionDays,versionName,permissions,onTab,onPermissions,onBackground,onDiagnostics,onClear,onRetentionChange,onPrivacyPolicy,onWithdrawConsent}:{
  logRetentionDays:number;
  versionName:string;
  permissions:PermissionState;
@@ -18,6 +18,8 @@ export default function SettingsScreen({logRetentionDays,versionName,permissions
  onDiagnostics:()=>void;
  onClear:()=>void;
  onRetentionChange:(days:number)=>void;
+ onPrivacyPolicy:()=>void;
+ onWithdrawConsent:()=>void;
 }){
  const [retentionOpen,setRetentionOpen]=useState(false);
  const skipStatus=permissions.skipRunning?'已连接':permissions.skip?'需要修复':'未开启';
@@ -34,7 +36,9 @@ export default function SettingsScreen({logRetentionDays,versionName,permissions
   <Text style={s.groupTitle}>隐私与数据</Text>
   <Card style={s.group}>
    {row('记录保留周期',RETENTION_OPTIONS.find(([days])=>days===logRetentionDays)?.[1]||'7 天',()=>setRetentionOpen(true))}
-   {row('清空记录',undefined,onClear,true)}
+   {row('清空记录',undefined,onClear)}
+   {row('隐私政策',undefined,onPrivacyPolicy)}
+   {row('撤回隐私同意',undefined,onWithdrawConsent,true)}
   </Card>
   <Text style={s.groupTitle}>关于</Text>
   <Card style={s.group}>{row('版本信息',versionName,undefined,true)}</Card>

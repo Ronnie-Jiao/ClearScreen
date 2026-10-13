@@ -43,10 +43,9 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
-    // The accessibility service runs in a small, independent process. Do not
-    // initialize React Native or Expo there: loading the JS runtime makes the
-    // service needlessly large and allows vivo's task cleaner to remove it
-    // together with the UI process.
+    // If the service is explicitly moved to `:accessibility` in the manifest,
+    // avoid initializing React Native/Expo in that process. The current
+    // manifest keeps the service in the app's default process.
     if (isAccessibilityProcess()) return
 
     DefaultNewArchitectureEntryPoint.releaseLevel = try {

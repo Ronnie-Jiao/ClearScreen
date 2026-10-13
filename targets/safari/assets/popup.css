@@ -1,0 +1,43 @@
+:root {
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  color: #092868;
+  background: #f4fcff;
+}
+
+body {
+  width: 320px;
+  margin: 0;
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+h1 {
+  margin: 0 0 16px;
+  font-size: 22px;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: #fff;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  accent-color: #0b78f2;
+}
+
+#status {
+  margin: 12px 2px 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+

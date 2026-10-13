@@ -11,7 +11,6 @@ type NativeApp = {
   network?: boolean;
   whitelist?: boolean;
   isSystemApp?: boolean;
-  versionName?: string;
 };
 
 type NativeLog = LogItem & { packageName?: string; result?: string; timestamp?: number };
@@ -51,6 +50,8 @@ export type InstallSourceDiagnostics = {
 
 export type BackendSnapshot = {
   backendReady: boolean;
+  privacyConsentAccepted: boolean;
+  privacyPolicyVersion: string;
   onboardingCompleted: boolean;
   masterEnabled: boolean;
   installedAppCount: number;
@@ -87,13 +88,14 @@ function normalizeApp(app: NativeApp): AppItem {
     // The single per-app switch is authoritative: off means excluded.
     whitelist: !Boolean(app.skip),
     isSystemApp: Boolean(app.isSystemApp),
-    versionName: app.versionName,
   };
 }
 
 function fallbackSnapshot(): BackendSnapshot {
   return {
     backendReady: false,
+    privacyConsentAccepted: false,
+    privacyPolicyVersion: '2026-10-13-v1',
     onboardingCompleted: false,
     masterEnabled: false,
     installedAppCount: 0,
@@ -162,6 +164,8 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
   };
   return {
     backendReady: Boolean(raw.backendReady),
+    privacyConsentAccepted: Boolean(raw.privacyConsentAccepted),
+    privacyPolicyVersion: String(raw.privacyPolicyVersion || '2026-10-13-v1'),
     onboardingCompleted: Boolean(raw.onboardingCompleted),
     masterEnabled: Boolean(raw.masterEnabled),
     installedAppCount: Number(raw.installedAppCount || apps.length),
@@ -206,6 +210,16 @@ export const ClearScreenNative = {
   getSnapshot: async (): Promise<BackendSnapshot> => {
     if (!native?.getSnapshot) return fallbackSnapshot();
     return normalizeSnapshot(await native.getSnapshot());
+  },
+  acceptPrivacyPolicy: async (): Promise<BackendSnapshot> => {
+    if (!native?.acceptPrivacyPolicy) {
+      return { ...fallbackSnapshot(), backendReady: true, privacyConsentAccepted: true };
+    }
+    return normalizeSnapshot(await native.acceptPrivacyPolicy());
+  },
+  withdrawPrivacyConsent: async (): Promise<BackendSnapshot> => {
+    if (!native?.withdrawPrivacyConsent) return fallbackSnapshot();
+    return normalizeSnapshot(await native.withdrawPrivacyConsent());
   },
   setOnboardingCompleted: async (completed: boolean) => {
     if (native?.setOnboardingCompleted) await native.setOnboardingCompleted(completed);

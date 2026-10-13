@@ -34,10 +34,6 @@ class ClearScreenStore(context: Context) {
     Context.MODE_PRIVATE or Context.MODE_MULTI_PROCESS,
   )
 
-  init {
-    migrateStorageIfNeeded()
-  }
-
   /**
    * SharedPreferences survives an in-place APK update as long as the package name and
    * signing key stay the same. Keep migrations additive: never call clear() and never
@@ -62,6 +58,16 @@ class ClearScreenStore(context: Context) {
       )
     }
     editor.apply()
+  }
+
+  /** Called only after the user has accepted the current privacy policy. */
+  fun prepareAfterConsent() {
+    migrateStorageIfNeeded()
+  }
+
+  /** Clear all app-owned local data after an explicit withdrawal request. */
+  fun clearUserData(): Boolean = synchronized(lock) {
+    preferences.edit().clear().commit()
   }
 
   fun isOnboardingCompleted(): Boolean =

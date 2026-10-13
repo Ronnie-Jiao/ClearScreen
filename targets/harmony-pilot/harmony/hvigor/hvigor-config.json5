@@ -1,0 +1,10 @@
+// 由 expo-harmony 生成：Hvigor 配置。
+// 依赖留空（与 DevEco Studio 自带工程模板一致）：@ohos/hvigor-ohos-plugin 由 hvigor wrapper
+// 按本机工具链解析，不写死版本（写死某版本可能导致该版本在官方源 repo.harmonyos.com/npm
+// 不存在而 CLI 构建失败）。modelVersion 与本机 DevEco Studio 对齐；
+// 首次用 DevEco 打开时如提示升级请按 IDE 指引处理。
+{
+  "modelVersion": "5.0.0",
+  "dependencies": {
+  }
+}

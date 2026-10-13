@@ -4,6 +4,50 @@
 
 ## 2026-10-13
 
+### 2026-10-13 16:50:29 +08:00 — 完成纯 RNOH 共享界面隔离试验的打包验证
+
+- 新建 `targets/harmony-bare-pilot/`，以 RNOH 官方 `0.84-main` 模板为工程骨架（上游提交 `f1ed468c5427ca92fcd4d0b79c0073cd3fad3b11`；React Native/RNOH `0.84.1`），并保留 MIT 许可文本与来源说明。
+- 鸿蒙试验直接导入现有首页、应用页、设置页、主题、数据和资源；通过试验专属的纯色渐变替代层避免把 Expo 原生模块带入。页面交互只在内存中变化，不接入 Android/iOS 主工程数据。
+- 将主工程 TypeScript 检查排除新的 Harmony 工程，更新项目 README/Wiki 和旧 Expo 试验说明。明确鸿蒙无障碍、后台、应用枚举、隐私存储、广告处理尚未实现；尚无可安装 HAP。
+- 验证：试验 `npm run typecheck` 通过；`npm test -- --runInBand` 1 项通过；Harmony Metro bundle 成功（970,803 字节）并导出 13 个资源文件（402,037 字节）；主工程 `npx tsc --noEmit` 通过；`git diff --check` 通过（仅有仓库既有 LF/CRLF 提示）。
+- 安全审计：`npm audit --omit=dev` 报告 8 项中危、25 项高危、0 项严重；试验依赖未做升级或安全审查，不得作为发布依赖。
+- 未执行 HAP 构建、模拟器/真机运行或签名验证：本机缺少 DevEco Studio、ohpm、hvigorw、hdc 与 HarmonyOS 设备/模拟器环境。
+- 涉及文件：`targets/harmony-bare-pilot/`、`targets/harmony-pilot/README.md`、`tsconfig.json`、`README.md`、`docs/wiki/README.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-13 16:25:35 +08:00 — 建立 HarmonyOS 隔离复用试验并记录工具链阻塞
+
+- 在 `targets/harmony-pilot/` 生成独立 Expo SDK 55 / React Native 0.83.6 / RNOH 0.84.1 工程骨架，并生成 RNOH 注册文件；当前 EntryAbility 仍是静态 ArkUI 壳页，未接入 React Native 宿主或净屏共享页面。若近期找不到兼容的 Expo/RNOH 组合，建议另开纯 React Native/RNOH 隔离试验，不强行改主工程依赖。
+- 依赖安装未通过：npm peer 检查发现 RNOH 0.84.1 要求 React Native 0.84.1，与脚手架声明的 0.83.6 冲突。未使用 `--force` 或 `--legacy-peer-deps` 绕过。现有净屏主工程是 Expo 54 / React Native 0.81.5；未改动 Android/iOS 依赖。
+- `expo-harmony doctor` 报告配置骨架存在，但退出码为失败；`expo-harmony env` 显示本机缺少 DevEco Studio、ohpm、hvigorw 和 hdc。没有构建 HAP、运行模拟器或安装真机。
+- 为隔离原生 Hvigor 文件，主工程 `tsconfig.json` 排除 `targets/harmony-pilot`；README/Wiki 说明当前状态和继续条件。
+- 验证：`expo-harmony create` 和 `prebuild --host-template rnoh` 完成；`npm add expo-linear-gradient@~15.0.0 @expo-harmony/expo-linear-gradient` 因 npm peer 版本冲突失败；`expo-harmony doctor` 1 个失败项；`expo-harmony env` 1 个失败项。主工程 `npx tsc --noEmit` 首次被试验 Hvigor 文件纳入而失败，增加排除项后复验通过；`prebuild --check` 无差异，`git diff --check` 通过（仅有仓库既有的 LF/CRLF 提示）；HAP/真机验证未执行。
+- 涉及文件：`targets/harmony-pilot/`、`tsconfig.json`、`README.md`、`docs/wiki/README.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-13 15:43:10 +08:00 — 明确 iOS 系统网址过滤的开发状态
+
+- iOS 首页新增系统广告过滤状态卡片：iOS 26 以下显示“需要 iOS 26”，iOS 26 及以上显示“尚未接入”；没有增加虚假的开启开关或处理次数。保留原 Safari Web Extension 入口。
+- 新增 iOS URL Filter 版本状态判断；同步更新 README、Wiki 和隐私政策，明确 Apple URL Filter 是基于网址数据拦截部分网络资源，不会识别屏幕或点击广告按钮，并列出 Bloom/PIR、控制扩展、CloudKit 注册、Network Extension entitlement/签名和 OHTTP Relay 资格等未完成前置条件。
+- 验证：`npx tsc --noEmit` 通过；`npm run test:safari` 6 项通过；`npx expo config --type prebuild --json` 通过；`git diff --check` 通过（仅有仓库既有的 LF/CRLF 提示）。未生成或构建 iOS 原生工程：当前环境为 Windows，且没有 Apple Team ID、URL Filter PIR 服务及相应 Apple 配置；未做 Xcode 签名或 iPhone 真机测试。
+- 涉及文件：`src/platform/ios/urlFilter.ts`、`src/screens/IOSSafariScreen.tsx`、`README.md`、`docs/wiki/README.md`、`docs/wiki/隐私政策.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-13 15:18:00 +08:00 — 增加共用界面的 iOS Safari 网页广告处理入口
+
+- iOS 主应用复用现有 React Native 组件，并单独显示 Safari 扩展引导与 iOS 隐私说明；Android 仍使用原有页面和原生无障碍流程。
+- 新增 Safari Web Extension：用户启用扩展、授予网站访问权限并手动打开过滤后，才在 Safari 网页内识别明确的广告跳过/关闭控件；普通关闭、导航、取消、下载和购买不作为处理目标。同一广告区域只处理一次。默认关闭，不上传或保存网页文字、网址和识别结果。
+- 补充 iOS 本地隐私说明、README/Wiki 的平台范围及限制；说明图片/Canvas、嵌入框架和缺少明确按钮的广告可能无法处理，并记录公开隐私政策网页仍须补充 iOS 说明后才能用于商店提交。扩展开关页遵守项目文案约束，不增加按钮旁的功能说明小字。
+- 验证：`npm run test:safari` 通过（6 项）；`npx tsc --noEmit`、扩展脚本 `node --check`、`npx expo config --type prebuild --json` 和 `git diff --check` 通过。iOS 原生工程未能生成/构建：当前环境为 Windows，且尚未提供 Apple Team ID；未进行 Xcode 签名、iPhone 安装或 Safari 真机验证。
+- 涉及文件：`App.tsx`、`app.json`、`package.json`、`package-lock.json`、`README.md`、`src/screens/IOSSafariScreen.tsx`、`src/screens/PrivacyPolicyScreen.tsx`、`targets/safari/expo-target.config.json`、`targets/safari/SafariWebExtensionHandler.swift`、`targets/safari/assets/manifest.json`、`targets/safari/assets/ad-filter-core.js`、`targets/safari/assets/content.js`、`targets/safari/assets/popup.html`、`targets/safari/assets/popup.css`、`targets/safari/assets/popup.js`、`tests/safari-ad-filter.test.cjs`、`docs/wiki/README.md`、`docs/wiki/隐私政策.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-13 12:38:00 +08:00 — 补齐净屏隐私同意、公开政策页与商店合规材料
+
+- Android 1.0.28 首次启动先展示版本化隐私政策；同意前不读取启动器应用列表、系统无障碍状态、旧规则/记录或其他应用界面。无障碍服务每次处理前检查本地同意记录；用户撤回时停止界面处理并清除本机规则、记录和设置，不替用户切换系统无障碍授权。设置增加政策重看与撤回入口。
+- 正式版移除互联网、网络状态、外部存储、悬浮窗、振动和忽略电池优化权限，关闭系统备份；无障碍服务声明不请求手势能力。正式 Release 版本为 `1.0.28` / `versionCode=34`。
+- 按 Google ML Kit 官方披露补充 SDK 可能联系 Google 获取更新/兼容信息及发送性能、使用指标的说明；不再声称“无 INTERNET 权限即可保证 SDK 不会联网”。同步更正无障碍进程说明：当前 Android 清单未设置独立进程。新增小米/荣耀/vivo/OPPO 合规核查与待办；明确平台预审、企业认证、APP 备案和未成年人策略尚未完成。
+- 依负责人确认的公司名称与邮箱，创建并公开发布[净屏隐私政策](https://clearscreen-privacy-policy.buzzyorbit64.chatgpt.site)，网页仓库提交 `a2db22f5bb23fe0ddb476de94c031795502b443a`，Sites 版本 1。公开页面 HTTP 返回 200，核对标题、公司主体和邮箱可访问。
+- 验证：`npx tsc --noEmit`、`:app:testReleaseUnitTest`、`:app:assembleRelease`、`git diff --check` 通过；`aapt dump permissions` 检查最终 APK 仅列出应用自身动态接收器标记权限，没有平台 `uses-permission`；`apksigner verify --print-certs` 验证签名通过。APK SHA-256：`33DAF306898C6477FDEB5CDDC68F4E4A23D1508730C2D99803FBE6F440B39E95`。
+- 涉及文件：`App.tsx`、`README.md`、`app.json`、`android/app/build.gradle`、`android/app/src/debug/AndroidManifest.xml`、`android/app/src/debugOptimized/AndroidManifest.xml`、`android/app/src/main/AndroidManifest.xml`、`android/app/src/main/java/com/clearscreen/prototype/MainApplication.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAccessibilityService.kt`、`ClearScreenNativeModule.kt`、`ClearScreenPrivacyConsentStore.kt`、`ClearScreenStore.kt`、`android/app/src/main/res/xml*/accessibility_service_config.xml`、`android/app/src/lttCompat/res/xml-v31/accessibility_service_config.xml`、`src/native/ClearScreenNative.ts`、`src/privacy.ts`、`src/screens/PrivacyPolicyScreen.tsx`、`src/screens/SettingsScreen.tsx`、`docs/wiki/README.md`、`docs/wiki/隐私政策.md`、`docs/wiki/应用商店合规核查.md`、`docs/wiki/CHANGELOG.md`；公开政策网页源文件位于独立仓库 `C:\develop\ClearScreenPrivacyPolicy`。
+- 未向小米、荣耀、vivo 或 OPPO 提交应用；未在手机上安装/实测首启同意流程。商店控制台、备案和平台分类/预审仍待负责人办理或确认。
+
 ### 2026-10-13 10:02:14 +08:00 — 通过 USB 升级安装净屏 1.0.27
 
 - 使用 Release APK 对 vivo V2502DA（`10AG4M2KGF00527`）执行 `adb install -r`，安装命令返回 `Success`；未卸载应用或主动清除应用数据。

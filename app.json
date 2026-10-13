@@ -2,7 +2,7 @@
   "expo": {
     "name": "净屏",
     "slug": "clearscreen-high-fidelity-ui",
-    "version": "1.0.27",
+    "version": "1.0.28",
     "orientation": "portrait",
     "icon": "./assets/logo.png",
     "userInterfaceStyle": "light",
@@ -13,11 +13,16 @@
     },
     "android": {
       "package": "com.clearscreen.prototype",
-      "versionCode": 33,
+      "versionCode": 34,
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo.png",
         "backgroundColor": "#EAF9FF"
       }
-    }
+    },
+    "ios": {
+      "bundleIdentifier": "com.clearscreen.prototype",
+      "supportsTablet": true
+    },
+    "plugins": ["@bacons/apple-targets"]
   }
 }

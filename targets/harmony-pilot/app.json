@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "ClearScreen",
+    "slug": "clearscreen",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.svg",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "platforms": [
+      "ios",
+      "android",
+      "harmony"
+    ],
+    "plugins": [
+      "@oh-expo/expo-harmony"
+    ],
+    "harmony": {
+      "bundleName": "com.example.clearscreen",
+      "label": "ClearScreen",
+      "icon": "./assets/icon.svg",
+      "versionCode": 1
+    }
+  }
+}

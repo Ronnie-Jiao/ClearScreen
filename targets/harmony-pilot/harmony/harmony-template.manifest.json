@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "templateVersion": "1.0.0",
+  "baselineId": "harmony-shell-0.1.0",
+  "baseline": {
+    "expoSdk": "55",
+    "rnohJs": "@react-native-oh/react-native-harmony@0.84.1",
+    "harmonySdk": {
+      "compatibleSdkVersion": 23,
+      "targetApiVersion": 24
+    }
+  },
+  "directories": [
+    "AppScope",
+    "build-profile.json5",
+    "codelinter.json",
+    "entry",
+    "hvigor",
+    "hvigorfile.ts",
+    "oh-package.json5",
+    "README.md"
+  ],
+  "changelog": [
+    {
+      "version": "1.0.0",
+      "date": "2026-09-06",
+      "changes": [
+        "首版：harmony 工程壳模板（CNG 生成基线）",
+        "AppScope/entry/hvigor 资源拆分，图标 SVG 与权限 reason 资源",
+        "SDK 版本不硬编码（compatibleSdkVersion 23 / targetApiVersion 24 默认，app.json harmony 块可覆盖）",
+        "B5：补 codelinter.json（对照 BlackishGreen33/Expo-Harmony-Toolkit 模板）"
+      ]
+    }
+  ]
+}

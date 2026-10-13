@@ -1,0 +1,37 @@
+// 由 expo-harmony 生成：entry 模块声明。
+// 权限在 app.json 的 harmony.permissions 中声明，prebuild 时写入 requestsPermissions；
+// 每个带 $string 的 reason 会同步生成对应的字符串资源。
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": [
+      "phone",
+      "tablet",
+      "2in1"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:icon",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": ["entity.system.home"],
+            "actions": ["action.system.home"]
+          }
+        ]
+      }
+    ],
+  }
+}

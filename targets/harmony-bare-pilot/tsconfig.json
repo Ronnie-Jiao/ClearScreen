@@ -1,0 +1,18 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-native": ["./node_modules/react-native"],
+      "react-native/*": ["./node_modules/react-native/*"]
+    }
+  },
+  "include": [
+    "App.tsx",
+    "LinearGradientShim.tsx",
+    "types/**/*.d.ts"
+  ],
+  "exclude": ["node_modules", "harmony"]
+}

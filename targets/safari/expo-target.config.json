@@ -1,0 +1,7 @@
+{
+  "type": "safari",
+  "name": "ClearScreenSafari",
+  "displayName": "净屏 Safari 扩展",
+  "bundleIdentifier": "com.clearscreen.prototype.safari",
+  "deploymentTarget": "15.1"
+}

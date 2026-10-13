@@ -1,0 +1,41 @@
+// 由 expo-harmony 生成：工程级 build-profile。
+// 签名：在 DevEco Studio（File > Project Structure > Signing Configs）中生成并勾选自动签名，
+// 或在此手写 signingConfigs 后把 products[].signingConfig 指向它。不要把密钥材料提交进 git。
+// SDK 版本兼容说明（本文件不预填，交给本机工具链解析/首开对齐）：
+//   - DevEco Studio 首次打开本工程时，会按本机 SDK 自动把 compatibleSdkVersion/targetSdkVersion
+//     写入 products[]（并处理 hvigor 迁移提示）；
+//   - 纯 CLI（hvigorw）构建需显式声明 products[].compatibleSdkVersion，取值格式按 API 分级：
+//       API 10–25：字符串 "5.0.0(12)"（HarmonyOS 版本(API) 形式）；
+//       API 26+ ： 字符串 "26.0.0"（纯 SDK 版本形式，API 26 起不接受括号写法）；
+//   - app.json harmony 块中的 compatibleSdkVersion/targetApiVersion（默认
+//     23/24）作为声明口径，供对齐使用。
+{
+  "app": {
+    "signingConfigs": [],
+    "products": [
+      {
+        "name": "default",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      { "name": "debug" },
+      { "name": "release" }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        { "name": "default", "applyToProducts": ["default"] }
+      ]
+    }
+  ]
+}

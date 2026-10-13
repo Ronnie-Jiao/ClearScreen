@@ -30,7 +30,11 @@ import java.util.Locale
 class ClearScreenNativeModule(
   private val reactContext: ReactApplicationContext,
 ) : ReactContextBaseJavaModule(reactContext) {
-  private val store = ClearScreenStore(reactContext)
+  private val storeDelegate = lazy {
+    ClearScreenStore(reactContext).apply { prepareAfterConsent() }
+  }
+  private val store by storeDelegate
+  private val privacyConsentStore by lazy { ClearScreenPrivacyConsentStore(reactContext) }
   private val executor = Executors.newSingleThreadExecutor()
 
   override fun getName(): String = "ClearScreenBackend"
@@ -42,14 +46,35 @@ class ClearScreenNativeModule(
 
   @ReactMethod
   fun setOnboardingCompleted(completed: Boolean, promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
     store.setOnboardingCompleted(completed)
     true
   }
 
   @ReactMethod
   fun setMasterEnabled(enabled: Boolean, promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
     store.setMasterEnabled(enabled)
     snapshot()
+  }
+
+  @ReactMethod
+  fun acceptPrivacyPolicy(promise: Promise) = runAsync(promise) {
+    privacyConsentStore.acceptCurrentPolicy()
+    store.prepareAfterConsent()
+    snapshot()
+  }
+
+  @ReactMethod
+  fun withdrawPrivacyConsent(promise: Promise) = runAsync(promise) {
+    privacyConsentStore.withdrawConsent()
+    val cleared = if (storeDelegate.isInitialized()) {
+      store.clearUserData()
+    } else {
+      ClearScreenStore(reactContext).clearUserData()
+    }
+    check(cleared) { "Unable to clear local app data" }
+    privacySnapshot()
   }
 
   @ReactMethod
@@ -60,12 +85,14 @@ class ClearScreenNativeModule(
     whitelist: Boolean,
     promise: Promise,
   ) = runAsync(promise) {
+    requirePrivacyConsent()
     store.setAppRule(packageName, AppRuleState(skipEnabled, networkBlockEnabled, whitelist))
     true
   }
 
   @ReactMethod
   fun setSetting(key: String, enabled: Boolean, promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
     val knownKey = when (key) {
       "startup" -> ClearScreenStore.KEY_STARTUP
       "autoUpdate" -> ClearScreenStore.KEY_AUTO_UPDATE
@@ -81,12 +108,14 @@ class ClearScreenNativeModule(
 
   @ReactMethod
   fun setLogRetentionDays(days: Int, promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
     store.setLogRetentionDays(days)
     snapshot()
   }
 
   @ReactMethod
   fun clearLogs(promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
     store.clearEvents()
     snapshot()
   }
@@ -120,6 +149,7 @@ class ClearScreenNativeModule(
 
   @ReactMethod
   fun confirmVendorStartupGuide(promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
     // This is an acknowledgement of the guided check, not a fabricated claim
     // that Android exposed the OEM switch to us.
     store.setVendorStartupGuideConfirmed(true)
@@ -132,6 +162,7 @@ class ClearScreenNativeModule(
   }
 
   private fun snapshot(): WritableMap {
+    if (!privacyConsentStore.hasCurrentConsent()) return privacySnapshot()
     val map = Arguments.createMap()
     val apps = Arguments.createArray()
     installedApps().forEach { app -> apps.pushMap(app) }
@@ -165,6 +196,8 @@ class ClearScreenNativeModule(
       reactContext.packageManager.getPackageInfo(reactContext.packageName, 0).versionName
     }.getOrNull() ?: "unknown"
     map.putBoolean("backendReady", true)
+    map.putBoolean("privacyConsentAccepted", true)
+    map.putString("privacyPolicyVersion", ClearScreenPrivacyConsentStore.POLICY_VERSION)
     map.putString("versionName", versionName)
     map.putBoolean("onboardingCompleted", store.isOnboardingCompleted())
     map.putBoolean("masterEnabled", store.isMasterEnabled())
@@ -192,6 +225,59 @@ class ClearScreenNativeModule(
     map.putMap("settings", settings)
     map.putMap("installSource", installSourceDiagnostics())
     return map
+  }
+
+  /** No app inventory, old preferences, device diagnostics, or system permission state is read here. */
+  private fun privacySnapshot(): WritableMap = Arguments.createMap().apply {
+    putBoolean("backendReady", true)
+    putBoolean("privacyConsentAccepted", false)
+    putString("privacyPolicyVersion", ClearScreenPrivacyConsentStore.POLICY_VERSION)
+    putString("versionName", "unknown")
+    putBoolean("onboardingCompleted", false)
+    putBoolean("masterEnabled", false)
+    putInt("installedAppCount", 0)
+    putInt("todaySkipCount", 0)
+    putInt("todayNetworkCount", 0)
+    putBoolean("accessibilityEnabled", false)
+    putBoolean("accessibilityRunning", false)
+    putBoolean("accessibilitySettingEnabled", false)
+    putBoolean("accessibilityServiceBound", false)
+    putBoolean("accessibilityProcessAlive", false)
+    putString("accessibilityStoredServices", "")
+    putBoolean("vpnPrepared", false)
+    putBoolean("vpnRunning", false)
+    putBoolean("batteryOptimizationIgnored", false)
+    putBoolean("isVivoFamily", false)
+    putBoolean("vendorStartupSettingsAvailable", false)
+    putBoolean("vendorStartupGuideConfirmed", false)
+    putString("deviceManufacturer", "unknown")
+    putArray("apps", Arguments.createArray())
+    putArray("logs", Arguments.createArray())
+    putMap("settings", Arguments.createMap().apply {
+      putBoolean("startup", true)
+      putBoolean("autoUpdate", true)
+      putBoolean("debug", false)
+      putBoolean("skipSplashVideo", true)
+      putBoolean("closePopupAds", true)
+      putBoolean("closeFeedAds", true)
+      putInt("logRetentionDays", ClearScreenStore.DEFAULT_LOG_RETENTION_DAYS)
+    })
+    putMap("installSource", Arguments.createMap().apply {
+      putNull("installingPackageName")
+      putNull("initiatingPackageName")
+      putNull("originatingPackageName")
+      putInt("packageSource", -1)
+      putString("packageSourceLabel", "unknown")
+      putBoolean("adbInstallLikely", false)
+      putBoolean("restrictedSettingsLikely", false)
+      putDouble("firstInstallTime", 0.0)
+      putDouble("lastUpdateTime", 0.0)
+      putNull("signingCertificateSha256")
+    })
+  }
+
+  private fun requirePrivacyConsent() {
+    check(privacyConsentStore.hasCurrentConsent()) { "Privacy policy consent is required" }
   }
 
   private fun installSourceDiagnostics(): WritableMap {
@@ -287,9 +373,6 @@ class ClearScreenNativeModule(
     return packages.map { info ->
       val packageName = info.packageName
       val rule = store.getAppRule(packageName)
-      val versionName = runCatching {
-        packageManager.getPackageInfo(packageName, 0).versionName ?: ""
-      }.getOrDefault("")
       Arguments.createMap().apply {
         putString("id", packageName)
         putString("packageName", packageName)
@@ -299,8 +382,6 @@ class ClearScreenNativeModule(
         putBoolean("network", rule.networkBlockEnabled)
         putBoolean("whitelist", rule.whitelist)
         putBoolean("isSystemApp", info.flags and ApplicationInfo.FLAG_SYSTEM != 0)
-        putString("versionName", versionName)
-        putDouble("lastUpdateTime", packageManager.getPackageInfo(packageName, 0).lastUpdateTime.toDouble())
       }
     }
   }

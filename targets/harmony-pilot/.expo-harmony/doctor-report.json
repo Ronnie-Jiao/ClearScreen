@@ -1,0 +1,157 @@
+{
+  "generatedAt": "2026-10-13T08:24:02.319Z",
+  "toolVersion": "0.1.1",
+  "projectRoot": "C:\\develop\\ClearScreen\\targets\\harmony-pilot",
+  "baseline": {
+    "expoSdk": "55",
+    "rnohJs": "@react-native-oh/react-native-harmony@0.84.1"
+  },
+  "exitSummary": {
+    "errors": 1,
+    "warnings": 5
+  },
+  "runtimeMode": "host-wired",
+  "gapCategory": "deps-gap",
+  "coverageProfile": {
+    "verified": [],
+    "preview": [
+      "expo-status-bar"
+    ],
+    "experimental": [
+      "expo"
+    ],
+    "unsupported": []
+  },
+  "capabilities": [
+    {
+      "name": "expo",
+      "tier": "experimental",
+      "kind": "unsupported",
+      "upstream": "none",
+      "severity": "warn",
+      "note": "未收录的 Expo 包：评估是否纯 JS；含原生模块需自行适配或等待上游移植（doctor --strict 会按阻塞处理）"
+    },
+    {
+      "name": "expo-status-bar",
+      "tier": "preview",
+      "kind": "native",
+      "adapter": "@expo-harmony/expo-status-bar",
+      "upstream": "expo-harmony",
+      "severity": "warn",
+      "note": "安装适配包 @expo-harmony/expo-status-bar（原生注册随 install/sync 自动维护）"
+    }
+  ],
+  "checks": [
+    {
+      "id": "env.node",
+      "title": "Node.js v24.18.0",
+      "severity": "pass"
+    },
+    {
+      "id": "env.pkg-manager",
+      "title": "包管理器 npm",
+      "severity": "pass"
+    },
+    {
+      "id": "env.ohpm",
+      "title": "ohpm 未找到",
+      "severity": "error",
+      "hint": "安装 DevEco Studio 并把 ohpm/bin 加入 PATH（或设置 DEVECO_HOME）"
+    },
+    {
+      "id": "env.deveco",
+      "title": "DevEco Studio 未找到",
+      "severity": "warn",
+      "hint": "构建/运行 HAP 需要 DevEco Studio（含 HarmonyOS SDK）；可设置 DEVECO_HOME"
+    },
+    {
+      "id": "env.hvigor",
+      "title": "hvigorw 未找到（可用工程内 harmony/hvigorw）",
+      "severity": "warn",
+      "hint": "构建 HAP 需要 Hvigor；工程内 harmony/ 目录会生成本地 hvigorw"
+    },
+    {
+      "id": "env.hdc",
+      "title": "hdc 未找到（真机/模拟器调试用）",
+      "severity": "warn",
+      "hint": "设置 HDC_PATH 或安装 HarmonyOS SDK toolchains"
+    },
+    {
+      "id": "proj.platforms",
+      "title": "platforms 含 harmony",
+      "severity": "pass",
+      "detail": "ios, android, harmony"
+    },
+    {
+      "id": "proj.plugin",
+      "title": "plugins 注册 expo-harmony（config-plugin）",
+      "severity": "pass"
+    },
+    {
+      "id": "proj.bundle-name",
+      "title": "harmony.bundleName 已配置",
+      "severity": "pass",
+      "detail": "com.example.clearscreen"
+    },
+    {
+      "id": "deps.react-native",
+      "title": "react-native（iOS/Android 侧）",
+      "severity": "pass",
+      "detail": "0.83.6"
+    },
+    {
+      "id": "deps.rnoh-js",
+      "title": "@react-native-oh/react-native-harmony（RNOH JS 运行时）",
+      "severity": "pass",
+      "detail": "0.84.1"
+    },
+    {
+      "id": "deps.react-harmony",
+      "title": "react-harmony alias（react@19.2.3，双 React 共存）",
+      "severity": "pass",
+      "detail": "npm:react@19.2.3"
+    },
+    {
+      "id": "proj.template-manifest",
+      "title": "模板 manifest 与基线一致（harmony-template.manifest.json）",
+      "severity": "pass",
+      "detail": "templateVersion=1.0.0（baselineId=harmony-shell-0.1.0）"
+    },
+    {
+      "id": "native.harmony-dir",
+      "title": "harmony/ 原生工程",
+      "severity": "pass",
+      "detail": "(已生成)"
+    },
+    {
+      "id": "native.rnoh-host",
+      "title": "RNOH 宿主注册文件（RNOHPackagesFactory.ets）",
+      "severity": "info",
+      "detail": "(已生成)"
+    },
+    {
+      "id": "native.managed-state",
+      "title": ".expo-harmony 受管状态",
+      "severity": "pass",
+      "detail": "(已建立)"
+    }
+  ],
+  "nextActions": [
+    "安装适配包：expo-harmony install expo-status-bar",
+    "运行 expo-harmony doctor --strict 作为 CI gate（退出码 0/1/2）"
+  ],
+  "evidence": {
+    "bundle": {
+      "status": "none"
+    },
+    "debugBuild": {
+      "status": "none"
+    },
+    "device": {
+      "status": "none"
+    },
+    "release": {
+      "status": "none"
+    }
+  }
+}

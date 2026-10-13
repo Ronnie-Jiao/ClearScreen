@@ -1,0 +1,11 @@
+// 由 expo-harmony 生成：AppScope 应用级配置。
+{
+  "app": {
+    "bundleName": "com.example.clearscreen",
+    "vendor": "expo-harmony",
+    "versionCode": 1,
+    "versionName": "1.0.0",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name"
+  }
+}

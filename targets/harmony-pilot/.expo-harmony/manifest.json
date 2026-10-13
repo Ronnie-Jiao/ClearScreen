@@ -1,0 +1,17 @@
+{
+  "toolVersion": "0.1.1",
+  "baselineId": "harmony-shell-0.1.0",
+  "projectName": "clearscreen",
+  "appLabel": "ClearScreen",
+  "bundleName": "com.example.clearscreen",
+  "generatedAt": "2026-10-13T08:19:50.787Z",
+  "rnohHost": true,
+  "hostTemplate": "rnoh",
+  "managedFiles": [
+    "harmony/entry/src/main/ets/RNOHPackagesFactory.ets",
+    "harmony/entry/src/main/cpp/RNOHPackagesFactory.h",
+    "harmony/entry/src/main/cpp/autolinking.cmake"
+  ],
+  "treeFileCount": 25,
+  "protectedFiles": []
+}

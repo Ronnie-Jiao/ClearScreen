@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "净屏 Safari 扩展",
+  "version": "1.0.0",
+  "description": "跳过或关闭 Safari 网页中明确标记的广告。",
+  "permissions": ["storage"],
+  "browser_action": {
+    "default_title": "净屏",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["ad-filter-core.js", "content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

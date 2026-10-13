@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, StyleSheet, View } from 'react-native';
+import { Alert, AppState, BackHandler, Platform, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import SplashScreen from './src/screens/SplashScreen';
 import WelcomeScreen from './src/screens/WelcomeScreen';
@@ -12,12 +12,14 @@ import SettingsScreen from './src/screens/SettingsScreen';
 import WhitelistScreen from './src/screens/WhitelistScreen';
 import RecordDetailScreen from './src/screens/RecordDetailScreen';
 import DiagnosticsScreen from './src/screens/DiagnosticsScreen';
+import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
+import IOSSafariScreen from './src/screens/IOSSafariScreen';
 import { AppItem, LogItem } from './src/data';
 import { BackendSnapshot, ClearScreenNative } from './src/native/ClearScreenNative';
 
 const UI_SCALE = .84;
 
-type Page='splash'|'welcome'|'permissions'|'home'|'apps'|'appDetail'|'records'|'recordDetail'|'settings'|'whitelist'|'diagnostics';
+type Page='splash'|'privacyConsent'|'privacyPolicy'|'welcome'|'permissions'|'home'|'apps'|'appDetail'|'records'|'recordDetail'|'settings'|'whitelist'|'diagnostics';
 type MainTab='home'|'apps'|'settings';
 type AccessibilityHandoff='accessibility'|'appInfo'|'background'|null;
 type RecordsQuery={appId?:string;todayOnly?:boolean};
@@ -75,18 +77,21 @@ export default function App(){
  },[openAccessibilitySettings,openAppDetailsSettings]);
  useEffect(()=>{
    let alive=true;
-   refresh().then(snapshot=>{if(alive)setTimeout(()=>alive&&setPage(snapshot?.onboardingCompleted?'home':'welcome'),500)});
+   refresh().then(snapshot=>{if(alive)setTimeout(()=>alive&&setPage(Platform.OS==='ios'?'home':snapshot?.privacyConsentAccepted?(snapshot.onboardingCompleted?'home':'welcome'):'privacyConsent'),500)});
    const subscription=AppState.addEventListener('change',state=>{
      if(state!=='active')return;
      const handoff=accessibilityHandoff.current;
      accessibilityHandoff.current=null;
      if(handoff!=='accessibility'){
-       refresh();
+       void refresh().then(latest=>{
+       if(alive&&Platform.OS==='android'&&!latest?.privacyConsentAccepted){setHistory([]);setPage('privacyConsent')}
+       });
        return;
      }
      setAccessibilityChecking(true);
      void (async()=>{
        let latest=await refresh();
+       if(!latest?.privacyConsentAccepted){if(alive){setHistory([]);setPage('privacyConsent');setAccessibilityChecking(false)}return}
        if(latest?.permissions.skip&&!latest.permissions.skipRunning){
          for(const delay of [250,700,1500]){
            await new Promise<void>(resolve=>setTimeout(resolve,delay));
@@ -100,6 +105,40 @@ export default function App(){
    });
    return()=>{alive=false;subscription.remove()};
  },[refresh]);
+ useEffect(()=>{
+   if(page!=='privacyConsent')return;
+   const subscription=BackHandler.addEventListener('hardwareBackPress',()=>{BackHandler.exitApp();return true});
+   return()=>subscription.remove();
+ },[page]);
+ const acceptPrivacyPolicy=useCallback(async()=>{
+   try{
+     const snapshot=await ClearScreenNative.acceptPrivacyPolicy();
+     applySnapshot(snapshot);
+     setHistory([]);
+     setPage(snapshot.onboardingCompleted?'home':'welcome');
+   }catch(error){Alert.alert('保存失败','请重试。')}
+ },[applySnapshot]);
+ const withdrawPrivacyConsent=useCallback(()=>Alert.alert(
+   '撤回隐私同意？',
+   '净屏将停止读取其他应用界面，并删除本机应用规则、处理记录和设置。系统无障碍开关不会由净屏更改。',
+   [
+     {text:'取消',style:'cancel'},
+     {text:'撤回并删除',style:'destructive',onPress:async()=>{
+       try{
+         const snapshot=await ClearScreenNative.withdrawPrivacyConsent();
+         applySnapshot(snapshot);
+         setApps([]);setLogs([]);setSelectedId('');setSelectedLog(null);setRecordsQuery({});setHistory([]);
+         setPage('privacyConsent');
+       }catch(error){
+         const snapshot=await ClearScreenNative.getSnapshot().catch(()=>undefined);
+         if(snapshot&&!snapshot.privacyConsentAccepted){
+           applySnapshot(snapshot);setApps([]);setLogs([]);setSelectedId('');setSelectedLog(null);setHistory([]);setPage('privacyConsent');
+           Alert.alert('同意已撤回','本机数据未能确认清除，请在系统设置中清除净屏数据。');
+         }else Alert.alert('撤回失败','请重试。');
+       }
+     }}
+   ],
+ ),[applySnapshot]);
  const completeOnboarding=useCallback(()=>{
    setOnboardingCompleted(true);
    ClearScreenNative.setOnboardingCompleted(true).catch(error=>console.warn('ClearScreen onboarding update failed',error));
@@ -185,6 +224,8 @@ export default function App(){
    if(snapshot?.permissions.skip&&snapshot.permissions.skipRunning)tab('apps');
    else tab('home');
  }} onLater={()=>{completeOnboarding();tab('home')}} permissions={permissionsProps} onOpenAccessibility={()=>openPermission('skip')} onOpenAppInfo={openAppDetailsSettings} onHelp={()=>Alert.alert('开启方法','在系统设置中找到“净屏”，打开无障碍服务后返回此页。')}/>;
+ else if(page==='privacyConsent')overlay=<PrivacyPolicyScreen mode="consent" onBack={()=>BackHandler.exitApp()} onAccept={()=>{void acceptPrivacyPolicy()}} onDecline={()=>BackHandler.exitApp()}/>;
+ else if(page==='privacyPolicy')overlay=<PrivacyPolicyScreen mode="read" onBack={back}/>;
  else if(page==='appDetail'&&selected)overlay=<AppDetailScreen app={selected} logs={logs} onBack={back} onChange={a=>updateApps(apps.map(x=>x.id===a.id?a:x))} onRecords={()=>goRecords({appId:selected.id})} onOpenRecord={openRecord}/>;
  else if(page==='recordDetail'&&selectedLog){
    const logApp=apps.find(app=>app.id===selectedLog.appId);
@@ -192,9 +233,11 @@ export default function App(){
  }
  else if(page==='whitelist')overlay=<WhitelistScreen apps={apps} onChangeApps={updateApps} onBack={back}/>;
  else if(page==='diagnostics')overlay=<DiagnosticsScreen permissions={permissions} logs={logs} onBack={back} onRepair={()=>go('permissions')}/>;
- const homeScreen=<HomeScreen master={master} onAction={handleHomeAction} checking={accessibilityChecking} onTab={tab} onPermissions={()=>go('permissions')} onRecords={()=>goRecords({todayOnly:true})} onOpenRecord={openRecord} onOpenApp={goApp} apps={apps} logs={logs} today={today} permissions={permissions} enabledAppCount={enabledAppCount}/>;
+ const homeScreen=Platform.OS==='ios'
+   ? <IOSSafariScreen onPrivacyPolicy={()=>go('privacyPolicy')}/>
+   : <HomeScreen master={master} onAction={handleHomeAction} checking={accessibilityChecking} onTab={tab} onPermissions={()=>go('permissions')} onRecords={()=>goRecords({todayOnly:true})} onOpenRecord={openRecord} onOpenApp={goApp} apps={apps} logs={logs} today={today} permissions={permissions} enabledAppCount={enabledAppCount}/>;
  const appsScreen=<AppsScreen apps={apps} onChangeApps={updateApps} onTab={tab} onOpen={goApp} onWhitelist={()=>go('whitelist')}/>;
- const settingsScreen=<SettingsScreen logRetentionDays={settings.logRetentionDays} versionName={versionName} permissions={permissions} onTab={tab} onPermissions={()=>go('permissions')} onBackground={()=>openPermission('bg')} onDiagnostics={()=>go('diagnostics')} onClear={handleClearLogs} onRetentionChange={days=>handleRetentionChange(days).catch(error=>Alert.alert('保存失败',String(error)))}/>;
+ const settingsScreen=<SettingsScreen logRetentionDays={settings.logRetentionDays} versionName={versionName} permissions={permissions} onTab={tab} onPermissions={()=>go('permissions')} onBackground={()=>openPermission('bg')} onDiagnostics={()=>go('diagnostics')} onClear={handleClearLogs} onRetentionChange={days=>handleRetentionChange(days).catch(error=>Alert.alert('保存失败',String(error)))} onPrivacyPolicy={()=>go('privacyPolicy')} onWithdrawConsent={withdrawPrivacyConsent}/>;
  const recordsScreen=<RecordsScreen apps={apps} logs={logs} onBack={back} onOpenRecord={openRecord} filterAppId={recordsQuery.appId} todayOnly={recordsQuery.todayOnly}/>;
  return <><StatusBar hidden={false} style="light" backgroundColor="#8F9498" translucent={false}/><View style={s.viewport}><View style={s.scaledRoot}>
    <View style={[s.screenLayer,{display:page==='home'?'flex':'none'}]}>{homeScreen}</View>

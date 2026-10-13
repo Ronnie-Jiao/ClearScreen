@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "toolVersion": "0.1.1",
+  "baselineId": "harmony-shell-0.1.0",
+  "createdAt": "2026-10-13T08:19:50.785Z",
+  "updatedAt": "2026-10-13T08:19:50.786Z",
+  "files": {
+    "harmony/entry/src/main/ets/RNOHPackagesFactory.ets": {
+      "templateId": "autolink/v1",
+      "sha256": "8f7b248a2fde2569d29de012a905e1b5907c958b9a936a41000afd44e111d5b4"
+    },
+    "harmony/entry/src/main/cpp/RNOHPackagesFactory.h": {
+      "templateId": "autolink/v1",
+      "sha256": "07d0b92f1dcfb423cbe6421b2791b212d8569354d525f8d36186ee69817da537"
+    },
+    "harmony/entry/src/main/cpp/autolinking.cmake": {
+      "templateId": "autolink/v1",
+      "sha256": "74aa52bd2ea4ed42b16d6f9dd86b578b344a2563e6a7fc468923685dbb8ea5d8"
+    }
+  }
+}

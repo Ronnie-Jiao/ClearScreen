@@ -2,7 +2,7 @@
 
 本文档是 `C:\develop\ClearScreen` 的项目 Wiki，记录当前实现、权限边界、构建方式、安装约定和真机验证要求。代码行为发生变化时，应同步更新本页和根目录 `README.md`，并在[修改记录](CHANGELOG.md)追加带时间的条目。每次开始修改项目前，先阅读修改记录最新条目。
 
-最后更新：2026-10-12
+最后更新：2026-10-13
 
 ## 1. 项目定位
 
@@ -14,14 +14,42 @@
 
 净屏不申请、不启动、不接管系统 VPN。网络过滤功能已经停用，用户可以同时使用自己的 VPN 客户端连接国外网络。
 
+### iOS 广告处理
+
+- Android 继续使用现有原生无障碍服务；iOS 主应用复用 React Native 页面基础组件和主题，平台入口按能力分流，不复用 Android 专属权限/应用管理流程。
+- 当前已接入的 iOS 广告处理只有 `targets/safari/` 中的 Safari Web Extension；它仅作用于用户授权的网站，不跨 App 读取屏幕。网页内容仅在设备本地临时检查，不保存网址、页面文字、浏览历史或识别结果，也不上传。
+- iOS 首页显示的“系统广告过滤”目前是目标能力展示，状态为“尚未接入”，不是有效的过滤开关。它不会拦截流量，也不应记作处理次数。
+- 系统级 URL Filter 的目标最低版本为 iOS 26。Apple 说明该能力检查通过 WebKit 和 `URLSession` 发出的 HTTP/HTTPS 网址请求，按完整网址数据集作允许/拦截决定；它不识别屏幕、不点击广告关闭按钮，也不保证覆盖使用其他网络栈的 App。
+- URL Filter 依赖设备端 Bloom 预过滤器和远程 PIR 网址数据库；潜在命中还要由 PIR 查询确认。准确率取决于广告网址数据集的质量，不能承诺所有 App/所有广告都能拦截。过滤数据不支持通配符或正则的默认匹配；需谨慎配置 URL 解析方式。
+- 正式实现前必须补齐原生控制扩展、广告网址数据更新/Bloom 构建、PIR 与 Privacy Pass 服务配置、CloudKit Identity & Trust 注册、Network Extension entitlement/签名及苹果托管 OHTTP Relay 资格。缺任一项都不能将功能标记为“已开启”。
+- Apple 官方资料：[URL filters](https://developer.apple.com/documentation/networkextension/url-filters)、[NEURLFilterManager](https://developer.apple.com/documentation/NetworkExtension/NEURLFilterManager)、[Filtering traffic by URL](https://developer.apple.com/documentation/NetworkExtension/filtering-traffic-by-url)、[WWDC25](https://developer.apple.com/videos/play/wwdc2025/234/)。
+- 识别动作要求按钮文案明确写有广告跳过/关闭，或普通“跳过/关闭”控件与同一局部广告容器、广告标记及尺寸/边缘条件相符。不会点击取消、下载、购买或领取类按钮；不确定时不操作。
+- 图片/Canvas 广告、嵌入框架中的广告、未提供明确可点击按钮的广告，以及网页结构不兼容的页面可能无法识别；Safari 扩展是保守的网页控件自动操作，不是完整的广告拦截器。
+- Safari 扩展使用 `@bacons/apple-targets` 生成 iOS 原生扩展目标。更改 Expo target 配置后须重新 prebuild；iOS 真机构建、签名和 Safari 站点授权必须在 macOS/Xcode 与 iPhone 上完成。Windows 上的脚本/配置测试不代表已构建、签名或真机验收。
+- 本地安全策略测试：`npm run test:safari`。iOS 隐私说明见[隐私政策](隐私政策.md)；公开隐私政策网站在更新并发布该说明前，不应宣称 iOS 版本可提交商店。
+
+### HarmonyOS 隔离复用验证
+
+- 纯 React Native/RNOH 页面复用试验独立放在 [`targets/harmony-bare-pilot`](../../targets/harmony-bare-pilot/README.md)，Expo/RNOH 骨架保留在 [`targets/harmony-pilot`](../../targets/harmony-pilot/README.md)。两个试验都不升级 Android/iOS 主工程依赖。
+- RNOH 试验从官方 `0.84-main` 工程模板取骨架（React Native/RNOH `0.84.1`），直接导入主工程的首页、应用页、设置页、主题和图片资源。Expo 渐变仅在试验内用 React Native `View` 替代；应用开关/记录保留只在内存预览中变化。
+- 试验只验证共享 UI 可接入，鸿蒙无障碍、后台服务、应用枚举、隐私存储和广告处理都未实现；页面未模拟真实授权和运行状态，不能把此目录视为可用或可发布的鸿蒙版。
+- 试验工程 TypeScript 检查、1 项 Jest 和 Harmony Metro bundle 检查通过；但 `npm audit --omit=dev` 当前报告 8 项中危、25 项高危，依赖未经审查升级，不得用于发布。
+- 本机缺少 DevEco Studio、ohpm、hvigorw 和 hdc；尚未构建 HAP、启动模拟器或安装真机。官方 RNOH 开发说明将 DevEco Studio 与 HarmonyOS NEXT 模拟器或真机列为运行验证前提。主工程 TypeScript 检查排除两个独立 Harmony 工程，避免把 Hvigor 文件当作 Android/iOS TypeScript 源码。
+- 下一步安装匹配的 HarmonyOS 开发工具链，构建并真机检查共享 UI；通过后再独立实现 HarmonyOS `AccessibilityExtensionAbility` 并由用户在系统设置授权。普通应用不能代替用户开启系统无障碍服务。参考[HarmonyOS Accessibility Kit](https://developer.huawei.com/consumer/en/doc/harmonyos-guides-V5/accessibilitykit-overview-V5)。
+
 ## 2. 工程结构
 
 - `App.tsx`：React Native/Expo 应用入口、页面导航、总开关和权限引导。
 - `src/screens/`：欢迎页、权限页、首页、应用列表、应用详情、记录详情、设置、排除应用和故障诊断页面。
 - `src/native/ClearScreenNative.ts`：JavaScript 与 Android 原生模块之间的类型和状态适配。
+- `src/screens/IOSSafariScreen.tsx`：复用既有 UI 基础组件的 iOS Safari 扩展引导页。
+- `targets/safari/`：Safari Web Extension target 配置、广告控件判断和 Safari 扩展弹窗开关。
 - `android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenNativeModule.kt`：原生状态、应用规则、无障碍状态和系统设置跳转。
 - `android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAccessibilityService.kt`：无障碍事件监听、广告控件识别和安全点击策略。
 - `android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenStore.kt`：本地设置、应用规则和事件记录。
+- `android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenPrivacyConsentStore.kt`：当前隐私政策版本和同意时间；在用户同意前不打开规则/记录存储。
+- `src/screens/PrivacyPolicyScreen.tsx`、`src/privacy.ts`：首次同意、政策查看与公开政策版本/链接。
+- [隐私政策](隐私政策.md)、[应用商店合规核查](应用商店合规核查.md)：对外处理说明和平台侧未完成事项。
 - `android/app/src/main/res/xml/accessibility_service_config.xml`、`xml-v30/`、`xml-v31/`：无障碍服务声明；Android 11 及以上显式声明本地截图分析能力。
 - `ACCESSIBILITY_PERSISTENCE_REPORT.md`：vivo/Android 无障碍授权保持问题的诊断记录。
 
@@ -34,6 +62,9 @@
 - 应用详情提供该应用的单一启用开关和最近处理记录；记录列表作为二级页面提供全部、已执行和失败筛选及记录详情。
 - 权限页在系统设置返回后复核授权和服务连接；设置页只展示当前可用的权限、后台指引、故障诊断、记录保留、清空记录和版本信息。
 - 外观设置目前不属于可访问的应用页面；未接通或未实现的旧控件不作为已实现功能展示。
+- 首次启动先展示当前隐私政策；同意前不读取启动器应用列表、系统无障碍状态、旧规则/记录或其他应用界面。撤回时先停用本机处理，再删除规则、记录和设置；不替用户更改系统无障碍开关。
+- Android 无障碍服务目前与主界面处于同一默认进程；`MainApplication` 中的独立进程保护仅在清单显式配置进程名时生效。隐私同意使用独立文件，并在服务每次处理前重新核验。
+- Release 清单不声明 Android `INTERNET` 权限；应用内截图与 OCR 结果不保存、不上传。Google ML Kit SDK 官方说明可能联系 Google 服务器获取组件更新/兼容信息并发送性能和使用指标。当前尚未对各设备的 SDK 网络行为进行抓包验证，应用商店披露应按该第三方组件可能处理诊断指标填写。详见[隐私政策](隐私政策.md)。
 
 ## 界面文案约束
 
@@ -79,7 +110,7 @@
 
 ### 3.2 本地截图/OCR 的能力边界
 
-- 1.0.18 起使用 APK 内置的中文 OCR 模型；Android 11 及以上通过无障碍截图在本机内存中分析文字，不保存截图、不上传数据、不调用 VPN 或云端识别。1.0.19–1.0.24 加入卡片内 OCR X、顶部居中广告文案、彩云天气两类已取证插屏的局部证据。1.0.25 把可点击节点、广告徽标和卡片归属按准确的无障碍子树关联，收紧泛用 X 与 `jump` 的误点条件；在明确播放器场景中有限时地等待延迟出现的跳过按钮。1.0.26 增加与应用包名无关的全屏创意/促销组合判断，以及对没有标准弹窗类名的局部容器 OCR 兜底，仍要求证据局部对应和真实独立点击控件。OCR 截图前后的无障碍树不一致时丢弃旧图文证据，并最多重新采集一次；仍变化就不点击。检测到密码字段或正聚焦的文本输入框时，不启动截图 OCR。Android 10 及以下、系统拒绝截图、受保护窗口，以及系统/游戏/网页 `Canvas` 未暴露可访问关闭控件时，回退到原有无障碍节点规则。
+- 1.0.18 起使用 APK 内置的中文 OCR 模型；Android 11 及以上通过无障碍截图在本机内存中分析文字，不保存截图或识别文字。Google ML Kit 可能联系 Google 服务器获取组件更新/兼容信息并发送性能和使用指标；当前 Release 未声明 Android `INTERNET` 权限，但尚未做所有系统/设备路径的抓包验证，详见[隐私政策](隐私政策.md)。净屏自身不上传截图、OCR 结果，不调用 VPN 或云端识别。1.0.19–1.0.24 加入卡片内 OCR X、顶部居中广告文案、彩云天气两类已取证插屏的局部证据。1.0.25 把可点击节点、广告徽标和卡片归属按准确的无障碍子树关联，收紧泛用 X 与 `jump` 的误点条件；在明确播放器场景中有限时地等待延迟出现的跳过按钮。1.0.26 增加与应用包名无关的全屏创意/促销组合判断，以及对没有标准弹窗类名的局部容器 OCR 兜底，仍要求证据局部对应和真实独立点击控件。OCR 截图前后的无障碍树不一致时丢弃旧图文证据，并最多重新采集一次；仍变化就不点击。检测到密码字段或正聚焦的文本输入框时，不启动截图 OCR。Android 10 及以下、系统拒绝截图、受保护窗口，以及系统/游戏/网页 `Canvas` 未暴露可访问关闭控件时，回退到原有无障碍节点规则。
 - 这是“本地 OCR + UI 结构/位置规则融合”，不是针对各应用广告训练的专用视觉模型。仓库没有广告训练数据集或专用分类模型，不能承诺所有广告都识别或零误点；页面文案、卡片层级与控件可访问性都会影响结果。
 - 只有 OCR 文本证据、却没有可访问且可点击的独立关闭节点时，不会用猜测的屏幕坐标点击。截图被系统保护或页面不产生无障碍节点的广告可能漏过，需要应用自身暴露关闭节点或后续基于真实样本改进。
 

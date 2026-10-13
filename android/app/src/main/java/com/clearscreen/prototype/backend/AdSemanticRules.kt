@@ -55,7 +55,7 @@ internal object AdSemanticRules {
     """(?:^|[/_.])(?:skip|skipbtn|skipbutton|skipview|skiptext|skipad|adskip|splashskip|countdownskip|timerskip)(?:$|[/_.\d])"""
   )
   private val adCloseId = Regex(
-    """(?:^|[/_.])(?:adclose|closead|adclosebtn|adclosebutton|splashclose|interstitialclose|closeinterstitial|addismiss)(?:$|[/_.\d])"""
+    """(?:^|[/_.])(?:ad[_-]?close|close[_-]?ad|adclosebtn|adclosebutton|closebtn[_-]?ad|splash[_-]?close|interstitial[_-]?close|closeinterstitial|addismiss)(?:$|[/_.\d])"""
   )
 
   fun normalize(value: String): String =

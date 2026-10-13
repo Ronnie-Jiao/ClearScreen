@@ -1,6 +1,8 @@
 package com.clearscreen.prototype.backend
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
 import android.content.ComponentName
 import android.content.Context
 import android.graphics.Rect
@@ -28,6 +30,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   private val handler = Handler(Looper.getMainLooper())
   private val recentActions = LinkedHashMap<String, Long>()
   private var lastActionAt = 0L
+  private var lastScanAt = 0L
+  private var lastWindowProbeAt = 0L
+  private var lastWindowProbePackage: String? = null
+  private var actionInFlight = false
+  private val pendingProbes = mutableListOf<Runnable>()
 
   override fun onServiceConnected() {
     super.onServiceConnected()
@@ -37,52 +44,146 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
     if (event == null || !::store.isInitialized || !store.isMasterEnabled()) return
+    if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+      event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+      event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED
+    ) return
     val packageName = event.packageName?.toString()?.takeIf { it.isNotBlank() } ?: return
-
-    // Never inspect or click our own UI. The app intentionally contains labels such as
-    // "今日自动跳过" and "自动跳过权限"; treating those as ad controls would navigate
-    // the user around the app while they are configuring it.
     if (packageName == applicationContext.packageName) return
 
     val rule = store.getAppRule(packageName)
     if (!rule.skipEnabled || rule.whitelist) return
 
     val now = System.currentTimeMillis()
-    if (now - lastActionAt < ACTION_COOLDOWN_MS) return
+    // Many splash ads appear one or two frames AFTER the window state event. Do
+    // bounded follow-up scans instead of assuming the first node tree is final.
+    if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+      (lastWindowProbePackage != packageName || now - lastWindowProbeAt > WINDOW_PROBE_RESET_MS)
+    ) {
+      lastWindowProbePackage = packageName
+      lastWindowProbeAt = now
+      scheduleWindowProbes(packageName)
+    }
 
+    // A content-changing WebView may emit hundreds of events per second.
+    if (now - lastScanAt < MIN_SCAN_INTERVAL_MS && event.eventType ==
+      AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+    ) return
+    scanForAd(packageName)
+  }
+
+  private fun scheduleWindowProbes(packageName: String) {
+    pendingProbes.forEach(handler::removeCallbacks)
+    pendingProbes.clear()
+    for (delay in WINDOW_PROBE_DELAYS_MS) {
+      val task = Runnable {
+        // Android can move to a different app before a delayed scan fires.
+        // findRootForPackage() below checks the package again.
+        scanForAd(packageName)
+      }
+      pendingProbes += task
+      handler.postDelayed(task, delay)
+    }
+  }
+
+  private fun scanForAd(packageName: String) {
+    if (!::store.isInitialized || !store.isMasterEnabled() || actionInFlight) return
+    if (packageName == applicationContext.packageName) return
+    val rule = store.getAppRule(packageName)
+    if (!rule.skipEnabled || rule.whitelist) return
+
+    val now = System.currentTimeMillis()
+    if (now - lastActionAt < ACTION_COOLDOWN_MS) return
+    lastScanAt = now
     val root = findRootForPackage(packageName) ?: return
     val action = findAdAction(root) ?: return
     val fingerprint = action.targetFingerprint(packageName)
     if (wasRecentlyAttempted(fingerprint, now)) return
 
+    actionInFlight = true
     lastActionAt = now
-    val clicked = action.target.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
-      (action.allowDismiss && action.target.performAction(AccessibilityNodeInfo.ACTION_DISMISS))
-    if (clicked) rememberAction(fingerprint, now)
+    val clicked = runCatching {
+      action.target.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
+        (action.allowDismiss && action.target.performAction(AccessibilityNodeInfo.ACTION_DISMISS))
+    }.getOrDefault(false)
 
-    if (BuildConfig.DEBUG) {
-      Log.d(
-        TAG,
-        "action=${action.ruleId} score=${action.score} package=$packageName " +
-          "label=${action.label} clicked=$clicked",
-      )
+    if (clicked) {
+      finalizeAction(packageName, action, fingerprint, accepted = true, viaGesture = false)
+      return
     }
 
-    if (!clicked) {
+    // Some ad SDKs expose their skip text/icon as an accessibility node but
+    // mark neither it nor any ancestor clickable. A tightly bounded tap is
+    // permitted ONLY for an explicit ad action with strong geometry/context.
+    if (action.allowGestureFallback) {
+      performBoundedTap(packageName, action, fingerprint)
+    } else {
+      finalizeAction(packageName, action, fingerprint, accepted = false, viaGesture = false)
+    }
+  }
+
+  private fun performBoundedTap(
+    packageName: String,
+    action: DetectionAction,
+    fingerprint: String,
+  ) {
+    val x = action.targetBounds.exactCenterX()
+    val y = action.targetBounds.exactCenterY()
+    val path = Path().apply { moveTo(x, y) }
+    val gesture = GestureDescription.Builder()
+      .addStroke(GestureDescription.StrokeDescription(path, 0, 56L))
+      .build()
+    val callback = object : GestureResultCallback() {
+      override fun onCompleted(gestureDescription: GestureDescription?) {
+        finalizeAction(packageName, action, fingerprint, accepted = true, viaGesture = true)
+      }
+      override fun onCancelled(gestureDescription: GestureDescription?) {
+        finalizeAction(packageName, action, fingerprint, accepted = false, viaGesture = true)
+      }
+    }
+    val dispatched = runCatching { dispatchGesture(gesture, callback, handler) }.getOrDefault(false)
+    if (!dispatched) {
+      finalizeAction(packageName, action, fingerprint, accepted = false, viaGesture = true)
+    }
+  }
+
+  private fun finalizeAction(
+    packageName: String,
+    action: DetectionAction,
+    fingerprint: String,
+    accepted: Boolean,
+    viaGesture: Boolean,
+  ) {
+    if (BuildConfig.DEBUG) {
+      Log.d(TAG, "action=${action.ruleId} score=${action.score} package=$packageName " +
+        "label=${action.label} accepted=$accepted gesture=$viaGesture")
+    }
+    if (!accepted) {
+      actionInFlight = false
       appendActionEvent(packageName, action, "failed", "处理失败")
       return
     }
 
-    // performAction(true) only means that Android accepted the request. Verify
-    // the same target shortly afterwards so a stale/non-operational node does
-    // not inflate the success counter.
+    rememberAction(fingerprint, System.currentTimeMillis())
     handler.postDelayed({
+      actionInFlight = false
       if (!::store.isInitialized || !store.isMasterEnabled()) return@postDelayed
-      val currentRoot = findRootForPackage(packageName)
-      val currentAction = currentRoot?.let(::findAdAction)
-      val stillPresent = currentAction?.targetFingerprint(packageName) == fingerprint
+      val rule = store.getAppRule(packageName)
+      if (!rule.skipEnabled || rule.whitelist) return@postDelayed
+
+      // Do NOT mark success merely because the event's window vanished. This
+      // also avoids false success when the user switches to another app.
+      val root = findRootForPackage(packageName)
+      if (root == null) {
+        appendActionEvent(packageName, action, "attempted", "已执行，结果待确认")
+        return@postDelayed
+      }
+
+      // Countdown digits may change between frames (3跳过 -> 2跳过).
+      // Fingerprints intentionally ignore the changing number.
+      val stillPresent = findAdAction(root)?.targetFingerprint(packageName) == fingerprint
       if (stillPresent) {
-        appendActionEvent(packageName, action, "failed", "动作未生效")
+        appendActionEvent(packageName, action, "failed", "动作后仍显示广告控件")
       } else {
         appendActionEvent(packageName, action, "success", action.successText)
       }
@@ -93,6 +194,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   override fun onDestroy() {
     handler.removeCallbacksAndMessages(null)
+    pendingProbes.clear()
+    actionInFlight = false
     recentActions.clear()
     running = false
     super.onDestroy()
@@ -122,14 +225,17 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     snapshot: AccessibilitySnapshot,
   ): DetectionAction? {
     if (!node.isEnabled) return null
-    val target = clickableTarget(node.node) ?: return null
+    val clickable = clickableTarget(node.node)
+    val target = clickable ?: node.node
     if (!target.isVisibleToUser || !target.isEnabled) return null
 
     val compact = node.compactLabel
     val resourceId = node.resourceId
-    val strongLabel = isStrongSkipLabel(compact)
-    val countdownLabel = isCountdownSkipLabel(compact)
-    val plainLabel = compact == "跳过" || compact == "skip"
+    // text and contentDescription are often duplicates or contain different
+    // strings. Score them independently instead of requiring a joined match.
+    val strongLabel = node.labelVariants.any(::isStrongSkipLabel)
+    val countdownLabel = node.labelVariants.any(::isCountdownSkipLabel)
+    val plainLabel = node.labelVariants.any { it == "跳过" || it == "skip" }
     val explicitResource = hasSkipResourceId(resourceId)
     if (!strongLabel && !countdownLabel && !plainLabel && !explicitResource) return null
 
@@ -167,6 +273,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       !nearTopRight && !ancestorHasAdSignal
     ) return null
     if (plainLabel && !compactControl && !snapshot.context.hasAdSignal && !explicitResource) return null
+    // Resource names such as skip_button also occur in normal onboarding UIs.
+    // A resource-id-only match needs both ad context AND a small corner control.
+    if (explicitResource && !strongLabel && !countdownLabel && !plainLabel &&
+      !(nearTopRight && compactControl && snapshot.context.hasAdSignal)
+    ) return null
 
     if (snapshot.context.hasAdSignal || ancestorHasAdSignal) {
       ruleId += ".ad-context"
@@ -178,6 +289,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       minimumScore = if (plainLabel) 102 else 96,
       actionPriority = 2,
       allowDismiss = false,
+      allowGestureFallback = nearTopRight && isTightTapTarget(targetBounds, snapshot.rootBounds) &&
+        (countdownLabel || strongLabel || (explicitResource && snapshot.context.hasStrongAdSignal)),
       ruleId = ruleId,
       label = node.label.take(MAX_LOG_LABEL_LENGTH),
       successText = "已跳过开屏广告",
@@ -189,12 +302,13 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     snapshot: AccessibilitySnapshot,
   ): DetectionAction? {
     if (!node.isEnabled) return null
-    val target = clickableTarget(node.node) ?: return null
+    val clickable = clickableTarget(node.node)
+    val target = clickable ?: node.node
     if (!target.isVisibleToUser || !target.isEnabled) return null
 
     val compact = node.compactLabel
     val resourceId = node.resourceId
-    val closeLabel = isPopupCloseLabel(compact)
+    val closeLabel = node.labelVariants.any(::isPopupCloseLabel)
     val explicitAdResource = hasAdCloseResourceId(resourceId)
     if (!closeLabel && !explicitAdResource) return null
 
@@ -204,12 +318,20 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val compactControl = isCompactControl(targetBounds, snapshot.rootBounds)
     val ancestorHasAdSignal = node.ancestorLabels.any(::hasStrongAdSignal)
     val hasAdContext = snapshot.context.hasAdSignal || ancestorHasAdSignal
+    val explicitCloseLabel = node.labelVariants.any {
+      it == "关闭广告" || it == "关闭弹窗" || it == "关闭此广告" || it == "关闭推广"
+    }
+    // An unrelated background banner may contain "广告", but this must not
+    // authorize clicking every generic X on a normal page.
+    val localAdContext = ancestorHasAdSignal ||
+      snapshot.hasNearbyAdSignal(targetBounds)
+    if (!explicitCloseLabel && !explicitAdResource && !localAdContext) return null
 
     // A generic close icon is too dangerous to click without ad context. A
     // resource id explicitly mentioning an interstitial/splash/ad is stronger,
     // but it still must be a small control near the edge of the screen.
     if (!nearTopRight || !compactControl) return null
-    if (!hasAdContext && !explicitAdResource) return null
+    if (!hasAdContext && !explicitAdResource && !explicitCloseLabel) return null
 
     var score = when {
       explicitAdResource -> 92
@@ -229,6 +351,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       minimumScore = 106,
       actionPriority = 1,
       allowDismiss = true,
+      allowGestureFallback = isTightTapTarget(targetBounds, snapshot.rootBounds) &&
+        (explicitAdResource || explicitCloseLabel || localAdContext),
       ruleId = if (explicitAdResource) "builtin.popup.close.resource-id" else "builtin.popup.close.context",
       label = node.label.take(MAX_LOG_LABEL_LENGTH),
       successText = "已关闭弹窗广告",
@@ -295,6 +419,17 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val rootBounds: Rect,
     val context: AdContext,
   ) {
+    fun hasNearbyAdSignal(bounds: Rect): Boolean {
+      val width = rootBounds.width().coerceAtLeast(1)
+      val height = rootBounds.height().coerceAtLeast(1)
+      return nodes.any { node ->
+        node.isVisible &&
+          hasStrongAdSignal(node.label, node.resourceId) &&
+          kotlin.math.abs(node.bounds.centerX() - bounds.centerX()) < width * 0.34f &&
+          kotlin.math.abs(node.bounds.centerY() - bounds.centerY()) < height * 0.22f
+      }
+    }
+
     companion object {
       fun capture(root: AccessibilityNodeInfo): AccessibilitySnapshot {
         val nodes = mutableListOf<ScreenNode>()
@@ -305,7 +440,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         while (pending.isNotEmpty() && nodes.size < MAX_NODES_PER_SNAPSHOT) {
           val current = pending.removeFirst()
           val node = current.node
-          val label = readNodeLabel(node)
+          val variants = readNodeLabelVariants(node)
+          val label = variants.joinToString(" ")
           val resourceId = node.viewIdResourceName.orEmpty().lowercase(Locale.ROOT)
           val bounds = Rect().also(node::getBoundsInScreen)
           val visible = node.isVisibleToUser && hasUsableBounds(bounds)
@@ -313,6 +449,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
             node = node,
             label = label,
             compactLabel = normalizeLabel(label),
+            labelVariants = variants.map(::normalizeLabel),
             resourceId = resourceId,
             ancestorLabels = current.ancestorLabels,
             bounds = bounds,
@@ -347,6 +484,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val node: AccessibilityNodeInfo,
     val label: String,
     val compactLabel: String,
+    val labelVariants: List<String>,
     val resourceId: String,
     val ancestorLabels: List<String>,
     val bounds: Rect,
@@ -386,6 +524,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val minimumScore: Int,
     val actionPriority: Int,
     val allowDismiss: Boolean,
+    val allowGestureFallback: Boolean,
     val ruleId: String,
     val label: String,
     val successText: String,
@@ -393,15 +532,16 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     fun targetFingerprint(packageName: String): String = buildString {
       append(packageName)
       append('|')
-      append(label)
+      // Ignore the changing countdown number and small layout jitter.
+      append(if (ruleId.startsWith("builtin.skip.countdown")) "countdown" else label)
       append('|')
-      append(targetBounds.left)
+      append(targetBounds.left / FINGERPRINT_BUCKET_PX)
       append(',')
-      append(targetBounds.top)
+      append(targetBounds.top / FINGERPRINT_BUCKET_PX)
       append(',')
-      append(targetBounds.right)
+      append(targetBounds.right / FINGERPRINT_BUCKET_PX)
       append(',')
-      append(targetBounds.bottom)
+      append(targetBounds.bottom / FINGERPRINT_BUCKET_PX)
     }
   }
 
@@ -411,7 +551,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
     private const val TAG = "ClearScreenA11y"
     private const val ACTION_COOLDOWN_MS = 480L
-    private const val ACTION_VERIFY_DELAY_MS = 650L
+    private const val ACTION_VERIFY_DELAY_MS = 700L
+    private const val MIN_SCAN_INTERVAL_MS = 100L
+    private const val WINDOW_PROBE_RESET_MS = 2_500L
+    private val WINDOW_PROBE_DELAYS_MS = longArrayOf(220L, 600L, 1_200L)
+    private const val FINGERPRINT_BUCKET_PX = 20
     private const val ACTION_REPEAT_GUARD_MS = 1_500L
     private const val MAX_CLICKABLE_ANCESTORS = 6
     private const val MAX_NODES_PER_SNAPSHOT = 1_200
@@ -435,6 +579,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       "关闭",
       "关闭广告",
       "关闭弹窗",
+      "关闭此广告",
+      "关闭推广",
       "close",
       "closead",
       "dismiss",
@@ -460,6 +606,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     private val MEDIUM_AD_MARKERS = listOf(
       "立即打开",
       "立即下载",
+      "立即办理",
       "点击跳转",
       "详情页面",
       "免费领取",
@@ -498,11 +645,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       return enabled.split(':').any { it.equals(component, ignoreCase = true) }
     }
 
-    private fun readNodeLabel(node: AccessibilityNodeInfo): String =
+    private fun readNodeLabelVariants(node: AccessibilityNodeInfo): List<String> =
       listOfNotNull(
         node.text?.toString()?.trim()?.takeIf { it.isNotBlank() },
         node.contentDescription?.toString()?.trim()?.takeIf { it.isNotBlank() },
-      ).distinct().joinToString(" ")
+      ).distinct()
 
     private fun normalizeLabel(value: String): String = value
       .lowercase(Locale.ROOT)
@@ -554,6 +701,15 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       return bounds.centerX() >= rootBounds.left + width * 0.55f &&
         bounds.top <= rootBounds.top + height * 0.48f &&
         bounds.right >= rootBounds.left + width * 0.70f
+    }
+
+    private fun isTightTapTarget(bounds: Rect, rootBounds: Rect): Boolean {
+      val width = rootBounds.width().coerceAtLeast(1)
+      val height = rootBounds.height().coerceAtLeast(1)
+      return bounds.width() <= width * 0.30f &&
+        bounds.height() <= height * 0.11f &&
+        bounds.centerX() >= rootBounds.left + width * 0.63f &&
+        bounds.top <= rootBounds.top + height * 0.43f
     }
 
     private fun isCompactControl(bounds: Rect, rootBounds: Rect): Boolean {

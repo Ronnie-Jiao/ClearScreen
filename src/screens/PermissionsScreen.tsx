@@ -1,25 +1,28 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Background, Badge, Card, PrimaryButton, SquareIcon, TopBar } from '../components/UI';
 import { C } from '../theme';
 
-type PermissionState={skip:boolean;skipRunning?:boolean;bg:boolean;isVivoFamily?:boolean;vendorStartupGuideConfirmed?:boolean};
-export default function PermissionsScreen({onBack,onContinue,permissions,onToggle}:{onBack:()=>void;onContinue:()=>void;permissions:PermissionState;onToggle:(k:'skip'|'bg')=>void}){
- const { width, height } = useWindowDimensions();
- const scale = Math.min(1, Math.max(.84, Math.min(width / 360, height / 800)));
- const px = (value:number) => Math.round(value * scale);
- const vendorStartupPending=Boolean(permissions.isVivoFamily&&!permissions.vendorStartupGuideConfirmed);
-  const row=(key:'skip'|'bg',symbol:string,tone:any,title:string,button:string)=>{
-  const enabled=key==='bg'?(permissions.bg||Boolean(permissions.isVivoFamily&&permissions.vendorStartupGuideConfirmed)):permissions[key];
-  const status=key==='skip'&&!permissions.skipRunning&&permissions.skip?'●  启动中':key==='bg'&&vendorStartupPending?'●  需开自启动':key==='bg'&&permissions.isVivoFamily&&enabled?'✓  已完成检查':enabled?'✓  已开启':'●  未开启';
-  const confirmed=key==='skip'?Boolean(permissions.skipRunning):enabled&&!vendorStartupPending;
-  return <Card key={key} style={[s.card,{height:px(144),padding:px(14),marginBottom:px(12),gap:px(12)}]}><SquareIcon symbol={symbol} tone={tone} size={px(64)}/><View style={[s.copy,{gap:px(7)}]}><Text style={[s.title,{fontSize:px(22),lineHeight:px(27)}]}>{title}</Text><Badge green={confirmed}>{status}</Badge></View><Pressable onPress={()=>onToggle(key)} style={[s.button,{width:px(92),height:px(56),borderRadius:px(20)}]}><Text style={[s.buttonText,{fontSize:px(18),lineHeight:px(22)}]}>{key==='bg'&&permissions.isVivoFamily?'去设置':enabled&&key!=='bg'?'去设置':button}</Text></Pressable></Card>;
- };
- return <Background><View style={[s.page,{paddingHorizontal:px(20),paddingTop:px(18)}]}><TopBar title="开启权限" onBack={onBack}/><View style={s.content}>
-   {row('skip','≫','blue','自动跳过权限','去设置')}
-   {row('bg','⚙','purple','后台运行','去开启')}
-   <Text style={[s.note,{fontSize:px(16),lineHeight:px(23),marginBottom:px(12)}]}>网络过滤已关闭，不会占用系统 VPN；你可以正常使用其他 VPN 连接。</Text>
-   <View style={[s.continue,{marginTop:px(2),paddingBottom:px(4)}]}><PrimaryButton title="继续" onPress={onContinue}/></View>
- </View></View></Background>
+type PermissionState={skip:boolean;skipRunning:boolean;checking:boolean;restrictedSettingsLikely:boolean};
+export default function PermissionsScreen({onBack,onContinue,onLater,permissions,onOpenAccessibility,onOpenAppInfo,onHelp}:{onBack:()=>void;onContinue:()=>void;onLater:()=>void;permissions:PermissionState;onOpenAccessibility:()=>void;onOpenAppInfo:()=>void;onHelp:()=>void}){
+ const ready=permissions.skip&&permissions.skipRunning;
+ const status=permissions.checking?'正在检查':ready?'已准备好':permissions.skip?'需要修复':'未开启';
+ const statusGood=ready;
+ const actionTitle=permissions.checking?null:ready?'选择应用':permissions.skip?'重新开启':'去系统开启';
+ return <Background><ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
+  <TopBar title="自动跳过服务" onBack={onBack}/>
+  <Card style={s.card}>
+   <SquareIcon symbol="≫" tone="blue" size={62}/>
+   <View style={s.copy}><Text style={s.title}>无障碍服务</Text><Badge green={statusGood}>{status}</Badge></View>
+  </Card>
+  <Text style={s.privacy}>用于查找可识别的广告控件；识别在本机完成，不上传屏幕内容。</Text>
+  {actionTitle?<PrimaryButton title={actionTitle} onPress={ready?onContinue:onOpenAccessibility}/>:null}
+  <View style={s.secondaryActions}>
+   {!ready&&permissions.restrictedSettingsLikely?<Pressable onPress={onOpenAppInfo} hitSlop={10}><Text style={s.link}>打开应用信息</Text></Pressable>:null}
+   {!ready?<Pressable onPress={onHelp} hitSlop={10}><Text style={s.link}>查看步骤</Text></Pressable>:null}
+   <Pressable onPress={onLater} hitSlop={10}><Text style={s.link}>{ready?'先进入首页':'稍后再说'}</Text></Pressable>
+  </View>
+ </ScrollView></Background>;
 }
-const s=StyleSheet.create({page:{flex:1},content:{flex:1},card:{flexDirection:'row',alignItems:'center'},copy:{flex:1,minWidth:0},title:{fontWeight:'900',color:C.navy},button:{backgroundColor:C.blue,alignItems:'center',justifyContent:'center',overflow:'hidden'},buttonText:{color:'#fff',fontWeight:'900'},note:{color:C.text2,fontWeight:'700'},continue:{width:'100%'}})
+
+const s=StyleSheet.create({page:{flexGrow:1,padding:18,paddingBottom:36},card:{minHeight:116,padding:18,flexDirection:'row',alignItems:'center',gap:16,marginBottom:12},copy:{flex:1,gap:8},title:{fontSize:22,fontWeight:'900',color:C.navy},privacy:{fontSize:14,lineHeight:20,fontWeight:'700',color:C.text2,marginBottom:20,marginHorizontal:4},secondaryActions:{minHeight:62,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:20,flexWrap:'wrap'},link:{fontSize:15,fontWeight:'900',color:C.blue,paddingVertical:10}});

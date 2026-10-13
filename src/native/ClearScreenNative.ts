@@ -1,5 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
-import { APPS, AppItem, LOGS, LogItem } from '../data';
+import { AppItem, LogItem } from '../data';
 import { LOGO } from '../assets';
 
 type NativeApp = {
@@ -60,7 +60,16 @@ export type BackendSnapshot = {
   installSource: InstallSourceDiagnostics;
   apps: AppItem[];
   logs: LogItem[];
-  settings: { startup: boolean; autoUpdate: boolean; debug: boolean };
+  settings: {
+    startup: boolean;
+    autoUpdate: boolean;
+    debug: boolean;
+    skipSplashVideo: boolean;
+    closePopupAds: boolean;
+    closeFeedAds: boolean;
+    logRetentionDays: number;
+  };
+  versionName: string;
 };
 
 const native = Platform.OS === 'android' ? NativeModules.ClearScreenBackend : undefined;
@@ -75,7 +84,8 @@ function normalizeApp(app: NativeApp): AppItem {
     // Network filtering is intentionally disabled so ClearScreen never owns a
     // VPN slot needed by the user's separate VPN client.
     network: false,
-    whitelist: Boolean(app.whitelist),
+    // The single per-app switch is authoritative: off means excluded.
+    whitelist: !Boolean(app.skip),
     isSystemApp: Boolean(app.isSystemApp),
     versionName: app.versionName,
   };
@@ -85,14 +95,14 @@ function fallbackSnapshot(): BackendSnapshot {
   return {
     backendReady: false,
     onboardingCompleted: false,
-    masterEnabled: true,
-    installedAppCount: APPS.length,
-    todaySkipCount: 28,
+    masterEnabled: false,
+    installedAppCount: 0,
+    todaySkipCount: 0,
     todayNetworkCount: 0,
     permissions: {
-      skip: true,
+      skip: false,
       skipRunning: false,
-      accessibilitySettingEnabled: true,
+      accessibilitySettingEnabled: false,
       accessibilityServiceBound: false,
       accessibilityProcessAlive: false,
       accessibilityStoredServices: '',
@@ -117,9 +127,18 @@ function fallbackSnapshot(): BackendSnapshot {
       lastUpdateTime: 0,
       signingCertificateSha256: null,
     },
-    apps: APPS,
-    logs: LOGS.filter(log => log.type !== 'network'),
-    settings: { startup: true, autoUpdate: true, debug: false },
+    apps: [],
+    logs: [],
+    settings: {
+      startup: true,
+      autoUpdate: true,
+      debug: false,
+      skipSplashVideo: true,
+      closePopupAds: true,
+      closeFeedAds: true,
+      logRetentionDays: 7,
+    },
+    versionName: 'unknown',
   };
 }
 
@@ -171,7 +190,14 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
       startup: raw.settings?.startup !== false,
       autoUpdate: raw.settings?.autoUpdate !== false,
       debug: Boolean(raw.settings?.debug),
+      skipSplashVideo: raw.settings?.skipSplashVideo !== false,
+      closePopupAds: raw.settings?.closePopupAds !== false,
+      closeFeedAds: raw.settings?.closeFeedAds !== false,
+      logRetentionDays: [0, 1, 7, 30].includes(Number(raw.settings?.logRetentionDays))
+        ? Number(raw.settings.logRetentionDays)
+        : 7,
     },
+    versionName: String(raw.versionName || 'unknown'),
   };
 }
 
@@ -189,10 +215,17 @@ export const ClearScreenNative = {
   },
   setAppRule: async (app: AppItem) => {
     if (native?.setAppRule) {
-      await native.setAppRule(app.packageName || app.id, app.skip, false, app.whitelist);
+      await native.setAppRule(app.packageName || app.id, app.skip, false, !app.skip);
     }
   },
-  setSetting: async (key: 'startup' | 'autoUpdate' | 'debug', enabled: boolean) => {
+  setLogRetentionDays: async (days: number) => {
+    if (!native?.setLogRetentionDays) return fallbackSnapshot();
+    return normalizeSnapshot(await native.setLogRetentionDays(days));
+  },
+  setSetting: async (
+    key: 'startup' | 'autoUpdate' | 'debug' | 'skipSplashVideo' | 'closePopupAds' | 'closeFeedAds',
+    enabled: boolean,
+  ) => {
     if (native?.setSetting) await native.setSetting(key, enabled);
   },
   clearLogs: async () => {

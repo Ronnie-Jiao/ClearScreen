@@ -79,9 +79,8 @@ class ClearScreenStore(context: Context) {
 
   fun getAppRule(packageName: String): AppRuleState = synchronized(lock) {
     val rules = JSONObject(preferences.getString(KEY_APP_RULES, "{}") ?: "{}")
-    // New apps are protected by default once the user enables the master switch.
-    // An explicit per-app false value still remains an opt-out and is preserved.
-    val value = rules.optJSONObject(packageName) ?: return@synchronized AppRuleState(skipEnabled = true)
+    // New apps remain off until the user explicitly enables their rule.
+    val value = rules.optJSONObject(packageName) ?: return@synchronized AppRuleState()
     AppRuleState(
       skipEnabled = value.optBoolean("skipEnabled", false),
       networkBlockEnabled = value.optBoolean("networkBlockEnabled", false),
@@ -111,6 +110,17 @@ class ClearScreenStore(context: Context) {
     preferences.edit().putBoolean(key, enabled).apply()
   }
 
+  fun getLogRetentionDays(): Int =
+    preferences.getInt(KEY_LOG_RETENTION_DAYS, DEFAULT_LOG_RETENTION_DAYS)
+      .takeIf { it in LOG_RETENTION_OPTIONS }
+      ?: DEFAULT_LOG_RETENTION_DAYS
+
+  fun setLogRetentionDays(days: Int) = synchronized(lock) {
+    require(days in LOG_RETENTION_OPTIONS) { "Unsupported log retention: $days" }
+    preferences.edit().putInt(KEY_LOG_RETENTION_DAYS, days).apply()
+    pruneExpiredEventsLocked(readEventsLocked())
+  }
+
   /**
    * vivo/iQOO expose their startup protection in a vendor-owned settings page.
    * Android does not provide a public API to read that switch, so this only
@@ -128,7 +138,7 @@ class ClearScreenStore(context: Context) {
     limit: Int = 100,
     excludedPackageName: String? = null,
   ): List<StoredEvent> = synchronized(lock) {
-    val events = JSONArray(preferences.getString(KEY_EVENTS, "[]") ?: "[]")
+    val events = pruneExpiredEventsLocked(readEventsLocked())
     val result = mutableListOf<StoredEvent>()
     val start = maxOf(0, events.length() - limit)
     for (index in events.length() - 1 downTo start) {
@@ -157,7 +167,8 @@ class ClearScreenStore(context: Context) {
     text: String,
     duration: Long = 0L,
   ) = synchronized(lock) {
-    val events = JSONArray(preferences.getString(KEY_EVENTS, "[]") ?: "[]")
+    if (getLogRetentionDays() == 0) return@synchronized
+    val events = pruneExpiredEventsLocked(readEventsLocked())
     events.put(JSONObject().apply {
       put("type", type)
       put("packageName", packageName ?: "")
@@ -173,8 +184,31 @@ class ClearScreenStore(context: Context) {
     preferences.edit().putString(KEY_EVENTS, trimmed.toString()).apply()
   }
 
-  fun clearEvents() {
+  fun clearEvents() = synchronized(lock) {
     preferences.edit().putString(KEY_EVENTS, "[]").apply()
+  }
+
+  private fun readEventsLocked(): JSONArray =
+    JSONArray(preferences.getString(KEY_EVENTS, "[]") ?: "[]")
+
+  private fun pruneExpiredEventsLocked(events: JSONArray): JSONArray {
+    val retentionDays = getLogRetentionDays()
+    val cutoff = if (retentionDays == 0) {
+      Long.MAX_VALUE
+    } else {
+      System.currentTimeMillis() - retentionDays * MILLIS_PER_DAY
+    }
+    val retained = JSONArray()
+    for (index in 0 until events.length()) {
+      val event = events.optJSONObject(index) ?: continue
+      if (retentionDays > 0 && event.optLong("timestamp", 0L) >= cutoff) {
+        retained.put(event)
+      }
+    }
+    if (retained.length() != events.length()) {
+      preferences.edit().putString(KEY_EVENTS, retained.toString()).apply()
+    }
+    return retained
   }
 
   fun countToday(type: String, excludedPackageName: String? = null): Int {
@@ -203,8 +237,15 @@ class ClearScreenStore(context: Context) {
     const val KEY_STARTUP = "startupEnabled"
     const val KEY_AUTO_UPDATE = "autoUpdateEnabled"
     const val KEY_DEBUG = "debugEnabled"
+    const val KEY_SKIP_SPLASH_VIDEO = "skipSplashVideoEnabled"
+    const val KEY_CLOSE_POPUP_ADS = "closePopupAdsEnabled"
+    const val KEY_CLOSE_FEED_ADS = "closeFeedAdsEnabled"
+    private const val KEY_LOG_RETENTION_DAYS = "logRetentionDays"
     private const val KEY_VENDOR_STARTUP_GUIDE_CONFIRMED = "vendorStartupGuideConfirmed"
-    const val MAX_EVENTS = 200
+    const val DEFAULT_LOG_RETENTION_DAYS = 7
+    private const val MILLIS_PER_DAY = 24L * 60L * 60L * 1000L
+    private const val MAX_EVENTS = 5000
+    private val LOG_RETENTION_OPTIONS = setOf(0, 1, 7, 30)
     private val LEGACY_DATA_KEYS = setOf(
       KEY_MASTER_ENABLED,
       KEY_APP_RULES,

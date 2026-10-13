@@ -37,10 +37,11 @@ export function SquareIcon({symbol,tone='blue',size=52}:{symbol:string;tone?:'bl
   return <View style={[styles.square,{width:size,height:size,borderRadius:size*.28,backgroundColor:bg}]}><Text style={[styles.squareText,{color,fontSize:size*.42}]}>{symbol}</Text></View>;
 }
 
-export function BrandHeader({title='净屏',tagline=true}:{title?:string;tagline?:boolean}){
+export function BrandHeader({title='净屏',tagline=true,action}:{title?:string;tagline?:boolean;action?:React.ReactNode}){
   return <View style={styles.brandRow}>
     <Image source={LOGO} style={styles.brandLogo}/>
     <View style={{flex:1}}><Text style={styles.brandTitle}>{title}</Text><Text style={styles.brandEnglish}>Clear<Text style={{color:C.teal}}>Screen</Text></Text></View>
+    {action}
     {tagline?<Text style={styles.tagline}>净化屏幕{`\n`}专注生活</Text>:null}
   </View>;
 }

@@ -70,10 +70,19 @@ class ClearScreenNativeModule(
       "startup" -> ClearScreenStore.KEY_STARTUP
       "autoUpdate" -> ClearScreenStore.KEY_AUTO_UPDATE
       "debug" -> ClearScreenStore.KEY_DEBUG
+      "skipSplashVideo" -> ClearScreenStore.KEY_SKIP_SPLASH_VIDEO
+      "closePopupAds" -> ClearScreenStore.KEY_CLOSE_POPUP_ADS
+      "closeFeedAds" -> ClearScreenStore.KEY_CLOSE_FEED_ADS
       else -> throw IllegalArgumentException("Unknown setting: $key")
     }
     store.setSettingEnabled(knownKey, enabled)
     true
+  }
+
+  @ReactMethod
+  fun setLogRetentionDays(days: Int, promise: Promise) = runAsync(promise) {
+    store.setLogRetentionDays(days)
+    snapshot()
   }
 
   @ReactMethod
@@ -147,8 +156,16 @@ class ClearScreenNativeModule(
       putBoolean("startup", store.isSettingEnabled(ClearScreenStore.KEY_STARTUP, true))
       putBoolean("autoUpdate", store.isSettingEnabled(ClearScreenStore.KEY_AUTO_UPDATE, true))
       putBoolean("debug", store.isSettingEnabled(ClearScreenStore.KEY_DEBUG, false))
+      putBoolean("skipSplashVideo", store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true))
+      putBoolean("closePopupAds", store.isSettingEnabled(ClearScreenStore.KEY_CLOSE_POPUP_ADS, true))
+      putBoolean("closeFeedAds", store.isSettingEnabled(ClearScreenStore.KEY_CLOSE_FEED_ADS, true))
+      putInt("logRetentionDays", store.getLogRetentionDays())
     }
+    val versionName = runCatching {
+      reactContext.packageManager.getPackageInfo(reactContext.packageName, 0).versionName
+    }.getOrNull() ?: "unknown"
     map.putBoolean("backendReady", true)
+    map.putString("versionName", versionName)
     map.putBoolean("onboardingCompleted", store.isOnboardingCompleted())
     map.putBoolean("masterEnabled", store.isMasterEnabled())
     map.putInt("installedAppCount", apps.size())

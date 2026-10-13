@@ -101,8 +101,8 @@ android {
         applicationId clearscreenApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion clearscreenTargetSdk
-        versionCode 22
-        versionName "1.0.16"
+        versionCode 33
+        versionName "1.0.27"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -187,6 +187,8 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    testImplementation("junit:junit:4.13.2")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";

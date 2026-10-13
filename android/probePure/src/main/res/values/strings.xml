@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">净屏纯无障碍探针</string>
+  <string name="service_label">净屏纯无障碍探针</string>
+  <string name="service_description">仅用于测试无障碍授权是否能被系统稳定保留，不执行任何点击或广告处理。</string>
+</resources>

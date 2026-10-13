@@ -161,7 +161,7 @@
     const recent = logs.slice(0,3).map(l=>'<div class="row"><span class="log-time">'+l.time+'</span>'+appIcon({cls:l.cls,icon:l.icon})+
       '<div class="row-main"><div class="row-title">'+l.app+'</div></div><div class="'+(l.type==='fail'?'bad':'good')+'" style="font-weight:800">'+l.action+'</div></div>').join('');
     return '<div class="app-shell"><main class="screen">'+logoHeader()+
-      '<section class="card status-card"><div class="status-orb">'+icon('check',52)+'</div><div class="status-copy"><h2>'+ (state.master?'净屏已开启':'净屏已暂停') +'</h2><p>自动跳过 + 网络过滤</p></div>'+sw(state.master,'master')+'</section>'+
+      '<section class="card status-card"><div class="status-orb">'+icon('check',52)+'</div><div class="status-copy"><h2>'+ (state.master?'净屏已开启':'净屏已暂停') +'</h2></div>'+sw(state.master,'master')+'</section>'+
       '<div class="stat-grid"><div class="card stat" data-go="records">'+
         '<div class="stat-icon blue">'+icon('play',28)+'</div><div class="stat-copy"><b>今日自动跳过</b><strong>28</strong><small> 次</small></div></div>'+
         '<div class="card stat" data-go="records"><div class="stat-icon green">'+icon('globe',28)+'</div><div class="stat-copy"><b>今日网络过滤</b><strong>136</strong><small> 次</small></div></div></div>'+
@@ -171,7 +171,6 @@
         '<div class="row" data-go="permissions">'+square('battery','purple')+'<div class="row-main"><div class="row-title">后台运行</div></div><div class="row-right '+(state.permissions.bg?'good':'warn')+'">'+(state.permissions.bg?'已允许':'建议开启')+chevron()+'</div></div>'+
       '</section>'+
       '<section class="card section-card"><div class="section-head"><h3>最近记录</h3><span class="link" data-go="records">查看全部</span></div>'+recent+'</section>'+
-      '<div class="notice">💡 已为你减少广告打扰</div>'+
       '</main>'+bottomNav('home')+toastHtml()+modalHtml()+'</div>';
   }
 
@@ -202,9 +201,8 @@
         '<div class="big-row">'+square('globe','green')+'<div class="row-main"><div class="row-title">网络过滤</div></div>'+sw(a.net,'app:'+a.id+':net')+'</div>'+
         '<div class="big-row">'+square('shield','purple')+'<div class="row-main"><div class="row-title">加入白名单</div></div>'+sw(a.white,'app:'+a.id+':white')+'</div>'+
       '</section>'+
-      '<div class="hero-strip" data-action="toast:已开启双重去广告策略">💡 双重去广告 <span style="margin-left:auto">'+chevron()+'</span></div>'+
       '<section class="card section-card"><div class="section-head"><h3>最近记录</h3><span class="link" data-go="records">查看全部</span></div>'+rel+'</section>'+
-      '<section class="card section-card"><div class="row" data-action="toast:高级设置将在正式版提供">'+square('settings','purple')+'<div class="row-main"><div class="row-title">高级设置</div></div><div class="row-right">'+chevron()+'</div></div></section>'+
+      '<section class="card section-card"><div class="row" data-action="toast:暂未开放">'+square('settings','purple')+'<div class="row-main"><div class="row-title">高级设置</div></div><div class="row-right">'+chevron()+'</div></div></section>'+
       '</main>'+toastHtml()+modalHtml()+'</div>';
   }
 
@@ -241,7 +239,7 @@
         '<div class="row" data-go="rules">'+square('refresh','blue')+'<div class="row-main"><div class="row-title">规则管理</div></div><div class="row-right">'+chevron()+'</div></div>'+
         '<div class="row">'+square('bug','purple')+'<div class="row-main"><div class="row-title">调试模式</div></div>'+sw(state.debug,'debug')+'</div>'+
         '<div class="row" data-action="toast:当前版本 v1.0.0">'+square('info','green')+'<div class="row-main"><div class="row-title">当前版本</div></div><div class="row-right">v1.0.0 '+chevron()+'</div></div>'+
-        '<div class="row" data-action="toast:原型中的隐私政策为示意入口">'+square('info','blue')+'<div class="row-main"><div class="row-title">隐私政策</div></div><div class="row-right">'+chevron()+'</div></div>'+
+        '<div class="row" data-action="toast:原型入口">'+square('info','blue')+'<div class="row-main"><div class="row-title">隐私政策</div></div><div class="row-right">'+chevron()+'</div></div>'+
       '</section>'+
       '</main>'+bottomNav('settings')+toastHtml()+modalHtml()+'</div>';
   }
@@ -284,7 +282,7 @@
       '</section>'+
       '<section class="card settings-group">'+
         '<div class="row">'+square('bug','purple')+'<div class="row-main"><div class="row-title">调试模式</div></div>'+sw(state.debug,'debug')+'</div>'+
-        '<div class="row" data-action="toast:规则导入功能为原型示意">'+square('refresh','blue')+'<div class="row-main"><div class="row-title">导入规则</div></div><div class="row-right">'+chevron()+'</div></div>'+
+        '<div class="row" data-action="toast:暂未开放">'+square('refresh','blue')+'<div class="row-main"><div class="row-title">导入规则</div></div><div class="row-right">'+chevron()+'</div></div>'+
       '</section>'+
       '</main>'+toastHtml()+modalHtml()+'</div>';
   }

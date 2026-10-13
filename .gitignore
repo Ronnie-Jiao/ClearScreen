@@ -7,6 +7,9 @@ android/app/build/
 android/app/.cxx/
 android/local.properties
 android/app/*.keystore
+android/*.keystore
+android/keystore.properties
+diagnostics/
 .idea/
 *.iml
 *.log

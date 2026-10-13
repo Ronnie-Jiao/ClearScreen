@@ -2,6 +2,8 @@ package com.clearscreen.prototype
 
 import android.app.Application
 import android.content.res.Configuration
+import android.os.Build
+import android.os.Process
 
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
@@ -41,6 +43,12 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // The accessibility service runs in a small, independent process. Do not
+    // initialize React Native or Expo there: loading the JS runtime makes the
+    // service needlessly large and allows vivo's task cleaner to remove it
+    // together with the UI process.
+    if (isAccessibilityProcess()) return
+
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (e: IllegalArgumentException) {
@@ -52,6 +60,19 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
+    if (isAccessibilityProcess()) return
     ApplicationLifecycleDispatcher.onConfigurationChanged(this, newConfig)
+  }
+
+  private fun isAccessibilityProcess(): Boolean {
+    val currentProcessName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+      Application.getProcessName()
+    } else {
+      val activityManager = getSystemService(ACTIVITY_SERVICE) as? android.app.ActivityManager
+      activityManager?.runningAppProcesses
+        ?.firstOrNull { it.pid == Process.myPid() }
+        ?.processName
+    }
+    return currentProcessName?.endsWith(":accessibility") == true
   }
 }

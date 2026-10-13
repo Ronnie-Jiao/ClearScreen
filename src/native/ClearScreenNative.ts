@@ -1,5 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
-import { APPS, AppItem, LOGS, LogItem } from '../data';
+import { AppItem, LogItem } from '../data';
 import { LOGO } from '../assets';
 
 type NativeApp = {
@@ -19,9 +19,20 @@ type NativeLog = LogItem & { packageName?: string; result?: string; timestamp?: 
 export type BackendPermissions = {
   skip: boolean;
   skipRunning: boolean;
+  accessibilitySettingEnabled: boolean;
+  accessibilityServiceBound: boolean;
+  accessibilityProcessAlive: boolean;
+  accessibilityStoredServices: string;
   network: boolean;
   networkRunning: boolean;
   bg: boolean;
+  isVivoFamily: boolean;
+  vendorStartupSettingsAvailable: boolean;
+  // Android has no public API for vivo/iQOO's self-start switch. This field
+  // means the user completed the guided check, not that the system exposed a
+  // verifiable permission grant to the app.
+  vendorStartupGuideConfirmed: boolean;
+  deviceManufacturer: string;
   restrictedSettingsLikely: boolean;
 };
 
@@ -33,6 +44,9 @@ export type InstallSourceDiagnostics = {
   packageSourceLabel: string;
   adbInstallLikely: boolean;
   restrictedSettingsLikely: boolean;
+  firstInstallTime: number;
+  lastUpdateTime: number;
+  signingCertificateSha256: string | null;
 };
 
 export type BackendSnapshot = {
@@ -46,7 +60,16 @@ export type BackendSnapshot = {
   installSource: InstallSourceDiagnostics;
   apps: AppItem[];
   logs: LogItem[];
-  settings: { startup: boolean; autoUpdate: boolean; debug: boolean };
+  settings: {
+    startup: boolean;
+    autoUpdate: boolean;
+    debug: boolean;
+    skipSplashVideo: boolean;
+    closePopupAds: boolean;
+    closeFeedAds: boolean;
+    logRetentionDays: number;
+  };
+  versionName: string;
 };
 
 const native = Platform.OS === 'android' ? NativeModules.ClearScreenBackend : undefined;
@@ -58,8 +81,11 @@ function normalizeApp(app: NativeApp): AppItem {
     name: app.name || app.packageName || '未知应用',
     icon: app.iconUri ? { uri: app.iconUri } : LOGO,
     skip: Boolean(app.skip),
-    network: Boolean(app.network),
-    whitelist: Boolean(app.whitelist),
+    // Network filtering is intentionally disabled so ClearScreen never owns a
+    // VPN slot needed by the user's separate VPN client.
+    network: false,
+    // The single per-app switch is authoritative: off means excluded.
+    whitelist: !Boolean(app.skip),
     isSystemApp: Boolean(app.isSystemApp),
     versionName: app.versionName,
   };
@@ -69,11 +95,26 @@ function fallbackSnapshot(): BackendSnapshot {
   return {
     backendReady: false,
     onboardingCompleted: false,
-    masterEnabled: true,
-    installedAppCount: APPS.length,
-    todaySkipCount: 28,
-    todayNetworkCount: 136,
-    permissions: { skip: true, skipRunning: false, network: true, networkRunning: false, bg: false, restrictedSettingsLikely: false },
+    masterEnabled: false,
+    installedAppCount: 0,
+    todaySkipCount: 0,
+    todayNetworkCount: 0,
+    permissions: {
+      skip: false,
+      skipRunning: false,
+      accessibilitySettingEnabled: false,
+      accessibilityServiceBound: false,
+      accessibilityProcessAlive: false,
+      accessibilityStoredServices: '',
+      network: false,
+      networkRunning: false,
+      bg: false,
+      isVivoFamily: false,
+      vendorStartupSettingsAvailable: false,
+      vendorStartupGuideConfirmed: false,
+      deviceManufacturer: 'unknown',
+      restrictedSettingsLikely: false,
+    },
     installSource: {
       installingPackageName: null,
       initiatingPackageName: null,
@@ -82,17 +123,31 @@ function fallbackSnapshot(): BackendSnapshot {
       packageSourceLabel: 'unknown',
       adbInstallLikely: false,
       restrictedSettingsLikely: false,
+      firstInstallTime: 0,
+      lastUpdateTime: 0,
+      signingCertificateSha256: null,
     },
-    apps: APPS,
-    logs: LOGS,
-    settings: { startup: true, autoUpdate: true, debug: false },
+    apps: [],
+    logs: [],
+    settings: {
+      startup: true,
+      autoUpdate: true,
+      debug: false,
+      skipSplashVideo: true,
+      closePopupAds: true,
+      closeFeedAds: true,
+      logRetentionDays: 7,
+    },
+    versionName: 'unknown',
   };
 }
 
 export function normalizeSnapshot(raw: any): BackendSnapshot {
   if (!raw || !native) return fallbackSnapshot();
   const apps = Array.isArray(raw.apps) ? raw.apps.map(normalizeApp) : [];
-  const logs = Array.isArray(raw.logs) ? raw.logs as LogItem[] : [];
+  const logs = Array.isArray(raw.logs)
+    ? (raw.logs as LogItem[]).filter(log => log.type !== 'network')
+    : [];
   const installSource: InstallSourceDiagnostics = {
     installingPackageName: raw.installSource?.installingPackageName ?? null,
     initiatingPackageName: raw.installSource?.initiatingPackageName ?? null,
@@ -101,6 +156,9 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
     packageSourceLabel: String(raw.installSource?.packageSourceLabel || 'unknown'),
     adbInstallLikely: Boolean(raw.installSource?.adbInstallLikely),
     restrictedSettingsLikely: Boolean(raw.installSource?.restrictedSettingsLikely),
+    firstInstallTime: Number(raw.installSource?.firstInstallTime || 0),
+    lastUpdateTime: Number(raw.installSource?.lastUpdateTime || 0),
+    signingCertificateSha256: raw.installSource?.signingCertificateSha256 ?? null,
   };
   return {
     backendReady: Boolean(raw.backendReady),
@@ -108,13 +166,21 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
     masterEnabled: Boolean(raw.masterEnabled),
     installedAppCount: Number(raw.installedAppCount || apps.length),
     todaySkipCount: Number(raw.todaySkipCount || 0),
-    todayNetworkCount: Number(raw.todayNetworkCount || 0),
+    todayNetworkCount: 0,
     permissions: {
       skip: Boolean(raw.accessibilityEnabled),
       skipRunning: Boolean(raw.accessibilityRunning),
-      network: Boolean(raw.vpnPrepared),
-      networkRunning: Boolean(raw.vpnRunning),
+      accessibilitySettingEnabled: Boolean(raw.accessibilitySettingEnabled ?? raw.accessibilityEnabled),
+      accessibilityServiceBound: Boolean(raw.accessibilityServiceBound ?? raw.accessibilityRunning),
+      accessibilityProcessAlive: Boolean(raw.accessibilityProcessAlive),
+      accessibilityStoredServices: String(raw.accessibilityStoredServices || ''),
+      network: false,
+      networkRunning: false,
       bg: Boolean(raw.batteryOptimizationIgnored),
+      isVivoFamily: Boolean(raw.isVivoFamily),
+      vendorStartupSettingsAvailable: Boolean(raw.vendorStartupSettingsAvailable),
+      vendorStartupGuideConfirmed: Boolean(raw.vendorStartupGuideConfirmed),
+      deviceManufacturer: String(raw.deviceManufacturer || 'unknown'),
       restrictedSettingsLikely: installSource.restrictedSettingsLikely,
     },
     installSource,
@@ -124,7 +190,14 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
       startup: raw.settings?.startup !== false,
       autoUpdate: raw.settings?.autoUpdate !== false,
       debug: Boolean(raw.settings?.debug),
+      skipSplashVideo: raw.settings?.skipSplashVideo !== false,
+      closePopupAds: raw.settings?.closePopupAds !== false,
+      closeFeedAds: raw.settings?.closeFeedAds !== false,
+      logRetentionDays: [0, 1, 7, 30].includes(Number(raw.settings?.logRetentionDays))
+        ? Number(raw.settings.logRetentionDays)
+        : 7,
     },
+    versionName: String(raw.versionName || 'unknown'),
   };
 }
 
@@ -142,10 +215,17 @@ export const ClearScreenNative = {
   },
   setAppRule: async (app: AppItem) => {
     if (native?.setAppRule) {
-      await native.setAppRule(app.packageName || app.id, app.skip, app.network, app.whitelist);
+      await native.setAppRule(app.packageName || app.id, app.skip, false, !app.skip);
     }
   },
-  setSetting: async (key: 'startup' | 'autoUpdate' | 'debug', enabled: boolean) => {
+  setLogRetentionDays: async (days: number) => {
+    if (!native?.setLogRetentionDays) return fallbackSnapshot();
+    return normalizeSnapshot(await native.setLogRetentionDays(days));
+  },
+  setSetting: async (
+    key: 'startup' | 'autoUpdate' | 'debug' | 'skipSplashVideo' | 'closePopupAds' | 'closeFeedAds',
+    enabled: boolean,
+  ) => {
     if (native?.setSetting) await native.setSetting(key, enabled);
   },
   clearLogs: async () => {
@@ -154,7 +234,9 @@ export const ClearScreenNative = {
   },
   openAccessibilitySettings: async () => native?.openAccessibilitySettings?.(),
   openAppDetailsSettings: async () => native?.openAppDetailsSettings?.(),
-  startVpn: async () => native?.startVpn?.(),
-  stopVpn: async () => native?.stopVpn?.(),
   openBatterySettings: async () => native?.openBatterySettings?.(),
+  confirmVendorStartupGuide: async (): Promise<BackendSnapshot | undefined> => {
+    if (!native?.confirmVendorStartupGuide) return undefined;
+    return normalizeSnapshot(await native.confirmVendorStartupGuide());
+  },
 };

@@ -133,7 +133,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val gesture = GestureDescription.Builder()
       .addStroke(GestureDescription.StrokeDescription(path, 0, 56L))
       .build()
-    val callback = object : GestureResultCallback() {
+    val callback = object : AccessibilityService.GestureResultCallback() {
       override fun onCompleted(gestureDescription: GestureDescription?) {
         finalizeAction(packageName, action, fingerprint, accepted = true, viaGesture = true)
       }
@@ -215,8 +215,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       .filter { it.score >= it.minimumScore }
       .maxWithOrNull(
         compareBy<DetectionAction> { it.score }
-          .thenByDescending { it.actionPriority }
-          .thenBy { it.targetBounds.top },
+          .thenBy { it.actionPriority }
+          .thenBy { -it.targetBounds.top },
       )
   }
 
@@ -273,6 +273,9 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       !nearTopRight && !ancestorHasAdSignal
     ) return null
     if (plainLabel && !compactControl && !snapshot.context.hasAdSignal && !explicitResource) return null
+    if ((strongLabel || countdownLabel) &&
+      !nearTopRight && !ancestorHasAdSignal && !snapshot.context.hasStrongAdSignal
+    ) return null
     // Resource names such as skip_button also occur in normal onboarding UIs.
     // A resource-id-only match needs both ad context AND a small corner control.
     if (explicitResource && !strongLabel && !countdownLabel && !plainLabel &&
@@ -324,7 +327,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     // An unrelated background banner may contain "广告", but this must not
     // authorize clicking every generic X on a normal page.
     val localAdContext = ancestorHasAdSignal ||
-      snapshot.hasNearbyAdSignal(targetBounds)
+      snapshot.hasNearbyAdSignal(targetBounds) ||
+      snapshot.hasAdModalPanel(targetBounds)
     if (!explicitCloseLabel && !explicitAdResource && !localAdContext) return null
 
     // A generic close icon is too dangerous to click without ad context. A
@@ -427,6 +431,36 @@ class ClearScreenAccessibilityService : AccessibilityService() {
           hasStrongAdSignal(node.label, node.resourceId) &&
           kotlin.math.abs(node.bounds.centerX() - bounds.centerX()) < width * 0.34f &&
           kotlin.math.abs(node.bounds.centerY() - bounds.centerY()) < height * 0.22f
+      }
+    }
+
+    /**
+     * SDK dialogs often put the "广告" badge at the BOTTOM of a modal and the
+     * X icon at its upper-right corner. Their nodes are too far apart for a
+     * simple nearest-neighbour check. Accept the badge as evidence only when
+     * both belong to the same bounded, centered panel; never use an ad label
+     * from an unrelated background card as authorization to click a random X.
+     */
+    fun hasAdModalPanel(close: Rect): Boolean {
+      val width = rootBounds.width().coerceAtLeast(1)
+      val height = rootBounds.height().coerceAtLeast(1)
+      val x = close.centerX()
+      val y = close.centerY()
+      return nodes.any { panel ->
+        val box = panel.bounds
+        if (!panel.isVisible ||
+          box.width() < width * 0.52f || box.width() > width * 0.93f ||
+          box.height() < height * 0.22f || box.height() > height * 0.76f ||
+          box.top < rootBounds.top + height * 0.10f ||
+          box.top > rootBounds.top + height * 0.60f ||
+          x < box.right - width * 0.23f || x > box.right + width * 0.04f ||
+          y < box.top - height * 0.05f || y > box.top + height * 0.14f
+        ) return@any false
+        nodes.any { signal ->
+          signal.isVisible && signal !== panel &&
+            hasStrongAdSignal(signal.label, signal.resourceId) &&
+            box.contains(signal.bounds.centerX(), signal.bounds.centerY())
+        }
       }
     }
 

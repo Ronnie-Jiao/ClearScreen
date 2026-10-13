@@ -56,6 +56,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       ?: rootInActiveWindow?.packageName?.toString()?.takeIf { it.isNotBlank() }
       ?: return
     if (packageName == applicationContext.packageName || isProtectedPackage(packageName)) return
+    if (ProtectedUiPolicy.isProtectedWindowClass(event.className?.toString().orEmpty())) return
 
     val rule = store.getAppRule(packageName)
     if (!rule.skipEnabled || rule.whitelist) return
@@ -102,10 +103,16 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (now - lastActionAt < ACTION_COOLDOWN_MS) return
     lastScanAt = now
     val root = findRootForPackage(packageName) ?: return
+    // Screen-wide veto comes BEFORE candidate scoring and applies even when
+    // the alarm / reminder contains a marketing banner or a "3 跳过" label.
+    if (isProtectedScreen(root, packageName)) return
     val action = findAdAction(root) ?: return
     val fingerprint = action.targetFingerprint(packageName)
     if (wasRecentlyAttempted(fingerprint, now)) return
     if (!tryReserveAttempt(fingerprint, now)) return
+    // Abort if a full-screen alarm or time-sensitive reminder appeared after
+    // recognition. A previously collected node must not be clicked there.
+    if (!mayInteractWithForeground(packageName)) return
 
     actionInFlight = true
     lastActionAt = now
@@ -142,6 +149,12 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     action: DetectionAction,
     fingerprint: String,
   ) {
+    // Recheck just before dispatchGesture: delayed WebView/ad rendering can
+    // yield to an alarm that now owns the foreground window.
+    if (!mayInteractWithForeground(packageName)) {
+      actionInFlight = false
+      return
+    }
     val x = action.targetBounds.exactCenterX()
     val y = action.targetBounds.exactCenterY()
     val path = Path().apply { moveTo(x, y) }
@@ -219,7 +232,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   private fun findAdAction(root: AccessibilityNodeInfo): DetectionAction? {
     val snapshot = AccessibilitySnapshot.capture(root)
-    if (snapshot.nodes.isEmpty()) return null
+    if (snapshot.nodes.isEmpty() || snapshot.isTimeSensitiveScreen()) return null
 
     val candidates = snapshot.nodes.mapNotNull { node ->
       findSkipCandidate(node, snapshot)
@@ -443,7 +456,27 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       packageName == "com.android.systemui" ||
       packageName == "com.google.android.permissioncontroller" ||
       packageName == "com.android.permissioncontroller" ||
-      packageName == "com.vivo.permissionmanager"
+      packageName == "com.vivo.permissionmanager" ||
+      ProtectedUiPolicy.isProtectedPackage(packageName)
+
+  private fun isProtectedScreen(
+    root: AccessibilityNodeInfo,
+    packageName: String,
+  ): Boolean =
+    ProtectedUiPolicy.isProtectedScreen(
+      packageName = packageName,
+      windowClassName = root.className?.toString().orEmpty(),
+      visibleLabels = AccessibilitySnapshot.capture(root).nodes
+        .filter { it.isVisible }.map { it.label },
+      visibleResourceIds = AccessibilitySnapshot.capture(root).nodes
+        .filter { it.isVisible }.map { it.resourceId },
+    )
+
+  private fun mayInteractWithForeground(packageName: String): Boolean {
+    if (isProtectedPackage(packageName)) return false
+    val root = findRootForPackage(packageName) ?: return false
+    return !isProtectedScreen(root, packageName)
+  }
 
   private fun wasRecentlyAttempted(key: String, now: Long): Boolean =
     recentActions[key]?.let { now - it < ACTION_REPEAT_GUARD_MS } == true
@@ -481,6 +514,13 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val rootBounds: Rect,
     val context: AdContext,
   ) {
+    fun isTimeSensitiveScreen(): Boolean =
+      ProtectedUiPolicy.isProtectedScreen(
+        packageName = "",
+        visibleLabels = nodes.asSequence().filter { it.isVisible }.map { it.label }.asIterable(),
+        visibleResourceIds = nodes.asSequence().filter { it.isVisible }.map { it.resourceId }.asIterable(),
+      )
+
     fun hasNearbyAdSignal(bounds: Rect): Boolean {
       val width = rootBounds.width().coerceAtLeast(1)
       val height = rootBounds.height().coerceAtLeast(1)

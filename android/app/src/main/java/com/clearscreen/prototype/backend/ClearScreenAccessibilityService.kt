@@ -102,6 +102,14 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
     actionInFlight = true
     lastActionAt = now
+    // An OEM may accept dispatchGesture() without returning a completion
+    // callback. Release this guard eventually so detection never stalls.
+    handler.postDelayed({
+      if (actionInFlight && lastActionAt == now) {
+        actionInFlight = false
+        if (BuildConfig.DEBUG) Log.w(TAG, "Ad action callback timed out: $packageName")
+      }
+    }, ACTION_IN_FLIGHT_TIMEOUT_MS)
     val clicked = runCatching {
       action.target.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
         (action.allowDismiss && action.target.performAction(AccessibilityNodeInfo.ACTION_DISMISS))
@@ -602,6 +610,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     private const val TAG = "ClearScreenA11y"
     private const val ACTION_COOLDOWN_MS = 480L
     private const val ACTION_VERIFY_DELAY_MS = 700L
+    private const val ACTION_IN_FLIGHT_TIMEOUT_MS = 3_000L
     private const val MIN_SCAN_INTERVAL_MS = 100L
     private const val WINDOW_PROBE_RESET_MS = 2_500L
     private val WINDOW_PROBE_DELAYS_MS = longArrayOf(220L, 600L, 1_200L)

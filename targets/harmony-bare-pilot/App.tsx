@@ -37,21 +37,16 @@ export default function App() {
           onChangeApps={setApps}
           onTab={setActiveTab}
           onOpen={() => undefined}
-          onWhitelist={() => undefined}
         />
       ) : (
         <SettingsScreen
           logRetentionDays={retentionDays}
           versionName="Harmony 试验"
-          permissions={{ skip: false, skipRunning: false, bg: false }}
           onTab={setActiveTab}
-          onPermissions={() => setActiveTab('home')}
-          onBackground={() => undefined}
-          onDiagnostics={() => undefined}
+          onServicePermissions={() => undefined}
           onClear={() => undefined}
           onRetentionChange={setRetentionDays}
           onPrivacyPolicy={() => undefined}
-          onWithdrawConsent={() => undefined}
         />
       )}
     </>

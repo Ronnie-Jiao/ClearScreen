@@ -2,24 +2,21 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, AppState, BackHandler, Platform, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import SplashScreen from './src/screens/SplashScreen';
-import WelcomeScreen from './src/screens/WelcomeScreen';
 import PermissionsScreen from './src/screens/PermissionsScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import AppsScreen from './src/screens/AppsScreen';
 import AppDetailScreen from './src/screens/AppDetailScreen';
 import RecordsScreen from './src/screens/RecordsScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import ServicePermissionsScreen from './src/screens/ServicePermissionsScreen';
 import WhitelistScreen from './src/screens/WhitelistScreen';
 import RecordDetailScreen from './src/screens/RecordDetailScreen';
-import DiagnosticsScreen from './src/screens/DiagnosticsScreen';
 import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
 import IOSSafariScreen from './src/screens/IOSSafariScreen';
 import { AppItem, LogItem } from './src/data';
 import { BackendSnapshot, ClearScreenNative } from './src/native/ClearScreenNative';
 
-const UI_SCALE = .84;
-
-type Page='splash'|'privacyConsent'|'privacyPolicy'|'welcome'|'permissions'|'home'|'apps'|'appDetail'|'records'|'recordDetail'|'settings'|'whitelist'|'diagnostics';
+type Page='splash'|'privacyConsent'|'privacyPolicy'|'permissions'|'home'|'apps'|'appDetail'|'records'|'recordDetail'|'settings'|'servicePermissions'|'whitelist';
 type MainTab='home'|'apps'|'settings';
 type AccessibilityHandoff='accessibility'|'appInfo'|'background'|null;
 type RecordsQuery={appId?:string;todayOnly?:boolean};
@@ -52,7 +49,7 @@ export default function App(){
    setSelectedId(current=>current||snapshot.apps[0]?.id||'');
  },[]);
  const refresh=useCallback(async():Promise<BackendSnapshot|undefined>=>{
-   try{const snapshot=await ClearScreenNative.getSnapshot();applySnapshot(snapshot);return snapshot}catch(error){console.warn('ClearScreen backend refresh failed',error);return undefined}
+   try{await appRuleSaveQueue.current;const snapshot=await ClearScreenNative.getSnapshot();applySnapshot(snapshot);return snapshot}catch(error){console.warn('ClearScreen backend refresh failed',error);return undefined}
  },[applySnapshot]);
  const openAccessibilitySettings=useCallback(()=>{
    accessibilityHandoff.current='accessibility';
@@ -77,7 +74,7 @@ export default function App(){
  },[openAccessibilitySettings,openAppDetailsSettings]);
  useEffect(()=>{
    let alive=true;
-   refresh().then(snapshot=>{if(alive)setTimeout(()=>alive&&setPage(Platform.OS==='ios'?'home':snapshot?.privacyConsentAccepted?(snapshot.onboardingCompleted?'home':'welcome'):'privacyConsent'),500)});
+   refresh().then(snapshot=>{if(alive)setTimeout(()=>alive&&setPage(Platform.OS==='ios'?'home':snapshot?.privacyConsentAccepted?(snapshot.onboardingCompleted?'home':'permissions'):'privacyConsent'),500)});
    const subscription=AppState.addEventListener('change',state=>{
      if(state!=='active')return;
      const handoff=accessibilityHandoff.current;
@@ -115,7 +112,7 @@ export default function App(){
      const snapshot=await ClearScreenNative.acceptPrivacyPolicy();
      applySnapshot(snapshot);
      setHistory([]);
-     setPage(snapshot.onboardingCompleted?'home':'welcome');
+     setPage(snapshot.onboardingCompleted?'home':'permissions');
    }catch(error){Alert.alert('保存失败','请重试。')}
  },[applySnapshot]);
  const withdrawPrivacyConsent=useCallback(()=>Alert.alert(
@@ -157,7 +154,7 @@ export default function App(){
    setApps(normalized);
    if(!changed.length)return;
    const save=appRuleSaveQueue.current.then(async()=>{
-     await Promise.all(changed.map(app=>ClearScreenNative.setAppRule(app)));
+     await ClearScreenNative.setAppRules(changed);
    });
    appRuleSaveQueue.current=save.catch(async error=>{
      console.warn('ClearScreen rule update failed',error);
@@ -195,6 +192,10 @@ export default function App(){
    const snapshot=await ClearScreenNative.setLogRetentionDays(days);
    if(snapshot)applySnapshot(snapshot);
  };
+ const handleRestoreDefaults=async()=>{
+   const snapshot=await ClearScreenNative.restoreDefaults();
+   applySnapshot(snapshot);
+ };
  const handleClearLogs=()=>Alert.alert('清空记录？','清空后无法恢复。',[
    {text:'取消',style:'cancel'},
    {text:'清空',style:'destructive',onPress:()=>{ClearScreenNative.clearLogs().then(applySnapshot).catch(error=>Alert.alert('清空失败',String(error)))}}
@@ -217,7 +218,6 @@ export default function App(){
  const isMainTab=page==='home'||page==='apps'||page==='settings';
  let overlay:React.ReactNode=null;
  if(page==='splash')overlay=<SplashScreen/>;
- else if(page==='welcome')overlay=<WelcomeScreen onStart={()=>{completeOnboarding();go('permissions')}} onLater={()=>{completeOnboarding();tab('home')}}/>;
  else if(page==='permissions')overlay=<PermissionsScreen onBack={back} onContinue={async()=>{
    completeOnboarding();
    const snapshot=await refresh();
@@ -225,31 +225,30 @@ export default function App(){
    else tab('home');
  }} onLater={()=>{completeOnboarding();tab('home')}} permissions={permissionsProps} onOpenAccessibility={()=>openPermission('skip')} onOpenAppInfo={openAppDetailsSettings} onHelp={()=>Alert.alert('开启方法','在系统设置中找到“净屏”，打开无障碍服务后返回此页。')}/>;
  else if(page==='privacyConsent')overlay=<PrivacyPolicyScreen mode="consent" onBack={()=>BackHandler.exitApp()} onAccept={()=>{void acceptPrivacyPolicy()}} onDecline={()=>BackHandler.exitApp()}/>;
- else if(page==='privacyPolicy')overlay=<PrivacyPolicyScreen mode="read" onBack={back}/>;
+ else if(page==='privacyPolicy')overlay=<PrivacyPolicyScreen mode="read" onBack={back} onWithdrawConsent={Platform.OS==='android'?withdrawPrivacyConsent:undefined}/>;
  else if(page==='appDetail'&&selected)overlay=<AppDetailScreen app={selected} logs={logs} onBack={back} onChange={a=>updateApps(apps.map(x=>x.id===a.id?a:x))} onRecords={()=>goRecords({appId:selected.id})} onOpenRecord={openRecord}/>;
  else if(page==='recordDetail'&&selectedLog){
    const logApp=apps.find(app=>app.id===selectedLog.appId);
    overlay=<RecordDetailScreen log={selectedLog} app={logApp} onBack={back} onOpenApp={()=>logApp&&goApp(logApp.id)} onStopApp={()=>logApp&&stopApp(logApp.id)}/>;
  }
  else if(page==='whitelist')overlay=<WhitelistScreen apps={apps} onChangeApps={updateApps} onBack={back}/>;
- else if(page==='diagnostics')overlay=<DiagnosticsScreen permissions={permissions} logs={logs} onBack={back} onRepair={()=>go('permissions')}/>;
+ else if(page==='servicePermissions')overlay=<ServicePermissionsScreen permissions={permissions} logs={logs} onBack={back} onPermissions={()=>go('permissions')} onBackground={()=>openPermission('bg')}/>;
  const homeScreen=Platform.OS==='ios'
    ? <IOSSafariScreen onPrivacyPolicy={()=>go('privacyPolicy')}/>
    : <HomeScreen master={master} onAction={handleHomeAction} checking={accessibilityChecking} onTab={tab} onPermissions={()=>go('permissions')} onRecords={()=>goRecords({todayOnly:true})} onOpenRecord={openRecord} onOpenApp={goApp} apps={apps} logs={logs} today={today} permissions={permissions} enabledAppCount={enabledAppCount}/>;
- const appsScreen=<AppsScreen apps={apps} onChangeApps={updateApps} onTab={tab} onOpen={goApp} onWhitelist={()=>go('whitelist')}/>;
- const settingsScreen=<SettingsScreen logRetentionDays={settings.logRetentionDays} versionName={versionName} permissions={permissions} onTab={tab} onPermissions={()=>go('permissions')} onBackground={()=>openPermission('bg')} onDiagnostics={()=>go('diagnostics')} onClear={handleClearLogs} onRetentionChange={days=>handleRetentionChange(days).catch(error=>Alert.alert('保存失败',String(error)))} onPrivacyPolicy={()=>go('privacyPolicy')} onWithdrawConsent={withdrawPrivacyConsent}/>;
+ const appsScreen=<AppsScreen apps={apps} onChangeApps={updateApps} onTab={tab} onOpen={goApp}/>;
+ const settingsScreen=<SettingsScreen logRetentionDays={settings.logRetentionDays} versionName={versionName} logs={logs} permissions={permissions} onTab={tab} onServicePermissions={()=>go('servicePermissions')} onClear={handleClearLogs} onRetentionChange={days=>handleRetentionChange(days).catch(error=>Alert.alert('保存失败',String(error)))} onPrivacyPolicy={()=>go('privacyPolicy')} onRestoreDefaults={Platform.OS==='android'?handleRestoreDefaults:undefined}/>;
  const recordsScreen=<RecordsScreen apps={apps} logs={logs} onBack={back} onOpenRecord={openRecord} filterAppId={recordsQuery.appId} todayOnly={recordsQuery.todayOnly}/>;
- return <><StatusBar hidden={false} style="light" backgroundColor="#8F9498" translucent={false}/><View style={s.viewport}><View style={s.scaledRoot}>
+ return <><StatusBar hidden={false} style="dark" backgroundColor="#EAF9FF" translucent={false}/><View style={s.viewport}>
    <View style={[s.screenLayer,{display:page==='home'?'flex':'none'}]}>{homeScreen}</View>
    <View style={[s.screenLayer,{display:page==='apps'?'flex':'none'}]}>{appsScreen}</View>
    <View style={[s.screenLayer,{display:page==='settings'?'flex':'none'}]}>{settingsScreen}</View>
    <View style={[s.screenLayer,{display:page==='records'?'flex':'none'}]}>{recordsScreen}</View>
    {!isMainTab&&page!=='records'&&overlay?<View style={s.screenLayer}>{overlay}</View>:null}
- </View></View></>;
+ </View></>;
 }
 
 const s=StyleSheet.create({
- viewport:{flex:1,overflow:'hidden'},
+ viewport:{flex:1,overflow:'hidden',backgroundColor:'#EAF9FF'},
  screenLayer:{...StyleSheet.absoluteFillObject},
- scaledRoot:{width:`${100/UI_SCALE}%`,height:`${100/UI_SCALE}%`,transformOrigin:'top left',transform:[{scale:UI_SCALE}]},
 });

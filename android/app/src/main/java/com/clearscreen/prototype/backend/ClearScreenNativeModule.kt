@@ -19,6 +19,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.WritableArray
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.bridge.Arguments
@@ -91,6 +92,19 @@ class ClearScreenNativeModule(
   }
 
   @ReactMethod
+  fun setAppRules(updates: ReadableArray, promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    val rules = (0 until updates.size()).associate { index ->
+      val update = requireNotNull(updates.getMap(index)) { "App rule is required" }
+      val packageName = requireNotNull(update.getString("packageName")) { "App package name is required" }
+      val enabled = update.getBoolean("skipEnabled")
+      packageName to AppRuleState(skipEnabled = enabled, whitelist = !enabled)
+    }
+    store.setAppRules(rules)
+    true
+  }
+
+  @ReactMethod
   fun setSetting(key: String, enabled: Boolean, promise: Promise) = runAsync(promise) {
     requirePrivacyConsent()
     val knownKey = when (key) {
@@ -104,6 +118,13 @@ class ClearScreenNativeModule(
     }
     store.setSettingEnabled(knownKey, enabled)
     true
+  }
+
+  @ReactMethod
+  fun restoreDefaults(promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    store.restoreDefaultPreferences()
+    snapshot()
   }
 
   @ReactMethod

@@ -2,7 +2,238 @@
 
 本文件按时间倒序记录项目修改，供后续 AI 和开发者开始任务前快速了解最近变化。自本记录建立起，新增条目的时间使用中国标准时间（UTC+08:00）；既有条目的时间按文件系统记录的本地最后修改时间整理。
 
+## 2026-10-18
+
+### 2026-10-18 02:04:08 +08:00 — 完成小米应用商店发布前合规核查，暂不上传
+
+- 对照小米开发者生态政策、上架要求、隐私合规标准和应用创建指南；确认公开隐私页仍为 2026-10-13-v1，且旧版网络权限说明和隐私邮箱与当前源码不一致。现有 Release APK 为 1.0.45 / versionCode 51，早于最新联系邮箱源码修改。
+- 记录净屏自动关闭第三方应用广告与小米“干扰其他应用正常使用”条款之间的审核风险；需平台预审确认。仓库未找到软著/电子版权证明和至少 4 张商店截图；开发者后台当前显示登录/注册，未上传或提交。
+- 验证：对 APK 执行 aapt 包名/版本/SDK/权限与 ABI 核验、apksigner 签名验证；现场打开公开隐私页核对版本、网络说明及邮箱。未执行构建、测试或小米设备兼容性测试。
+- 涉及文件：docs/wiki/应用商店合规核查.md、docs/wiki/CHANGELOG.md。
+
+### 2026-10-18 01:56:32 +08:00 — 配置用户反馈与隐私联系邮箱
+
+- 应用内意见反馈改用 support@cekoro.cn；Android/iOS 隐私政策及个人信息权利请求改用 contact@cekoro.cn。同步更新 Wiki 与公开隐私政策静态页；未使用无对应普通用户场景的商务、创始人和人事地址。
+- 这次只修正联系渠道，未改变个人信息处理目的、方式或范围，因此保留 `2026-10-16-v1` 政策版本，不触发用户重新同意。邮箱由负责人提供，未验证收件能力；公开静态页尚未部署，商店控制台未修改。
+- 验证：`npx tsc --noEmit`、主仓库 `git diff --check`、公开政策仓库 `git diff --check` 均通过；未执行 Android 构建、真机或商店控制台验收。
+- 涉及文件：`src/privacy.ts`、`src/screens/SettingsScreen.tsx`、`src/screens/PrivacyPolicyScreen.tsx`、`docs/wiki/隐私政策.md`、`docs/wiki/应用商店合规核查.md`、`docs/wiki/CHANGELOG.md`、`C:\develop\ClearScreenPrivacyPolicy\dist\index.html`。
+
+### 2026-10-18 01:36:53 +08:00 — 准备 vivo 提审版本并完成发布前核查
+
+- 将 Android 发布版本从 `1.0.44` / `versionCode 50` 升至 `1.0.45` / `versionCode 51`，生成对应正式签名 Release APK。
+- 对照 vivo 2026-09-23 版审核规范、应用分类和企业注册材料要求；核实公开隐私页线上仍为 `2026-10-13-v1`，而应用内为 `2026-10-16-v1`。将本地公开政策静态页更新到当前政策内容，补齐无障碍手势、检查更新网络请求和备案号；因 Sites 账户中无此站点项目，未部署。
+- 记录控制台企业认证审核未通过及需补充的视频材料，未接受平台协议、未上传主体材料、APK 或提交审核。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功；`aapt` 包名/版本/SDK/权限核验、`apksigner` 签名核验、`git diff --check` 和本地政策关键内容检查通过。未安装真机、未做广告行为回归、未运行 vivo 隐私/安全自检。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`docs/wiki/应用商店合规核查.md`、`docs/wiki/CHANGELOG.md`、`C:\develop\ClearScreenPrivacyPolicy\dist\index.html`。
+
+## 2026-10-18
+
+### 2026-10-18 01:20:04 +08:00 — 补充净屏 APP 备案信息
+
+- 根据负责人提供的腾讯云控制台截图，在设置“关于”中展示 `粤ICP备2026144630号-4A`，点击后打开工信部备案查询；同步加入应用内隐私政策、README 和 Wiki，并把备案待办更新为已通过。备案域名为 `clearscreen.cekoro.cn`，状态显示正常；这不代表应用商店审核通过。
+- 公开隐私政策的本地静态页源码已加入备案号。Sites 列表未找到对应项目，按仓库配置的项目 ID 查询也返回不存在，因此没有部署，线上页面仍待核对。
+- 验证：主项目与公开政策仓库的 `git diff --check` 均通过；未执行自动化测试、构建或真机验收。
+- 涉及文件：`src/privacy.ts`、`src/screens/SettingsScreen.tsx`、`src/screens/PrivacyPolicyScreen.tsx`、`README.md`、`docs/wiki/README.md`、`docs/wiki/隐私政策.md`、`docs/wiki/应用商店合规核查.md`、`docs/wiki/CHANGELOG.md`、`C:\develop\ClearScreenPrivacyPolicy\dist\index.html`。
+
+## 2026-10-17
+
+### 2026-10-17 00:32:23 +08:00 — 撤回未确认的设置页分组调整
+
+- 按用户说明先提供层级目录供其评估，将上一轮对设置页的分组及排序恢复为原样；不改变任何功能入口或动作。
+- Wiki 同步恢复为不限定分组名称的功能说明。
+- 验证：未执行。
+- 涉及文件：`src/screens/SettingsScreen.tsx`、`docs/wiki/README.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-17 00:14:08 +08:00 — 整理设置页功能分组
+
+- 将“关于”拆分为“帮助与反馈”和“关于”，把使用帮助、意见反馈、Android 诊断报告与版本信息、检查更新分别归组；把“其他”更名为“设置管理”，恢复默认继续放在页面末尾。
+- Wiki 同步记录设置页的分组顺序与各组内容。
+- 验证：`git diff --check` 通过；未执行自动化测试或真机视觉验收。
+- 涉及文件：`src/screens/SettingsScreen.tsx`、`docs/wiki/README.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-17 00:11:37 +08:00 — 移除冗余欢迎页
+
+- 首次同意隐私政策后直接进入“自动跳过服务”权限页，保留“稍后再说”进入首页的选择；已完成引导的用户仍直接进入首页。
+- 删除仅展示品牌图与开始/稍后按钮的独立欢迎页，避免在隐私同意和权限设置之间增加空白步骤。
+- 验证：`git diff --check`；未执行 TypeScript 检查、构建或真机验收。
+- 涉及文件：`App.tsx`、`src/screens/WelcomeScreen.tsx`（删除）、`src/assets.ts`、`README.md`、`docs/wiki/README.md`、`docs/wiki/CHANGELOG.md`。
+
+## 2026-10-16
+
+### 2026-10-16 15:17:29 +08:00 — 修复中国移动消息页广告被保护规则拦截
+
+- 从 Vivo 的中国移动消息页日志确认，整页此前因“话费账单提醒”“卡券到账提醒”“专属提醒不错过”中的通用“提醒”字样被误判为时间敏感界面，广告识别在候选阶段前即被阻断。现在只在中国移动包名下从保护判断中移除这三段固定消息文案；其他闹钟/计时文字、受保护窗口和控制资源 ID 仍保持拦截。
+- 同页内嵌广告的 X 是独立可点击节点，位于局部卡片右上；更新后通过同卡片 OCR 广告标记和图形 X 识别，`builtin.popup.close.embedded-ad-card` 执行后复查确认目标消失，日志记为 `result=success`。这是本次 Vivo 消息卡片的实际关闭验证。
+- 版本更新为 `1.0.44` / `versionCode 50`。`:app:assembleRelease --offline` 成功，`git diff --check` 通过；未执行自动化测试。
+- 对 Vivo V2502DA 使用 `adb install -r` 升级返回 `Success`；设备确认版本 `1.0.44` / `50`，更新时间 `2026-10-16 15:16:48`，首次安装时间仍为 `2026-09-20 15:33:13`；系统无障碍列表仍启用净屏，服务能力为 `161`（含手势）。APK SHA-256：`E3835CE17E07F5C0BE7AC1DE68D294C1D2ACD91656550A0E4B8A7F3895D99133`。
+- 本轮未重新复现 55GB 全屏开屏；包内保留其限定的同包、同窗口和新鲜 OCR 修正，因此本轮的真机关闭验证只覆盖消息卡片。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ProtectedUiPolicy.kt`、`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 14:27:59 +08:00 — 修正中国移动 55GB 开屏倒计时识别
+
+- 为 `com.greenpoint.android.mc10086.activity` 增加“55GB大流量卡、39元、40GB云盘、点击跳转详情页面”同屏组合识别；即使大图未暴露为常见图片控件或无障碍树带滚动标记，也需右上角小型倒计时控件匹配。OCR 身份校验不再因该小型跳过控件的数字/启用状态切换而作废，但实际候选与执行仍要求当前可见、启用、独立可点击的目标。
+- 版本更新为 `1.0.40` / `versionCode 46`。`:app:assembleRelease --offline` 成功；`git diff --check` 通过；未执行自动化测试。
+- 使用 `adb -s 10AG4M2KGF00527 install -r` 升级 Vivo V2502DA，返回 `Success`；设备确认 `1.0.40` / `46`，`lastUpdateTime=2026-10-16 14:27:29`，首次安装时间仍为 `2026-09-20 15:33:13`，净屏仍在系统无障碍启用列表中。Release APK SHA-256：`CCAB8E6C3C9E02AB63AAAD32AADFF3FF218AE3B9F9E15626B6984C5E529CC9C0`。小米设备未改动。
+- 未在手机上重新打开中国移动广告页做识别/关闭复测；安装与版本核对不代表广告行为验收通过。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/AdCreativeRules.kt`、`ClearScreenAccessibilityService.kt`、`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 13:54:33 +08:00 — 将诊断状态并入服务与权限页
+
+- 将系统授权、服务连接和最近异常状态直接显示在“服务与权限”页，移除“故障诊断”入口及独立页面；保留未授权或连接异常时的“自动跳过服务”修复入口。
+- 同步更新 README 与 Wiki 页面说明。
+- 验证：`npx tsc --noEmit`、`git diff --check` 通过；未执行构建或真机/模拟器界面验收。
+- 涉及文件：`src/screens/ServicePermissionsScreen.tsx`、`src/screens/DiagnosticsScreen.tsx`（删除）、`App.tsx`、`README.md`、`docs/wiki/README.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 13:54:08 +08:00 — 缩小设置页文字字号
+
+- 根据截图将设置页品牌标题、分区标题、列表项、状态值及弹窗文字适度调小；logo、图标和各行高度保持不变。
+- 验证：`git diff --check` 通过；未执行构建、测试或真机/模拟器视觉验收。
+- 涉及文件：`src/screens/SettingsScreen.tsx`、`src/components/UI.tsx`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 13:21:28 +08:00 — 按三张漏关截图改进局部证据、图形叉号和移动轮播弹窗
+
+- 按用户最新要求，本轮只修改、编译打包并升级安装，由用户自行测试；未新增或执行单元测试、截图识别回归、广告真机测试，也未在手机打开应用或操作广告/系统授权。
+- 将 OCR 的整页原始文字签名限制改为同一包名、窗口 ID、根区域及实际证据子树的节点身份、资源 ID、类型、位置、标签和可操作状态校验。仅规范化已可跳过的倒计时数字，覆盖数字与“跳过”分离成兄弟节点的 SDK；“几秒后可跳过”等等待提示继续拒绝。局部弹窗外的天气变化不再作废该弹窗的证据；开屏仍检查整窗。执行前页面发生变化时重新识别同一节点、规则与位置，刷新后再次检查目标身份、标签和可点击状态。
+- 新增 `AdCloseIconDetector.kt`：在设备内对已有小型可点击控件采样四条对角笔画、中心及间隙背景，补充文字 OCR 不输出图形 X 的情况；每帧最多 40 个候选，结果仍需同一局部区域的广告证据，只执行真实节点 `ACTION_CLICK`。不生成坐标点击，也不绕过 `cll_close_click` 假叉号硬拦截。
+- 对中国移动截图中的“广东移动 / 视频号福利 / 5GB / 立即前往 / 限量文案”增加包名限定的轮播海报规则：必须有同一非滚动、无输入框容器内的实际海报节点、下方成对“上一条/下一条”和海报右上方的小型独立关闭控件；其关闭语义仍须有文字、资源 ID 或 X 图形。补充“安全下载”为同卡片内的广告行动文案及彩云下载合规卡片条件，不点击下载入口。
+- 执行 `:app:assembleRelease --offline` 成功，Release 编译、打包及 lintVital 完成。重打包中曾遇并行窗口写入 `SettingsScreen.tsx` 时文件暂缺，文件恢复后重试成功，未覆盖该窗口修改。`git diff --check` 通过。未把编译、DEX 标记或安装成功视为广告行为验收。
+- 本任务先构建 `1.0.38` / `44`；共用工作区和 APK 随后由并行任务更新到 `1.0.39` / `45`。USB 保留数据升级返回 `Success`，Vivo V2502DA `10AG4M2KGF00527` 实际确认为 `1.0.39` / `45`，更新于 `2026-10-16 13:18:04`；首次安装时间仍为 `2026-09-20 15:33:13`，数据目录 `/data/user/0/com.clearscreen.prototype` 保留，无障碍启用列表仍包含净屏。
+- 最终交付 APK 与手机已安装 `base.apk` 的 SHA-256 完全一致：`A69F0FFA23C0E1E7E33572A590C30FCF89D0BFF784E24F199C11D68A657F70E0`；签名证书仍为 `93C410454A8263736FF60BB6E27153B19F74F4C934F444531842F5162CCFA999`。已核对包中有图形 X、局部证据校验、分离倒计时和移动轮播规则的 DEX 标记。固定副本：`C:\Users\22567\AppData\Local\Temp\clearscreen-delivery-20261016\ClearScreen-1.0.39-A69F0FFA.apk`，避免共用输出被后续打包覆盖。
+- 最终包同时包含设置页任务更新的隐私政策版本 `2026-10-16-v1`；按当前实现，旧版本同意不足以继续处理其他应用界面。用户需先打开净屏并自行确认新版隐私提示，再验证广告；本轮未代替用户确认。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAccessibilityService.kt`、`AdSemanticRules.kt`、`AdCreativeRules.kt`、新增 `AdCloseIconDetector.kt`，`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md` 与本记录。保留所有并行界面、设置、隐私和其他工作区修改。
+
+### 2026-10-16 13:21:06 +08:00 — 收紧应用页控件和列表行尺寸
+
+- 缩小应用页品牌标题、全部开启按钮、搜索框、筛选项、应用图标、应用名称和列表行高度；应用开关视觉尺寸同步缩小，并保留约 48dp 的触摸区域。
+- 验证：`git diff --check` 通过；未执行构建、测试或真机/模拟器界面预览。
+- 涉及文件：`src/screens/AppsScreen.tsx`、`src/components/UI.tsx`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 13:20:05 +08:00 — 增加首页顶部留白
+
+- 将首页内容与系统状态栏之间的留白增加 8dp，避免品牌标题区显得贴近屏幕上沿；仅调整首页，不改变其他页面。
+- 验证：`git diff --check` 通过；未执行构建、测试或真机/模拟器界面预览。
+- 涉及文件：`src/screens/HomeScreen.tsx`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 13:20:53 +08:00 — 补齐设置页反馈、帮助、更新、诊断和恢复入口
+
+- 设置页新增意见反馈邮件草稿、常见问题、手动检查 GitHub Releases、匿名诊断报告分享和恢复默认设置。诊断报告不导出包名、界面文字或屏幕内容；恢复默认关闭总开关并重置自动处理偏好，保留应用规则、处理记录和保留周期。
+- 为手动更新查询声明 Android `INTERNET` 权限，仅在用户点按时请求公开版本信息；同步应用内隐私政策版本到 `2026-10-16-v1`，更新 Wiki、README 和商店合规说明。公开托管的政策页面尚未同步。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin`、`:app:assembleRelease` 和 `git diff --check` 均通过。通过 `adb install -r` 更新 vivo V2502DA；设备确认包名 `com.clearscreen.prototype`、版本 `1.0.39`、版本代码 `45`，首次安装时间未变。未执行测试或真机界面验收。
+- 涉及文件：`src/screens/SettingsScreen.tsx`、`App.tsx`、`src/native/ClearScreenNative.ts`、`src/privacy.ts`、`src/screens/PrivacyPolicyScreen.tsx`、`app.json`、`android/app/build.gradle`、`android/app/src/main/AndroidManifest.xml`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenStore.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenNativeModule.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenPrivacyConsentStore.kt`、`README.md`、`docs/wiki/README.md`、`docs/wiki/隐私政策.md`、`docs/wiki/应用商店合规核查.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 13:10:24 +08:00 — 将今日处理次数并入首页状态卡
+
+- 将“今日处理”次数移入首页“工作中”等状态所在的上方卡片，并保留点击次数区域查看记录的操作；移除独立统计卡，使最近记录上移。
+- 验证：`git diff --check` 通过；未执行构建、测试或真机/模拟器界面预览。
+- 涉及文件：`src/screens/HomeScreen.tsx`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 13:00:26 +08:00 — 增加应用页顶部留白
+
+- 按用户截图将应用页顶部留白从 20dp 增加到 28dp，让 logo 与系统状态栏之间多出 8dp 空间。
+- 验证：`git diff --check` 通过；未执行构建、测试或真机/模拟器界面预览。
+- 涉及文件：`src/screens/AppsScreen.tsx`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 12:59:36 +08:00 — 缩小应用页控件并压低应用行高度
+
+- 按用户截图缩小应用页品牌标题区、顶部按钮、搜索框、筛选项、应用图标和开关；应用行最小高度从 82dp 降到 72dp。紧凑样式仅用于应用页，开关保留较大的触摸范围。
+- 验证：相关源码 `git diff --check` 通过；未执行构建、测试或真机/模拟器界面预览。
+- 涉及文件：`src/screens/AppsScreen.tsx`、`src/components/UI.tsx`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 12:58:01 +08:00 — 将服务与权限项目收拢到独立子页
+
+- 设置首页将“自动跳过服务”“后台运行”“故障诊断”三个入口替换为单一“服务与权限”入口；点击后进入新子页，原三项操作及状态显示保留，返回键回到设置页。
+- 同步更新 README 和项目 Wiki 的页面结构说明；Harmony 共享设置页接入新回调。
+- `git diff --check` 通过；未执行构建、测试或真机验收，未构建或安装 APK。
+- 涉及文件：`App.tsx`、`src/screens/SettingsScreen.tsx`、`src/screens/ServicePermissionsScreen.tsx`、`targets/harmony-bare-pilot/App.tsx`、`README.md`、`docs/wiki/README.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 12:57:44 +08:00 — 增加应用页品牌标题与状态栏间距
+
+- 按用户截图将应用页内容顶部留白从 12dp 增加到 20dp，为 logo/标题区与系统状态栏增加 8dp 间距；仅影响应用页。
+- 验证：未执行构建、测试或真机/模拟器界面验收。
+- 涉及文件：`src/screens/AppsScreen.tsx`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 12:56:14 +08:00 — 移除设置页的撤回同意行
+
+- 按用户截图移除设置页“撤回隐私同意”行；撤回并删除入口移至应用内隐私政策页，确认对话和原有停止处理、删除本机数据流程保留。
+- 同步修正应用内隐私说明、公开隐私政策和商店合规核查记录，避免文案仍指向设置页。
+- `git diff --check` 通过；未执行构建、测试或真机验收，未构建或安装 APK。
+- 涉及文件：`App.tsx`、`src/screens/SettingsScreen.tsx`、`src/screens/PrivacyPolicyScreen.tsx`、`targets/harmony-bare-pilot/App.tsx`、`docs/wiki/隐私政策.md`、`docs/wiki/应用商店合规核查.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-16 12:49:09 +08:00 — 屏蔽彩云天气广告跳转假叉号并升级 Vivo
+
+- 复核彩云天气 7.63.1 的 SDK 代码和小米真机日志后，确认 `cll_close_click` 虽然画成 X，实际绑定的是广告点击/跳转；`cll_close_3` 才是已核实的关闭控件。小米旧版日志中该假叉号的 `ACTION_CLICK` 被接受后紧接着出现系统“打开抖音”确认页，旧规则不能视为安全关闭。现场材料：`C:\Users\22567\AppData\Local\Temp\clearscreen-xiaomi-live-20261015\23-actions.log`、`23-frame13.png`。
+- 在 `ClearScreenAccessibilityService.kt` 的统一候选入口排除假叉号节点、其子节点及以该节点为真实点击目标的候选，并在执行前再拒绝目标资源 ID；`AdCreativeRules.kt` 只保留 `cll_close_3` 为已核实插屏关闭 ID。加入假叉号负例单测。同步修正 README/Wiki 中旧的 `cll_close_click` 关闭说明。版本更新为 `1.0.37` / versionCode `43`，Gradle 与 `app.json` 已同步。
+- 使用 JBR 21、离线执行 `:app:testReleaseUnitTest :app:assembleRelease` 成功，77 项单元测试通过，0 失败/错误/跳过；Release lintVital 通过。APK `android\app\build\outputs\apk\release\app-release.apk` SHA-256：`44A334611A45F57876EBBE5BF290B81F6015E79BE6B3700BDD2E69B171509216`；包名 `com.clearscreen.prototype`，签名证书 SHA-256 `93C410454A8263736FF60BB6E27153B19F74F4C934F444531842F5162CCFA999`。
+- 按用户要求仅对 Vivo V2502DA（序列号 `10AG4M2KGF00527`）执行 `adb -s 10AG4M2KGF00527 install -r --no-streaming`，返回 `Success`。设备确认 versionName `1.0.37` / versionCode `43`，更新于 `2026-10-16 12:48:37`；首次安装时间仍为 `2026-09-20 15:33:13`，数据目录 `/data/user/0/com.clearscreen.prototype` 和原签名包更新路径保留。系统启用无障碍列表仍包含净屏服务。小米设备未在本次升级。
+- 安装成功和单测不代表新版本的广告关闭已通过真机验收；本次没有在 Vivo 启动应用或复测广告，也没有操作系统确认页。六张截图对应的下载卡片与中国移动开屏正例仍需分别在可复现样本上做真机验证。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/AdCreativeRules.kt`、`ClearScreenAccessibilityService.kt`，相应 `AdCreativeRulesTest.kt`，`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md` 和本记录。
+
+## 2026-10-15
+
+### 2026-10-15 22:02:46 +08:00 — 小米授权已获用户同意，系统确认页模拟点击未生效
+
+- 用户明确选择“允许你在系统界面开启并继续测试”。重新读取小米 `2f8898c80822` 的确认页后，分别尝试点击页面已显示的风险勾选框及其说明区域；界面复核均仍为未选中，“确定”仍不可用。记录为“该系统页面未响应 USB 模拟点击”，没有证据把它扩大归因成所有小米设备或所有 USB 输入的限制。
+- 已请求用户在手机上直接勾选并确认，用户回复“手机暂时不在手边”。当前保留系统高敏感权限确认页；净屏仍为 `1.0.32` / `38`，系统无障碍启用列表仅有联控，净屏尚未开启。没有改写系统安全设置、修改联控或绕过该确认。
+- 真实广告自动关闭、普通页面误关和六张截图样式的真机验收仍未执行，待系统授权完成后继续。证据截图：`C:\Users\22567\AppData\Local\Temp\clearscreen-xiaomi-1.0.32-20261015\03-accessibility-checkbox.png`。本次仅追加测试进度，未改代码、构建或重复单元测试；`git diff --check` 通过。
+
+### 2026-10-15 19:26:01 +08:00 — 小米 USB 升级完成，真机测试等待系统无障碍确认
+
+- 按用户要求，对唯一当前连接的小米 `22101317C`（序列号 `2f8898c80822`，Android 14 / API 34，物理显示 1080×2400）执行 `adb -s 2f8898c80822 install -r`，安装返回 `Success`；系统确认净屏 `1.0.32` / versionCode `38`，更新于 `2026-10-15 19:20:28`。首次安装时间仍为 `2026-10-09 09:22:57`，原数据目录及历史处理记录保留，未卸载或清除数据。
+- 使用上一条记录已验证的正式签名 APK，SHA-256 仍为 `5B5E052EC3D0394BE26700BC15E7594ECF6DD24D093D5CDC6B35A3021F640595`。应用可进入首页，显示“需要开启服务”；系统启用列表当时仅有联控，净屏无障碍未授权。
+- 已打开系统“无障碍 → 已下载的应用 → 净屏 → 使用净屏”。小米弹出“无障碍为高度敏感权限”确认页，要求勾选知晓风险并确认读取屏幕/执行操作。当前保留该系统确认页，已向用户请求明确选择，尚未勾选或确认，也未使用命令绕过系统授权。
+- 本机已安装彩云天气 `7.63.1` / versionCode `350`；未发现中国移动截图对应的 `com.greenpoint.android.mc10086.activity`。真实广告点击、六张截图对应广告复现和普通页面误关测试均尚未执行，待授权后继续，不能把本次安装及首页显示记为算法验收。
+- 现场证据位于 `C:\Users\22567\AppData\Local\Temp\clearscreen-xiaomi-1.0.32-20261015`，含首页和系统授权确认截图及首次界面结构。仅追加测试进度记录，未改算法、应用规则、后台设置或其他项目代码；未重新构建或重复运行单元测试。
+
+### 2026-10-15 19:18:25 +08:00 — 按六张漏关截图补充下载卡片、开屏和延迟识别
+
+- 对照用户提供的六张截图：彩云天气滴滴弹窗、推荐广告卡片及两处带应用合规信息的下载卡片，中国移动两张“2 跳过 / 1 跳过”开屏。修正本地 OCR 将完整屏幕误缩放到应用根窗口的问题，改按物理显示尺寸映射，并排除落在应用窗口外的文本；显示尺寸、窗口 ID、包名、树结构和控件状态变化时丢弃旧证据，点击前再次校验当前树。
+- OCR 的小叉号同时从逐字元素和整行结果提取，减少与应用名称/版本同行时的漏识别。节点正文与无障碍描述分别匹配，并规范化全角字符和不可见分隔符；“2 跳过 + 按钮”等标签不再被拼成无效文本。“几秒后可跳过 / Skip in”、业务跳过和普通关闭权限等文案不触发广告动作。
+- 彩云天气下载卡片新增 `builtin.feed.close.download-disclosure`：仅在同一个有边界的卡片内具备应用名称、数值版本号、开发者、至少两项功能/权限/隐私/备案链接及明确下载文案时使用；仍要求卡片边缘真实可点击的小型关闭控件。例外只对 `com.nowcasting.activity` 生效；正常天气、会员权益、隐私页面、商店和其他应用不因这些合规字段触发。非滚动的局部 WebView 可作为卡片，真正滚动的页面容器继续排除。补充“抢先下载”作为局部广告行动文案，只识别关闭控件，不点击下载按钮。
+- 对截图中的中国移动开屏组合补充节点/OCR 联合依据：左上角小型明确广告徽标、下半屏完整“点击跳转详情页面/第三方应用”等提示、右上角真实小型跳过按钮，并要求没有可滚动页面内容。先读取当前节点文字（`builtin.skip.splash.labelled-redirect`），缺少文字时使用新鲜 OCR；不依赖 SDK 必须暴露 ImageView 等创意类名，不把普通右上角按钮作为位置兜底。
+- 用按前台包名、窗口及任务身份隔离的有限重扫替换仅 1 秒的三次重扫：普通内容重扫至约 1.8 秒，新窗口/广告候选最多检查 11 秒；候选仍存在时节流补采 OCR，连续事件不会延长同一任务的截止时间，切换前台/窗口、关闭规则或停止服务后旧任务失效。广告动作后最多再检查两次，覆盖后续广告层或被接受但未生效的点击；统计时同时刷新原控件，OCR 过期本身不再被视为关闭成功。
+- 保留原有系统确认、闹钟/计时器、隐私同意、总开关、单应用排除及可点击目标尺寸保护；不使用坐标点击、通用 `ACTION_DISMISS`、云端识别或付费接口。保留工作区此前的界面、规则存储和单应用禁用相关修改。
+- 版本同步为 `1.0.32` / versionCode `38`。使用本机 `jbr-21.0.11`、`NODE_ENV=production` 和既有临时测试依赖镜像 init 文件，以离线模式执行 `:app:testReleaseUnitTest :app:assembleRelease` 成功；67 项测试通过（较之前增加 19 项，覆盖截图转录的下载卡片/开屏组合、相似非广告负例、OCR 显示坐标、标签变体和过期任务），无失败、错误或跳过。Release 的 lintVital 与 `git diff --check` 通过；未执行前端 TypeScript、Harmony 或 iOS 检查，本次未修改其页面代码。最初尝试 Android Studio 自带 JBR 25 时 Gradle 插件解析失败，切换本机已有 JBR 21 后通过，未更改全局 Java 配置或项目依赖。
+- APK：`android/app/build/outputs/apk/release/app-release.apk`，SHA-256 `5B5E052EC3D0394BE26700BC15E7594ECF6DD24D093D5CDC6B35A3021F640595`；包名仍为 `com.clearscreen.prototype`，名称“净屏”，原 Release 证书 SHA-256 `93C410454A8263736FF60BB6E27153B19F74F4C934F444531842F5162CCFA999`，`apksigner verify` 通过。
+- 真机边界：只读核对到 vivo `10AG4M2KGF00527`（物理显示 1260×2800）仍为 `1.0.31` / `37`，净屏无障碍已启用并绑定、具有截图能力；读取时为系统通知面板，没有取得上述广告的实时节点树。未安装新版、未操作系统授权或其他应用。新增用例是依据截图手工转录的文案/几何单元回归，未执行这些图片的 ML Kit OCR 准确率测试或真机关闭验证，不能宣称六张广告均已实际关闭。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAccessibilityService.kt`、`AdSemanticRules.kt`、`AdGeometryRules.kt`、新增 `AdCreativeRules.kt`、`AdScanCoordinator.kt`，对应的 `AdSemanticRulesTest.kt`、`AdGeometryRulesTest.kt`、新增 `AdCreativeRulesTest.kt`、`AdScanCoordinatorTest.kt`，以及 `android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-10-15 10:15:11 +08:00 — 应用默认开启、全部开启和单应用排除保持一致
+
+- 按用户要求，将应用页右上角“排除应用”替换为“全部开启”：启用全部已加载应用、清除其排除状态并切回“全部”筛选，不受当前搜索或筛选范围限制；单应用仍通过原开关关闭，无新增功能说明小字。
+- 原生规则改为未保存规则的应用默认开启，后续新增应用也默认开启；已有显式关闭/白名单选择保持不变，直到用户主动操作。列表、详情与服务读取同一规则，关闭状态不会因刷新、重建存储对象或升级被覆盖。
+- 新增原生批量规则保存接口，一次写入并确认落盘；单应用更新复用同一路径。界面回到前台时先等待规则保存完成再读取状态，避免旧快照覆盖刚刚修改的开关。
+- 无障碍服务在开始 OCR、截图返回、识别结果回调和最终点击前重新检查总开关与单应用规则；关闭应用后不再安排该应用的后续 OCR，已在途结果不再触发广告动作。广告判断阈值与系统界面保护规则未变。
+- 版本同步为 `1.0.31` / versionCode `37`。`:app:testReleaseUnitTest` 48 项通过（其中新增规则存储测试 6 项，覆盖新装/新增应用默认开启、关闭保存、旧规则保持、179 个规则批量恢复、其他设置保持和写入失败上报）；主工程 `npx tsc --noEmit`、Harmony 共用页面试验 `npm run typecheck`、`:app:assembleRelease` 与签名验证通过。
+- 本机首次测试因 Maven Central/Google 仓库 TLS 连接失败未执行；使用临时 Gradle init 文件 `C:\Users\22567\AppData\Local\Temp\clearscreen-test-json-mirror.gradle`，仅为 `org.json` 测试依赖及其父 POM 使用 Aliyun 镜像后，测试和构建成功。项目生产依赖及仓库端点未改变。
+- 通过 `adb -s 2f8898c80822 install -r` 更新 Xiaomi `22101317C`，系统确认 `1.0.31` / `37`、更新于 `2026-10-15 10:10:15`，首次安装时间仍为 `2026-10-09 09:22:57`。APK SHA-256：`959CEA90A2C20EF54FA02AD17DCE72FF3F8E99410110CC95F46EA2FED23D34DA`；证书 SHA-256：`93C410454A8263736FF60BB6E27153B19F74F4C934F444531842F5162CCFA999`。
+- 真机核验：更新后显示默认“已开启 179 / 已排除 0”；手动关闭 58 同城与 Behance 后变为 `177 / 2`，回到桌面再返回应用后仍保留关闭；在“已排除”筛选下搜索 Behance，只显示一个关闭项时点“全部开启”，两项均恢复，计数回到 `179 / 0`，再次前台刷新后保持。已清空测试搜索，最终保留全部开启；截图为 `C:\Users\22567\AppData\Local\Temp\clearscreen-apps-1.0.31.png`。
+- 设备系统的净屏无障碍当时未开启（启用列表仅有 LinkPilot），未修改系统授权/后台设置，也未在其他 App 中验收真实广告处理；新装及冷重启规则行为由存储测试验证，真机未卸载、清除数据或强制停止应用。
+- 涉及文件：`App.tsx`、`src/screens/AppsScreen.tsx`、`src/native/ClearScreenNative.ts`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenStore.kt`、`ClearScreenNativeModule.kt`、`ClearScreenAccessibilityService.kt`、`android/app/src/test/java/com/clearscreen/prototype/backend/ClearScreenStoreTest.kt`、`android/app/build.gradle`、`app.json`、`targets/harmony-bare-pilot/App.tsx`、`README.md`、`docs/wiki/README.md`、`design-qa.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-15 09:39:51 +08:00 — 恢复设置页视觉改版前的层级布局
+
+- 按用户反馈，将设置页恢复到当前 Git 基线 `HEAD` 中保留的视觉改版前结构：移除额外的大号“设置”页标题、分组标题图标和行图标，恢复简洁分组标题、文字行、原行高及原有分组间距；保留隐私政策、撤回同意、记录保留、权限与诊断等入口和处理逻辑。
+- 设置页源码与 `HEAD:src/screens/SettingsScreen.tsx` 完全一致；`npx tsc --noEmit`、`git diff --check` 通过。未构建 APK、未安装设备；恢复后的真机视觉验收未执行。
+- 同步更新 `design-qa.md`，标明设置页源码已恢复但尚未重新构建/安装验证。
+- 涉及文件：`src/screens/SettingsScreen.tsx`、`design-qa.md`、`docs/wiki/CHANGELOG.md`。
+
 ## 2026-10-13
+
+### 2026-10-13 19:05:19 +08:00 — 对照 ChatGPT 高保真稿核验 Android 界面与设备版本
+
+- 重新打开并逐页核对 ChatGPT 对话“生成首页设计稿”中的首页、应用、记录和设置参考图；对照当前 Android 首页、应用和设置实现及小米真机截图。当前实现包含品牌页头、蓝白背景、圆角卡片、应用筛选列表和三项底部导航；应用管理参考图里仍画有四项导航，按现行产品结构保留三项。
+- 查明用户反馈截图不是 USB 小米真机上的最新安装：USB 设备 `2f8898c80822`（`22101317C`，Android 14，1080×2400）实际为 `1.0.30` / versionCode `36`；Android Studio 虚拟设备 `emulator-5554`（1080×2424）仍为 `1.0.2` / versionCode `3`。没有更新或清除虚拟设备数据；后续视觉验收必须先明确查看的是哪台设备。
+- `npx tsc --noEmit`、`npx expo install --check`、`git diff --check` 通过；后者仅输出仓库既有 LF/CRLF 转换提示。Release APK 已存在并已按此前记录安装到 USB 小米；本次未重新构建、未改动无障碍或手机权限。用户对 `1.0.30` 真机界面的最终视觉确认尚未取得。
+- 涉及文件：`design-qa.md`、`docs/wiki/CHANGELOG.md`。
+
+### 2026-10-13 18:06:17 +08:00 — 构建并更新小米手机 Android App
+
+- 使用当前工作区代码构建 Android Release APK，版本为 `1.0.28`（versionCode `34`）。
+- 目标设备：USB 小米 `22101317C`（Android 14，序列号 `2f8898c80822`）。先比对新旧 APK 的签名证书 SHA-256 一致，再执行 `adb -s 2f8898c80822 install -r android/app/build/outputs/apk/release/app-release.apk`；安装成功，使用 `-r` 保留原应用数据。
+- 安装后确认系统记录为 `1.0.28` / versionCode `34`，主界面 Activity 正常显示；首屏停在隐私政策同意页，未代替用户选择同意或拒绝。
+- 验证：`:app:assembleRelease` 成功；新旧 APK 签名一致；设备版本与前台页面已核实。模拟器未能启动（电脑空间不足），未用于本次安装；未修改无障碍权限或其他手机设置。
+- APK SHA-256：`ADBA1C98B45E130DF47C5E069506DE3C05299D7979DCFB9AEEAC27E6138636FF`。
+- 涉及文件：`android/app/build/outputs/apk/release/app-release.apk`、`docs/wiki/CHANGELOG.md`。
 
 ### 2026-10-13 16:57:12 +08:00 — 汇入远端 main 的其他 Agent 改动并完成联合验证
 

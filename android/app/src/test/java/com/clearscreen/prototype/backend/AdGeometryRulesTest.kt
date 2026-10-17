@@ -2,6 +2,8 @@ package com.clearscreen.prototype.backend
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
@@ -11,6 +13,26 @@ import org.junit.Test
  */
 class AdGeometryRulesTest {
   private val screen = AdGeometryRules.Box(0, 0, 852, 1846)
+
+  @Test fun screenshotCoordinatesStayOnTheDisplayDespiteInsetAppWindows() {
+    val screenshotClose = AdGeometryRules.Box(1160, 976, 1208, 1027)
+    val mapped = AdGeometryRules.mapScreenshotBox(screenshotClose, 1260, 2800, 1260, 2800)
+    assertEquals(screenshotClose, mapped)
+    // The app starts below a status bar. Its inset must not shift the X by 70px.
+    assertTrue(AdGeometryRules.Box(0, 130, 1260, 2758).contains(mapped!!.centerX, mapped.centerY))
+    assertTrue(screenshotClose.contains(mapped.centerX, mapped.centerY))
+  }
+
+  @Test fun resizedScreenshotsScaleToTheDisplayRatherThanTheAppBounds() {
+    assertEquals(AdGeometryRules.Box(1160, 976, 1208, 1026),
+      AdGeometryRules.mapScreenshotBox(AdGeometryRules.Box(580, 488, 604, 513), 630, 1400, 1260, 2800))
+  }
+
+  @Test fun invalidOcrCoordinatesCannotBecomeAClickTarget() {
+    assertNull(AdGeometryRules.mapScreenshotBox(AdGeometryRules.Box(-1, 20, 30, 40), 630, 1400, 1260, 2800))
+    assertNull(AdGeometryRules.mapScreenshotBox(AdGeometryRules.Box(600, 20, 650, 40), 630, 1400, 1260, 2800))
+    assertNull(AdGeometryRules.mapScreenshotBox(AdGeometryRules.Box(10, 20, 30, 40), 0, 1400, 1260, 2800))
+  }
 
   @Test fun countdownInTopRightIsRecognizable() {
     val countdown = AdGeometryRules.Box(659, 81, 807, 142)

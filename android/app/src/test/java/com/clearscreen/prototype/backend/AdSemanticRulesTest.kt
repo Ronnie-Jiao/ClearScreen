@@ -2,6 +2,8 @@ package com.clearscreen.prototype.backend
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
@@ -10,6 +12,29 @@ import org.junit.Test
  * an ad action. A positive text match alone NEVER authorizes a click.
  */
 class AdSemanticRulesTest {
+  @Test fun textAndDescriptionAreMatchedIndependently() {
+    assertEquals("2跳过", AdSemanticRules.selectSkipLabel(listOf("2 跳过", "按钮")))
+    assertEquals("1跳过", AdSemanticRules.selectSkipLabel(listOf("1 跳过", "跳过")))
+    assertEquals("跳过广告", AdSemanticRules.selectSkipLabel(listOf("跳过", "跳过广告")))
+    assertEquals("skipad", AdSemanticRules.selectSkipLabel(listOf("Ｓｋｉｐ　Ａｄ", "button")))
+    assertEquals("跳过", AdSemanticRules.selectSkipLabel(listOf("跳\u200b过")))
+  }
+
+  @Test fun aFutureOrBusinessSkipCannotBeOverriddenByItsShortDescription() {
+    for (label in listOf("5秒后可跳过广告", "3秒后跳过广告", "Skip in 3", "跳过倒计时 5 秒",
+      "跳过教程", "跳过片头", "跳过验证", "跳过登录")) {
+      assertNull(label, AdSemanticRules.selectSkipLabel(listOf(label, "跳过")))
+    }
+  }
+
+  @Test fun closeLabelsSurviveRoleDescriptionsWithoutAcceptingBusinessControls() {
+    assertEquals("关闭此广告", AdSemanticRules.selectCloseLabel(listOf("关闭此广告", "按钮")))
+    assertEquals("×", AdSemanticRules.selectCloseLabel(listOf("×", "关闭按钮", "X")))
+    assertNull(AdSemanticRules.selectCloseLabel(listOf("关闭权限", "关闭银行账户")))
+    assertTrue(AdSemanticRules.isNeutralControlLabel("Image Button"))
+    assertFalse(AdSemanticRules.isNeutralControlLabel("下载"))
+    assertFalse(AdSemanticRules.isNeutralControlLabel("下一步"))
+  }
   @Test fun recognizesCommonCountdownFormats() {
     for (raw in listOf("3 跳过", "03秒跳过广告", "跳过 3s", "Skip in 3", "跳过倒计时 5 秒")) {
       assertTrue(raw, AdSemanticRules.isCountdownSkip(AdSemanticRules.normalize(raw)))

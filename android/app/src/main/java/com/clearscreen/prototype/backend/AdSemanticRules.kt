@@ -1,6 +1,7 @@
 package com.clearscreen.prototype.backend
 
 import java.util.Locale
+import java.text.Normalizer
 
 /**
  * Package-independent, testable semantics for advertising UI controls.
@@ -12,22 +13,23 @@ import java.util.Locale
  * Keep this module Android-free so it can be tested without a phone.
  */
 internal object AdSemanticRules {
-  private val ignoredPunctuation = Regex("""[\s\p{Z}\-_:：，,。.!！？?()（）\[\]{}<>《》【】'"\x60~·|/\\]+""")
+  private val ignoredPunctuation = Regex("""[\s\p{Z}\p{Cf}\-_:：，,。.!！？?()（）\[\]{}<>《》【】'"\x60~·|/\\]+""")
   private val numericSkip = listOf(
     Regex("""^\d{1,3}(?:秒|s)?(?:后)?(?:跳过|skip)(?:广告|此广告|视频|ad|thisad|video)?$"""),
     Regex("""^(?:跳过|skip)(?:广告|此广告|视频|ad|thisad|video)?\d{1,3}(?:秒|s)?$"""),
     Regex("""^(?:skipin|跳过倒计时)\d{1,3}(?:秒|s)?$"""),
   )
   private val explicitSkip = setOf(
-    "跳过广告", "跳过此广告", "跳过视频",
+    "跳过广告", "跳过此广告", "跳过这条广告", "立即跳过广告", "广告跳过", "跳过视频",
+    "跳过视频广告", "跳过贴片广告", "跳过片前广告", "跳过中插广告",
     "跳过推广", "跳过开屏", "跳过开屏广告",
-    "skipad", "skipthisad", "skipvideo",
+    "skipad", "skipads", "skipthisad", "skipvideoad", "skipvideo",
     "skipadvertisement", "skipnow",
   )
   private val close = setOf(
     "关闭", "关掉", "关闭弹窗", "关闭广告", "关闭此广告",
     "关闭推广", "关闭开屏广告",
-    "close", "dismiss", "closead", "closeadvertisement",
+    "close", "dismiss", "closead", "closeadvertisement", "dismissad",
     "×", "✕", "✖", "✗", "╳", "⨯", "x",
   )
   private val explicitAdClose = setOf(
@@ -39,7 +41,7 @@ internal object AdSemanticRules {
     "sponsored", "advertisement", "interstitial", "splashad",
   )
   private val mediumAdSignals = listOf(
-    "立即下载", "立即打开", "立即办理", "点击跳转",
+    "立即下载", "安全下载", "立即打开", "立即办理", "点击跳转",
     "详情页面", "免费领取", "福利", "优惠", "促销",
     "特惠", "红包", "svip", "低至", "限时", "领券", "折扣",
   )
@@ -49,6 +51,12 @@ internal object AdSemanticRules {
     "实名认证", "账户安全", "身份验证", "新手引导", "操作教程",
     "删除账号", "退出登录",
   )
+  private val unsafeSkipLabels = listOf(
+    "跳过片头", "跳过片尾", "跳过前情", "跳过回顾", "跳过教程", "跳过引导",
+    "跳过验证", "跳过绑定", "跳过登录", "跳过支付", "跳过授权", "跳过这个步骤",
+    "skipintro", "skipoutro", "skiprecap", "skiptutorial", "skiplogin", "skipverification",
+  )
+  private val pendingSkip = Regex("""(?:\d{1,3}(?:秒|s)?后(?:可|可以)?跳过|后可(?:以)?跳过|skipin\d|跳过倒计时)""")
   // Token boundaries matter: "jump" and "skip" within unrelated long ids
   // should not automatically mark a button as a skip.
   private val skipId = Regex(
@@ -59,7 +67,48 @@ internal object AdSemanticRules {
   )
 
   fun normalize(value: String): String =
-    ignoredPunctuation.replace(value.lowercase(Locale.ROOT), "")
+    ignoredPunctuation.replace(Normalizer.normalize(value, Normalizer.Form.NFKC).lowercase(Locale.ROOT), "")
+
+  /** A ready skip remains the same control as its displayed countdown ticks. */
+  fun ocrEvidenceLabel(value: String): String {
+    val compact = normalize(value)
+    return if (!isBlockedSkipLabel(value) && (isPlainSkip(compact) || isCountdownSkip(compact))) {
+      "<ready-ad-skip>"
+    } else compact
+  }
+
+  /** Some SDKs expose the number and the ready skip label as sibling nodes. */
+  fun ocrEvidenceLabel(value: String, insideReadySkipControl: Boolean): String =
+    if (insideReadySkipControl && Regex("""^\d{1,3}(?:秒|s)?$""").matches(normalize(value))) {
+      "<ready-ad-skip-counter>"
+    } else ocrEvidenceLabel(value)
+
+  fun hasPendingSkipHint(labels: List<String>): Boolean = labels.any { label ->
+    val compact = normalize(label)
+    isBlockedSkipLabel(label) || compact.contains("后可") || compact.contains("秒后") || compact.contains("skipin")
+  }
+
+  fun isBlockedSkipLabel(label: String): Boolean {
+    val compact = normalize(label)
+    return unsafeSkipLabels.any(compact::contains) || pendingSkip.containsMatchIn(compact)
+  }
+
+  /** Text and accessibility description are alternatives, not one invented label. */
+  fun selectSkipLabel(labels: List<String>): String? {
+    if (labels.any(::isBlockedSkipLabel)) return null
+    val variants = labels.map(::normalize).distinct()
+    return variants.firstOrNull(::isExplicitSkip) ?: variants.firstOrNull(::isCountdownSkip) ?:
+      variants.firstOrNull(::isPlainSkip)
+  }
+
+  fun selectCloseLabel(labels: List<String>): String? {
+    val variants = labels.map(::normalize).distinct()
+    return variants.firstOrNull(::isExplicitAdClose) ?: variants.firstOrNull(::isClose)
+  }
+
+  fun isNeutralControlLabel(value: String): Boolean = normalize(value) in setOf(
+    "", "按钮", "button", "图片", "image", "imagebutton", "关闭按钮", "closebutton",
+  )
 
   fun isPlainSkip(compact: String): Boolean = compact == "跳过" || compact == "skip"
 

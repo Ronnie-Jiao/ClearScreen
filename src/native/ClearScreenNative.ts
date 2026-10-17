@@ -95,7 +95,7 @@ function fallbackSnapshot(): BackendSnapshot {
   return {
     backendReady: false,
     privacyConsentAccepted: false,
-    privacyPolicyVersion: '2026-10-13-v1',
+    privacyPolicyVersion: '2026-10-16-v1',
     onboardingCompleted: false,
     masterEnabled: false,
     installedAppCount: 0,
@@ -165,7 +165,7 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
   return {
     backendReady: Boolean(raw.backendReady),
     privacyConsentAccepted: Boolean(raw.privacyConsentAccepted),
-    privacyPolicyVersion: String(raw.privacyPolicyVersion || '2026-10-13-v1'),
+    privacyPolicyVersion: String(raw.privacyPolicyVersion || '2026-10-16-v1'),
     onboardingCompleted: Boolean(raw.onboardingCompleted),
     masterEnabled: Boolean(raw.masterEnabled),
     installedAppCount: Number(raw.installedAppCount || apps.length),
@@ -232,6 +232,19 @@ export const ClearScreenNative = {
       await native.setAppRule(app.packageName || app.id, app.skip, false, !app.skip);
     }
   },
+  setAppRules: async (apps: AppItem[]) => {
+    if (native?.setAppRules) {
+      await native.setAppRules(apps.map(app => ({
+        packageName: app.packageName || app.id,
+        skipEnabled: app.skip,
+      })));
+    } else if (native?.setAppRule) {
+      // Keep development clients using an older native module compatible.
+      await Promise.all(apps.map(app =>
+        native.setAppRule(app.packageName || app.id, app.skip, false, !app.skip),
+      ));
+    }
+  },
   setLogRetentionDays: async (days: number) => {
     if (!native?.setLogRetentionDays) return fallbackSnapshot();
     return normalizeSnapshot(await native.setLogRetentionDays(days));
@@ -241,6 +254,10 @@ export const ClearScreenNative = {
     enabled: boolean,
   ) => {
     if (native?.setSetting) await native.setSetting(key, enabled);
+  },
+  restoreDefaults: async (): Promise<BackendSnapshot> => {
+    if (!native?.restoreDefaults) throw new Error('Restoring settings is unavailable');
+    return normalizeSnapshot(await native.restoreDefaults());
   },
   clearLogs: async () => {
     if (!native?.clearLogs) return fallbackSnapshot();

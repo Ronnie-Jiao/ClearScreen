@@ -1,7 +1,7 @@
 import React from 'react';
 import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Background, Card, PrimaryButton, TopBar } from '../components/UI';
-import { PRIVACY_POLICY_URL } from '../privacy';
+import { APP_FILING_NUMBER, PRIVACY_CONTACT_EMAIL, PRIVACY_POLICY_URL } from '../privacy';
 import { C } from '../theme';
 
 type Section = { title: string; body: string };
@@ -16,11 +16,11 @@ const ANDROID_SECTIONS: Section[] = [
   },
   {
     title: '第三方组件和网络',
-    body: '净屏使用 Google ML Kit 中文文字识别，图片和识别结果在本机处理，不发送给 Google。Google 说明该组件可能联系 Google 服务器获取组件更新或兼容信息，并发送性能和使用指标。当前正式版不声明 Android 互联网权限；尚未对所有设备上的 SDK 网络行为进行运行时验证，因此按第三方组件可能处理诊断指标进行披露。净屏不接入账号、广告、独立统计、推送或支付服务。',
+    body: '净屏使用 Google ML Kit 中文文字识别，图片和识别结果在本机处理，不发送给 Google。Google 说明该组件可能联系 Google 服务器获取组件更新或兼容信息，并发送性能和使用指标。净屏会在你点按“检查更新”时向 GitHub 查询公开版本号和更新说明；GitHub 会收到 IP 地址等标准网络请求信息。该请求不包含应用列表、处理记录、屏幕内容或账号信息，净屏不会在后台自动检查。净屏不接入账号、广告、独立统计、推送或支付服务。',
   },
   {
     title: '保存、删除和你的选择',
-    body: '数据保存在 Android 应用私有空间，不提供云端同步，且不参与系统备份。应用规则保留到你删除规则、撤回同意或卸载应用；处理记录按上方周期自动清理。你可以在设置中清空记录，或撤回同意并删除本机规则、记录和设置。撤回后净屏停止读取其他应用界面；Android 系统中的无障碍开关由你在系统设置中管理，净屏不会代替你修改。',
+    body: '数据保存在 Android 应用私有空间，不提供云端同步，且不参与系统备份。应用规则保留到你删除规则、撤回同意或卸载应用；处理记录按上方周期自动清理。你可以在设置中清空记录，或在本页撤回同意并删除本机规则、记录和设置。撤回后净屏停止读取其他应用界面；Android 系统中的无障碍开关由你在系统设置中管理，净屏不会代替你修改。',
   },
   {
     title: '未成年人保护',
@@ -28,11 +28,15 @@ const ANDROID_SECTIONS: Section[] = [
   },
   {
     title: '开发者和联系',
-    body: '深圳市曜构智能科技有限公司（Shenzhen LumaForge Technologies Co., Ltd.）。如需查询、更正或删除个人信息，或提出隐私问题，请联系 2256764885@qq.com。',
+    body: `APP备案号：${APP_FILING_NUMBER}。深圳市曜构智能科技有限公司（Shenzhen LumaForge Technologies Co., Ltd.）。如需查询、更正或删除个人信息，或提出隐私问题，请联系 ${PRIVACY_CONTACT_EMAIL}。`,
   },
 ];
 
 const IOS_SECTIONS: Section[] = [
+  {
+    title: '版本更新',
+    body: '只有你点按“检查更新”时，净屏才会向 GitHub 查询公开版本号和更新说明。GitHub 会收到 IP 地址等标准网络请求信息；请求不包含应用列表、处理记录、屏幕内容或账号信息，净屏不会在后台自动检查。',
+  },
   {
     title: 'Safari 网页处理',
     body: '只有你在 Safari 设置中启用净屏扩展、在扩展菜单中开启过滤并允许访问相应网站后，扩展才会处理该 Safari 网页。扩展会在本机临时检查网页中的可访问文字、控件标识和布局，只尝试点击明确标记为广告的跳过或关闭控件；不截屏、不使用 OCR，也不操作其他 iPhone App。',
@@ -51,7 +55,7 @@ const IOS_SECTIONS: Section[] = [
   },
   {
     title: '开发者和联系',
-    body: '深圳市曜构智能科技有限公司（Shenzhen LumaForge Technologies Co., Ltd.）。如需提出隐私问题，请联系 2256764885@qq.com。',
+    body: `APP备案号：${APP_FILING_NUMBER}。深圳市曜构智能科技有限公司（Shenzhen LumaForge Technologies Co., Ltd.）。如需提出隐私问题，请联系 ${PRIVACY_CONTACT_EMAIL}。`,
   },
 ];
 
@@ -60,11 +64,13 @@ export default function PrivacyPolicyScreen({
   onBack,
   onAccept,
   onDecline,
+  onWithdrawConsent,
 }: {
   mode: 'consent' | 'read';
   onBack: () => void;
   onAccept?: () => void;
   onDecline?: () => void;
+  onWithdrawConsent?: () => void;
 }) {
   const openFullPolicy = () => Linking.openURL(PRIVACY_POLICY_URL);
   const sections = Platform.OS === 'ios' ? IOS_SECTIONS : ANDROID_SECTIONS;
@@ -81,8 +87,8 @@ export default function PrivacyPolicyScreen({
             {mode === 'consent'
               ? '请先阅读隐私政策。你同意后，净屏才会读取应用列表、无障碍状态或其他应用界面。'
               : Platform.OS === 'ios'
-                ? 'iOS Safari 扩展说明 · 2026年10月13日'
-                : '版本 2026-10-13-v1 · 2026年10月13日生效'}
+                ? 'iOS Safari 扩展说明 · 2026年10月16日'
+                : '版本 2026-10-16-v1 · 2026年10月16日生效'}
           </Text>
           {sections.map(section => (
             <Card key={section.title} style={s.card}>
@@ -93,6 +99,11 @@ export default function PrivacyPolicyScreen({
           {Platform.OS === 'android' ? (
             <Pressable accessibilityRole="link" onPress={openFullPolicy} style={s.linkButton}>
               <Text style={s.link}>打开公开版隐私政策</Text>
+            </Pressable>
+          ) : null}
+          {Platform.OS === 'android' && mode === 'read' && onWithdrawConsent ? (
+            <Pressable accessibilityRole="button" onPress={onWithdrawConsent} style={s.withdrawButton}>
+              <Text style={s.withdrawText}>撤回并删除</Text>
             </Pressable>
           ) : null}
         </ScrollView>
@@ -110,16 +121,18 @@ export default function PrivacyPolicyScreen({
 }
 
 const s = StyleSheet.create({
-  root: { flex: 1, paddingHorizontal: 18 },
-  pageTitle: { fontSize: 28, fontWeight: '900', color: C.navy, paddingVertical: 16 },
+  root: { flex: 1, paddingHorizontal: 16 },
+  pageTitle: { fontSize: 28, fontWeight: '900', color: C.navy, paddingVertical: 15 },
   content: { paddingBottom: 20 },
-  intro: { fontSize: 15, lineHeight: 23, fontWeight: '700', color: C.text, marginBottom: 12 },
-  card: { padding: 16, marginBottom: 10 },
-  sectionTitle: { fontSize: 17, fontWeight: '900', color: C.navy, marginBottom: 8 },
-  body: { fontSize: 14, lineHeight: 22, color: C.text },
-  linkButton: { alignSelf: 'center', paddingVertical: 14, paddingHorizontal: 18 },
-  link: { color: C.blue, fontSize: 15, fontWeight: '800', textDecorationLine: 'underline' },
-  actions: { gap: 8, paddingTop: 8, paddingBottom: 10 },
-  decline: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  declineText: { color: C.text2, fontSize: 15, fontWeight: '800' },
+  intro: { fontSize: 16, lineHeight: 24, fontWeight: '700', color: C.text, marginBottom: 14 },
+  card: { padding: 18, marginBottom: 13 },
+  sectionTitle: { fontSize: 18, fontWeight: '900', color: C.navy, marginBottom: 9 },
+  body: { fontSize: 16, lineHeight: 25, color: C.text },
+  linkButton: { alignSelf: 'center', paddingVertical: 12, paddingHorizontal: 16 },
+  link: { color: C.blue, fontSize: 16, fontWeight: '800', textDecorationLine: 'underline' },
+  withdrawButton: { alignSelf: 'center', paddingVertical: 12, paddingHorizontal: 16 },
+  withdrawText: { color: C.red, fontSize: 16, fontWeight: '800' },
+  actions: { gap: 7, paddingTop: 13, paddingBottom: 10, borderTopWidth: 1, borderTopColor: C.line, backgroundColor:'rgba(244,252,255,0.97)' },
+  decline: { minHeight: 48, alignItems: 'center', justifyContent: 'center' },
+  declineText: { color: C.text2, fontSize: 16, fontWeight: '800' },
 });

@@ -91,7 +91,19 @@ internal object ProtectedUiPolicy {
     visibleResourceIds: Iterable<String> = emptyList(),
   ): Boolean {
     if (isProtectedPackage(packageName) || isProtectedWindowClass(windowClassName)) return true
-    if (visibleLabels.any(::isProtectedText)) return true
+    val labelsToCheck = if (packageName == "com.greenpoint.android.mc10086.activity") {
+      visibleLabels.map { label ->
+        // These fixed China Mobile message-center copy strings mention
+        // reminders, but are account/coupon notifications rather than active
+        // timers. Remove only the incidental phrases; other time-sensitive
+        // labels and all protected control IDs remain protected.
+        listOf("话费账单提醒", "卡券到账提醒", "专属提醒不错过")
+          .fold(label) { remaining, phrase -> remaining.replace(phrase, "", ignoreCase = true) }
+      }
+    } else {
+      visibleLabels
+    }
+    if (labelsToCheck.any(::isProtectedText)) return true
     if (visibleResourceIds.any(::isProtectedResourceId)) return true
     return false
   }

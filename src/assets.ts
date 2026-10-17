@@ -1,6 +1,7 @@
 import { ImageSourcePropType } from 'react-native';
 
 export const LOGO: ImageSourcePropType = require('../assets/logo.png');
+export const UI_BACKGROUND: ImageSourcePropType = require('../assets/ui-background.png');
 
 export const APP_ICONS = {
   xhs: require('../assets/apps/xhs.png'),

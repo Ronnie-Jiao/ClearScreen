@@ -5,6 +5,26 @@ package com.clearscreen.prototype.backend
  * no coordinate alone is ever sufficient to authorize an action.
  */
 internal object AdGeometryRules {
+  /** Accessibility screenshots cover the display, not the app's inset window. */
+  fun mapScreenshotBox(
+    box: Box,
+    imageWidth: Int,
+    imageHeight: Int,
+    displayWidth: Int,
+    displayHeight: Int,
+  ): Box? {
+    if (imageWidth <= 0 || imageHeight <= 0 || displayWidth <= 0 || displayHeight <= 0 ||
+      box.width <= 0 || box.height <= 0 || box.left < 0 || box.top < 0 ||
+      box.right > imageWidth || box.bottom > imageHeight
+    ) return null
+    return Box(
+      (box.left.toLong() * displayWidth / imageWidth).toInt(),
+      (box.top.toLong() * displayHeight / imageHeight).toInt(),
+      (box.right.toLong() * displayWidth / imageWidth).toInt(),
+      (box.bottom.toLong() * displayHeight / imageHeight).toInt(),
+    ).takeIf { it.width > 0 && it.height > 0 }
+  }
+
   data class Box(
     val left: Int,
     val top: Int,

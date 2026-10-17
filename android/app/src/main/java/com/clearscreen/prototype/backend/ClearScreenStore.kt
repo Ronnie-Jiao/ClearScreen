@@ -1,6 +1,7 @@
 package com.clearscreen.prototype.backend
 
 import android.content.Context
+import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -8,7 +9,7 @@ import java.util.Date
 import java.util.Locale
 
 data class AppRuleState(
-  val skipEnabled: Boolean = false,
+  val skipEnabled: Boolean = true,
   val networkBlockEnabled: Boolean = false,
   val whitelist: Boolean = false,
 )
@@ -23,16 +24,10 @@ data class StoredEvent(
   val text: String,
 )
 
-class ClearScreenStore(context: Context) {
+class ClearScreenStore internal constructor(private val preferences: SharedPreferences) {
+  constructor(context: Context) : this(openPreferences(context))
+
   private val lock = Any()
-  // Keep the existing preference file and additive migration path. The UI and
-  // accessibility service now share the app process, while this mode remains
-  // compatible with installations that are upgrading from the old service process.
-  @Suppress("DEPRECATION")
-  private val preferences = context.getSharedPreferences(
-    PREFERENCES,
-    Context.MODE_PRIVATE or Context.MODE_MULTI_PROCESS,
-  )
 
   /**
    * SharedPreferences survives an in-place APK update as long as the package name and
@@ -85,28 +80,38 @@ class ClearScreenStore(context: Context) {
 
   fun getAppRule(packageName: String): AppRuleState = synchronized(lock) {
     val rules = JSONObject(preferences.getString(KEY_APP_RULES, "{}") ?: "{}")
-    // New apps remain off until the user explicitly enables their rule.
+    // Unconfigured apps are enabled, including apps installed later. Persisted
+    // opt-outs take priority and are never reset by an upgrade or a refresh.
     val value = rules.optJSONObject(packageName) ?: return@synchronized AppRuleState()
+    val enabled = value.optBoolean("skipEnabled", true) && !value.optBoolean("whitelist", false)
     AppRuleState(
-      skipEnabled = value.optBoolean("skipEnabled", false),
-      networkBlockEnabled = value.optBoolean("networkBlockEnabled", false),
-      whitelist = value.optBoolean("whitelist", false),
+      skipEnabled = enabled,
+      networkBlockEnabled = enabled && value.optBoolean("networkBlockEnabled", false),
+      whitelist = !enabled,
     )
   }
 
-  fun setAppRule(packageName: String, rule: AppRuleState) = synchronized(lock) {
+  fun setAppRule(packageName: String, rule: AppRuleState) {
+    setAppRules(mapOf(packageName to rule))
+  }
+
+  fun setAppRules(updates: Map<String, AppRuleState>) = synchronized(lock) {
+    if (updates.isEmpty()) return@synchronized
+    require(updates.keys.all { it.isNotBlank() }) { "App package name is required" }
     val rules = JSONObject(preferences.getString(KEY_APP_RULES, "{}") ?: "{}")
-    val safeRule = if (rule.whitelist) {
-      rule.copy(skipEnabled = false, networkBlockEnabled = false)
-    } else {
-      rule
+    updates.forEach { (packageName, rule) ->
+      val enabled = rule.skipEnabled && !rule.whitelist
+      rules.put(packageName, JSONObject().apply {
+        put("skipEnabled", enabled)
+        put("networkBlockEnabled", enabled && rule.networkBlockEnabled)
+        put("whitelist", !enabled)
+      })
     }
-    rules.put(packageName, JSONObject().apply {
-      put("skipEnabled", safeRule.skipEnabled)
-      put("networkBlockEnabled", safeRule.networkBlockEnabled)
-      put("whitelist", safeRule.whitelist)
-    })
-    preferences.edit().putString(KEY_APP_RULES, rules.toString()).apply()
+    // One durable write makes a bulk update visible as a whole and lets the
+    // bridge report a save failure instead of silently acknowledging it.
+    check(preferences.edit().putString(KEY_APP_RULES, rules.toString()).commit()) {
+      "Unable to save app rules"
+    }
   }
 
   fun isSettingEnabled(key: String, defaultValue: Boolean): Boolean =
@@ -114,6 +119,21 @@ class ClearScreenStore(context: Context) {
 
   fun setSettingEnabled(key: String, enabled: Boolean) {
     preferences.edit().putBoolean(key, enabled).apply()
+  }
+
+  /** Restore behavior preferences while preserving app rules, history, consent, and retention. */
+  fun restoreDefaultPreferences() = synchronized(lock) {
+    check(preferences.edit()
+      .putBoolean(KEY_MASTER_ENABLED, false)
+      .putBoolean(KEY_STARTUP, true)
+      .putBoolean(KEY_AUTO_UPDATE, true)
+      .putBoolean(KEY_DEBUG, false)
+      .putBoolean(KEY_SKIP_SPLASH_VIDEO, true)
+      .putBoolean(KEY_CLOSE_POPUP_ADS, true)
+      .putBoolean(KEY_CLOSE_FEED_ADS, true)
+      .commit()) {
+      "Unable to restore default preferences"
+    }
   }
 
   fun getLogRetentionDays(): Int =
@@ -233,6 +253,13 @@ class ClearScreenStore(context: Context) {
   }
 
   companion object {
+    // Preserve the existing file and compatibility with old service processes.
+    @Suppress("DEPRECATION")
+    private fun openPreferences(context: Context): SharedPreferences = context.getSharedPreferences(
+      PREFERENCES,
+      Context.MODE_PRIVATE or Context.MODE_MULTI_PROCESS,
+    )
+
     private const val PREFERENCES = "clearscreen_backend"
     private const val KEY_STORAGE_VERSION = "storageSchemaVersion"
     private const val KEY_ONBOARDING_COMPLETED = "onboardingCompleted"

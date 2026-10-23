@@ -49,6 +49,17 @@ internal object AdDecisionPolicy {
   ): Boolean = hasSkipLabel && compactTopRight && hasLargeCreative &&
     (hasExplicitAdMarker || (promotionalSignalCount >= 2 && hasPromotionalAction))
 
+  fun allowOcrBackedBottomLeftSplashSkip(
+    hasSkipLabel: Boolean,
+    compactBottomLeft: Boolean,
+    hasLargeCreative: Boolean,
+    currentWindowEvidence: Boolean,
+    controlInsideCreative: Boolean,
+    hasExplicitAdMarker: Boolean,
+    hasPromotionalAction: Boolean,
+  ): Boolean = hasSkipLabel && compactBottomLeft && hasLargeCreative &&
+    currentWindowEvidence && controlInsideCreative && hasExplicitAdMarker && hasPromotionalAction
+
   fun allowOcrBackedPopupClose(
     hasCloseSemantic: Boolean,
     isBoundedLocalRegion: Boolean,
@@ -66,6 +77,29 @@ internal object AdDecisionPolicy {
     hasPlayerSurface: Boolean,
     playerEntry: Boolean,
   ): Boolean = hasVideoAdCue || (playerEntry && hasPlayerSurface)
+
+  fun shouldEvaluateGenericAdCandidates(
+    isVideoPlayer: Boolean,
+    hasVideoSpecificCandidate: Boolean,
+  ): Boolean = !isVideoPlayer || !hasVideoSpecificCandidate
+
+  fun allowOcrBackedFullScreenAdClose(
+    hasCloseSemantic: Boolean,
+    compactTopRightControl: Boolean,
+    currentWindowEvidence: Boolean,
+    controlBelongsToLargeCreative: Boolean,
+    hasExplicitAdMarker: Boolean,
+  ): Boolean = hasCloseSemantic && compactTopRightControl && currentWindowEvidence &&
+    controlBelongsToLargeCreative && hasExplicitAdMarker
+
+  fun allowOcrBackedFloatingCreativeClose(
+    hasCloseSemantic: Boolean,
+    compactCreativeEdgeTarget: Boolean,
+    currentWindowEvidence: Boolean,
+    sameCreativeEvidence: Boolean,
+    hasAdMarkerOrPromoCluster: Boolean,
+  ): Boolean = hasCloseSemantic && compactCreativeEdgeTarget && currentWindowEvidence &&
+    sameCreativeEvidence && hasAdMarkerOrPromoCluster
 
   fun allowUnlabeledClose(hasCloseId: Boolean, hasOcrGlyph: Boolean): Boolean =
     hasCloseId || hasOcrGlyph

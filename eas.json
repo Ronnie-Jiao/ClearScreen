@@ -1,0 +1,19 @@
+{
+  "cli": {
+    "appVersionSource": "local"
+  },
+  "build": {
+    "preview": {
+      "ios": {
+        "distribution": "internal",
+        "autoIncrement": true
+      }
+    },
+    "production": {
+      "ios": {
+        "distribution": "store",
+        "autoIncrement": true
+      }
+    }
+  }
+}

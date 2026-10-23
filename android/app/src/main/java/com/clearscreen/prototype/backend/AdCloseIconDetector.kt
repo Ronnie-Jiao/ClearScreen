@@ -17,16 +17,19 @@ internal object AdCloseIconDetector {
       target.bottom > bitmap.height || target.width() < 14 || target.height() < 14
     ) return null
     val aspect = target.width().toDouble() / target.height()
-    if (aspect !in 0.65..1.55) return null
+    if (aspect !in 0.55..2.0) return null
     val width = target.width()
     val height = target.height()
     val pixels = IntArray(width * height)
     bitmap.getPixels(pixels, 0, width, target.left, target.top, width, height)
+    val levels = FloatArray(pixels.size) { index ->
+      val color = pixels[index]
+      ((color shr 16 and 255) * 0.2126 + (color shr 8 and 255) * 0.7152 +
+        (color and 255) * 0.0722).toFloat()
+    }
     fun luminance(x: Double, y: Double): Double {
-      val color = pixels[y.roundToInt().coerceIn(0, height - 1) * width +
-        x.roundToInt().coerceIn(0, width - 1)]
-      return ((color shr 16 and 255) * 0.2126 + (color shr 8 and 255) * 0.7152 +
-        (color and 255) * 0.0722)
+      return levels[y.roundToInt().coerceIn(0, height - 1) * width +
+        x.roundToInt().coerceIn(0, width - 1)].toDouble()
     }
     fun patch(x: Double, y: Double, spread: Double): Double =
       (luminance(x, y) + luminance(x - spread, y) + luminance(x + spread, y) +
@@ -35,12 +38,20 @@ internal object AdCloseIconDetector {
     var bestScore = 0.0
     var best: Rect? = null
     val side = min(width, height).toDouble()
-    for (offsetX in listOf(-0.07, 0.0, 0.07)) {
-      for (offsetY in listOf(-0.07, 0.0, 0.07)) {
+    // The accessible touch area can be padded or rectangular while the drawn
+    // glyph is tiny/off-centre. Search inside that real control only.
+    val offsets = doubleArrayOf(-0.24, -0.12, 0.0, 0.12, 0.24)
+    val fractions = doubleArrayOf(0.09, 0.12, 0.16, 0.21, 0.27, 0.33)
+    val distances = doubleArrayOf(0.35, 0.50, 0.65, 0.80, 0.95)
+    for (offsetX in offsets) {
+      for (offsetY in offsets) {
         val centerX = (width - 1) * (0.5 + offsetX)
         val centerY = (height - 1) * (0.5 + offsetY)
-        for (fraction in listOf(0.17, 0.21, 0.25, 0.29, 0.33)) {
+        for (fraction in fractions) {
           val radius = side * fraction
+          if (radius < 4.0 || centerX - radius < 0 || centerY - radius < 0 ||
+            centerX + radius >= width || centerY + radius >= height
+          ) continue
           val spread = (radius * 0.035).coerceAtLeast(0.4)
           // Cardinal samples fall between the diagonal strokes, inside a circle
           // border. A circle alone or a plus sign must not count as an X.
@@ -52,17 +63,30 @@ internal object AdCloseIconDetector {
           )
           if (background.max() - background.min() > 65.0) continue
           val backgroundLevel = background.average()
-          val arms = listOf(-1 to -1, -1 to 1, 1 to -1, 1 to 1).map { (x, y) ->
-            listOf(0.35, 0.50, 0.65, 0.80, 0.95).map { distance ->
-              patch(centerX + x * radius * distance, centerY + y * radius * distance, spread)
+          val centerContrast = patch(centerX, centerY, spread) - backgroundLevel
+          if (abs(centerContrast) < 20.0) continue
+          val direction = if (centerContrast > 0) 1.0 else -1.0
+          var score = Double.MAX_VALUE
+          var valid = true
+          for (arm in 0..3) {
+            val x = if (arm < 2) -1 else 1
+            val y = if (arm % 2 == 0) -1 else 1
+            var contrastSum = 0.0
+            var matched = 0
+            for (distance in distances) {
+              val contrast = (patch(centerX + x * radius * distance,
+                centerY + y * radius * distance, spread) - backgroundLevel) * direction
+              contrastSum += contrast
+              if (contrast >= 18.0) matched++
             }
+            val armContrast = contrastSum / distances.size
+            if (matched < 4 || armContrast < 26.0) {
+              valid = false
+              break
+            }
+            score = min(score, armContrast)
           }
-          val contrast = arms.flatten().average() - backgroundLevel
-          if (abs(contrast) < 38.0) continue
-          val direction = if (contrast > 0) 1.0 else -1.0
-          if (arms.any { arm -> arm.count { (it - backgroundLevel) * direction >= 24.0 } < 4 }) continue
-          if ((patch(centerX, centerY, spread) - backgroundLevel) * direction < 24.0) continue
-          val score = arms.minOf { abs(it.average() - backgroundLevel) }
+          if (!valid) continue
           if (score > bestScore) {
             bestScore = score
             best = Rect(

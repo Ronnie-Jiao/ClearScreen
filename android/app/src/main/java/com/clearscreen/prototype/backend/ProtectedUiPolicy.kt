@@ -91,8 +91,16 @@ internal object ProtectedUiPolicy {
     visibleResourceIds: Iterable<String> = emptyList(),
   ): Boolean {
     if (isProtectedPackage(packageName) || isProtectedWindowClass(windowClassName)) return true
+    val labels = visibleLabels.toList()
+    // ECalendar's month/home page includes a bare "提醒" shortcut on a solar-term
+    // card. It is not an active reminder. Never strip compound reminder text,
+    // alarm controls, or this label outside the fully identified home layout.
+    val calendarHome = packageName == WifiPromotionRules.CALENDAR_PACKAGE_NAME &&
+      windowClassName == "cn.etouch.ecalendar.module.main.ui.MainActivity" &&
+      listOf("日历", "黄历", "天气", "我的").all { tab -> labels.any { it.trim() == tab } } &&
+      labels.any { Regex("20[0-9]{2}年(?:0?[1-9]|1[0-2])月").containsMatchIn(it) }
     val labelsToCheck = if (packageName == "com.greenpoint.android.mc10086.activity") {
-      visibleLabels.map { label ->
+      labels.map { label ->
         // These fixed China Mobile message-center copy strings mention
         // reminders, but are account/coupon notifications rather than active
         // timers. Remove only the incidental phrases; other time-sensitive
@@ -100,9 +108,7 @@ internal object ProtectedUiPolicy {
         listOf("话费账单提醒", "卡券到账提醒", "专属提醒不错过")
           .fold(label) { remaining, phrase -> remaining.replace(phrase, "", ignoreCase = true) }
       }
-    } else {
-      visibleLabels
-    }
+    } else if (calendarHome) labels.filterNot { it.trim() == "提醒" } else labels
     if (labelsToCheck.any(::isProtectedText)) return true
     if (visibleResourceIds.any(::isProtectedResourceId)) return true
     return false

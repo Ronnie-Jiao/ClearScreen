@@ -1,18 +1,20 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { Image, ImageBackground, ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { C, R } from '../theme';
+import { C, COMPACT_UI, R } from '../theme';
 import { LOGO, UI_BACKGROUND } from '../assets';
+import { ScreenInsetsContext, SCREEN_TOP_GAP } from './ScreenInsets';
 
 export function Background({children}:{children:React.ReactNode}){
-  return <ImageBackground source={UI_BACKGROUND} resizeMode="stretch" style={styles.root} imageStyle={styles.backgroundImage}>
+  const {top}=useContext(ScreenInsetsContext);
+  return <ImageBackground source={UI_BACKGROUND} resizeMode="stretch" style={[styles.root,{paddingTop:top+SCREEN_TOP_GAP}]} imageStyle={styles.backgroundImage}>
     {children}
   </ImageBackground>;
 }
 
-export function Card({children,style}:{children:React.ReactNode;style?:any}){
-  return <View style={[styles.card,style]}>{children}</View>;
+export function Card({children,style,compact=false}:{children:React.ReactNode;style?:any;compact?:boolean}){
+  return <View style={[styles.card,compact&&styles.cardCompact,style]}>{children}</View>;
 }
 
 export function Toggle({value,onChange,compact=false}:{value:boolean;onChange?:()=>void;compact?:boolean}){
@@ -21,8 +23,8 @@ export function Toggle({value,onChange,compact=false}:{value:boolean;onChange?:(
   </Pressable>;
 }
 
-export function Badge({children,green=true}:{children:React.ReactNode;green?:boolean}){
-  return <View style={[styles.badge,!green&&{backgroundColor:'#EDF1F6'}]}><Text style={[styles.badgeText,!green&&{color:'#7186A3'}]}>{children}</Text></View>;
+export function Badge({children,green=true,compact=false}:{children:React.ReactNode;green?:boolean;compact?:boolean}){
+  return <View style={[styles.badge,compact&&styles.badgeCompact,!green&&{backgroundColor:'#EDF1F6'}]}><Text style={[styles.badgeText,compact&&styles.badgeTextCompact,!green&&{color:'#7186A3'}]}>{children}</Text></View>;
 }
 
 export function AppIcon({source,size=56}:{source:ImageSourcePropType;size?:number}){
@@ -47,34 +49,38 @@ export function BrandHeader({title='净屏',tagline=false,action,compact=false,s
   </View>;
 }
 
-export function TopBar({title,onBack}:{title:string;onBack:()=>void}){
-  return <View style={styles.topbar}>
-    <Pressable accessibilityRole="button" onPress={onBack} hitSlop={16} style={styles.backButton}><Ionicons name="chevron-back" size={27} color={C.navy}/></Pressable>
-    <Text style={styles.topTitle}>{title}</Text><View style={{width:36}}/>
+export function TopBar({title,onBack,compact=false}:{title:string;onBack:()=>void;compact?:boolean}){
+  return <View style={[styles.topbar,compact&&styles.topbarCompact]}>
+    <Pressable accessibilityRole="button" onPress={onBack} hitSlop={16} style={styles.backButton}><Ionicons name="chevron-back" size={compact?22:27} color={C.navy}/></Pressable>
+    <Text style={[styles.topTitle,compact&&styles.topTitleCompact]}>{title}</Text><View style={{width:36}}/>
   </View>;
 }
 
-export function PrimaryButton({title,onPress}:{title:string;onPress:()=>void}){
-  return <Pressable onPress={onPress}><LinearGradient colors={['#0D69F5','#15A4EA']} start={{x:0,y:0}} end={{x:1,y:0}} style={styles.primary}><Text style={styles.primaryText}>{title}</Text></LinearGradient></Pressable>;
+export function PrimaryButton({title,onPress,compact=false}:{title:string;onPress:()=>void;compact?:boolean}){
+  return <Pressable onPress={onPress}><LinearGradient colors={['#0D69F5','#15A4EA']} start={{x:0,y:0}} end={{x:1,y:0}} style={[styles.primary,compact&&styles.primaryCompact]}><Text style={[styles.primaryText,compact&&styles.primaryTextCompact]}>{title}</Text></LinearGradient></Pressable>;
 }
 
 export function SectionTitle({title}:{title:string}){return <Text style={styles.sectionTitle}>{title}</Text>}
-export function Chevron(){return <Ionicons name="chevron-forward" size={22} color={C.text2}/>}
+export function Chevron({compact=false}:{compact?:boolean}){return <Ionicons name="chevron-forward" size={compact?18:22} color={C.text2}/>}
 
 const styles=StyleSheet.create({
-  root:{flex:1,backgroundColor:C.bg,overflow:'hidden',paddingTop:6,paddingBottom:0},backgroundImage:{width:'100%',height:'100%'},
+  root:{flex:1,backgroundColor:C.bg,overflow:'hidden',paddingBottom:0},backgroundImage:{width:'100%',height:'100%'},
   card:{backgroundColor:'rgba(255,255,255,0.96)',borderRadius:R.lg,borderWidth:1,borderColor:'rgba(255,255,255,0.98)',shadowColor:'#4A7EA2',shadowOpacity:.10,shadowRadius:18,shadowOffset:{width:0,height:8},elevation:3},
+  cardCompact:{borderRadius:COMPACT_UI.cardRadius},
   toggle:{width:50,height:30,borderRadius:16,backgroundColor:C.graySwitch,padding:3,justifyContent:'center'},toggleCompact:{width:42,height:26,borderRadius:14},
   toggleOn:{backgroundColor:C.blue},
   knob:{width:24,height:24,borderRadius:12,backgroundColor:'#fff',shadowColor:'#243B55',shadowOpacity:.14,shadowRadius:4,shadowOffset:{width:0,height:1}},knobCompact:{width:20,height:20,borderRadius:10},
   knobOn:{alignSelf:'flex-end'},
   badge:{alignSelf:'flex-start',backgroundColor:C.greenBg,borderRadius:20,paddingHorizontal:13,paddingVertical:6},
   badgeText:{fontSize:14,fontWeight:'800',color:C.green},
+  badgeCompact:{paddingHorizontal:8,paddingVertical:3,borderRadius:12},badgeTextCompact:{fontSize:COMPACT_UI.caption,lineHeight:16},
   square:{alignItems:'center',justifyContent:'center'},
-  brandRow:{flexDirection:'row',alignItems:'center',gap:12,marginBottom:14,minHeight:72}, brandRowCompact:{gap:9,marginBottom:10,minHeight:58}, brandLogo:{width:68,height:68},brandLogoCompact:{width:54,height:54},
+  brandRow:{flexDirection:'row',alignItems:'center',gap:12,marginBottom:14,minHeight:72}, brandRowCompact:{gap:9,marginBottom:10,minHeight:72}, brandLogo:{width:68,height:68},brandLogoCompact:{width:68,height:68},
   brandTitle:{fontSize:32,fontWeight:'900',color:C.navy,letterSpacing:-.8,lineHeight:36},brandTitleCompact:{fontSize:25,letterSpacing:-.5,lineHeight:29},brandTitleSmall:{fontSize:28,letterSpacing:-.7,lineHeight:32},brandEnglish:{fontSize:16,fontWeight:'900',color:C.navy},brandEnglishCompact:{fontSize:13},brandEnglishSmall:{fontSize:14},
   tagline:{fontSize:14,lineHeight:19,color:C.blue,fontWeight:'700',textAlign:'center'},
   topbar:{height:66,flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:12},backButton:{width:40,height:44,justifyContent:'center',alignItems:'flex-start'},topTitle:{fontSize:25,fontWeight:'900',color:C.navy},
+  topbarCompact:{height:50,marginBottom:10},topTitleCompact:{fontSize:COMPACT_UI.title},
   primary:{height:60,borderRadius:20,alignItems:'center',justifyContent:'center'},primaryText:{color:'#fff',fontSize:20,fontWeight:'900'},
+  primaryCompact:{height:'auto',minHeight:COMPACT_UI.buttonHeight,paddingVertical:10,paddingHorizontal:14,borderRadius:14},primaryTextCompact:{fontSize:COMPACT_UI.body,lineHeight:20,fontWeight:'800'},
   sectionTitle:{fontSize:16,fontWeight:'900',color:C.text2,paddingVertical:10},
 });

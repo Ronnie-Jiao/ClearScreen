@@ -85,7 +85,7 @@ export default function IOSSafariScreen({
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  content: { padding: 18, paddingBottom: 28 },
+  content: { paddingHorizontal: 18, paddingBottom: 28 },
   systemFilter: { padding: 18, gap: 16, marginBottom: 14 },
   hero: { padding: 18, gap: 16, marginBottom: 14 },
   heroHeading: { flexDirection: 'row', alignItems: 'center', gap: 14 },

@@ -23,26 +23,51 @@ import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.WritableArray
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.LifecycleEventListener
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.Locale
 
 class ClearScreenNativeModule(
   private val reactContext: ReactApplicationContext,
-) : ReactContextBaseJavaModule(reactContext) {
+) : ReactContextBaseJavaModule(reactContext), LifecycleEventListener {
+  private val settingsNavigator by lazy { ClearScreenSettingsNavigator(reactContext) }
   private val storeDelegate = lazy {
     ClearScreenStore(reactContext).apply { prepareAfterConsent() }
   }
   private val store by storeDelegate
   private val privacyConsentStore by lazy { ClearScreenPrivacyConsentStore(reactContext) }
   private val executor = Executors.newSingleThreadExecutor()
+  private val permissionExecutor = Executors.newSingleThreadExecutor()
+  private val permissionReader by lazy { ClearScreenPermissionReader(reactContext) }
+
+  init { reactContext.addLifecycleEventListener(this) }
+
+  override fun onHostPause() { ClearScreenSettingsObserver.onHostPause() }
+  override fun onHostResume() { ClearScreenSettingsObserver.onHostResume() }
+  override fun onHostDestroy() { ClearScreenSettingsObserver.clear() }
 
   override fun getName(): String = "ClearScreenBackend"
 
   @ReactMethod
   fun getSnapshot(promise: Promise) = runAsync(promise) {
     snapshot()
+  }
+
+  @ReactMethod
+  fun getPermissionSnapshot(promise: Promise) = runAsync(promise, permissionExecutor) {
+    if (!privacyConsentStore.hasCurrentConsent()) privacySnapshot()
+    else {
+      val map = Arguments.createMap().apply {
+        putBoolean("privacyConsentAccepted", true)
+        writePermissionState(this)
+      }
+      // Consent can be withdrawn on the main worker while a provider read is
+      // in flight. Never return the old authorized snapshot after withdrawal.
+      if (privacyConsentStore.hasCurrentConsent()) map else privacySnapshot()
+    }
   }
 
   @ReactMethod
@@ -69,6 +94,7 @@ class ClearScreenNativeModule(
   @ReactMethod
   fun withdrawPrivacyConsent(promise: Promise) = runAsync(promise) {
     privacyConsentStore.withdrawConsent()
+    ClearScreenSettingsObserver.clear()
     val cleared = if (storeDelegate.isInitialized()) {
       store.clearUserData()
     } else {
@@ -131,7 +157,7 @@ class ClearScreenNativeModule(
   fun setLogRetentionDays(days: Int, promise: Promise) = runAsync(promise) {
     requirePrivacyConsent()
     store.setLogRetentionDays(days)
-    snapshot()
+    true
   }
 
   @ReactMethod
@@ -158,14 +184,17 @@ class ClearScreenNativeModule(
 
   @ReactMethod
   fun openBatterySettings(promise: Promise) {
-    // On vivo/iQOO, the documented Android battery-exemption screen does not
-    // control the vendor's "自启动" gate that is responsible for terminating
-    // user-enabled accessibility services. Prefer the verified OEM entrypoint
-    // when it exists, and retain the standard Android fallback elsewhere.
-    openSettings(
-      vendorStartupSettingsIntent() ?: Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
-      promise,
-    )
+    openSettingsPage(promise) { settingsNavigator.openBatteryOptimizationSettings() }
+  }
+
+  @ReactMethod
+  fun openStartupSettings(promise: Promise) {
+    openObservedSettings(promise, ClearScreenSettingsObserver.Kind.STARTUP) { settingsNavigator.openStartupSettings() }
+  }
+
+  @ReactMethod
+  fun openBackgroundSettings(promise: Promise) {
+    openObservedSettings(promise, ClearScreenSettingsObserver.Kind.BACKGROUND) { settingsNavigator.openBackgroundSettings() }
   }
 
   @ReactMethod
@@ -178,6 +207,10 @@ class ClearScreenNativeModule(
   }
 
   override fun invalidate() {
+    reactContext.removeLifecycleEventListener(this)
+    ClearScreenSettingsObserver.clear()
+    permissionReader.close()
+    permissionExecutor.shutdownNow()
     executor.shutdownNow()
     super.invalidate()
   }
@@ -225,6 +258,15 @@ class ClearScreenNativeModule(
     map.putInt("installedAppCount", apps.size())
     map.putInt("todaySkipCount", store.countToday("skip", reactContext.packageName))
     map.putInt("todayNetworkCount", store.countToday("network", reactContext.packageName))
+    writePermissionState(map)
+    map.putArray("apps", apps)
+    map.putArray("logs", logs)
+    map.putMap("settings", settings)
+    return map
+  }
+
+  /** Re-read permission state without loading application icons or processing history. */
+  private fun writePermissionState(map: WritableMap) {
     val accessibility = readAccessibilityState()
     map.putBoolean("accessibilityEnabled", accessibility.authorized)
     map.putBoolean("accessibilityRunning", accessibility.running)
@@ -236,16 +278,15 @@ class ClearScreenNativeModule(
     // fields false for older JS clients that still read them.
     map.putBoolean("vpnPrepared", false)
     map.putBoolean("vpnRunning", false)
-    map.putBoolean("batteryOptimizationIgnored", isBatteryOptimizationIgnored())
+    map.putNullableBoolean("batteryOptimizationIgnored", isBatteryOptimizationIgnored())
+    map.putNullableBoolean("backgroundRestricted", isBackgroundRestricted())
+    map.putNullableBoolean("startupAllowed", permissionReader.startupAllowed())
+    map.putNullableBoolean("backgroundAllowed", ClearScreenSettingsObserver.value(ClearScreenSettingsObserver.Kind.BACKGROUND))
     map.putBoolean("isVivoFamily", isVivoFamilyDevice())
-    map.putBoolean("vendorStartupSettingsAvailable", vendorStartupSettingsIntent() != null)
+    map.putBoolean("vendorStartupSettingsAvailable", settingsNavigator.hasStartupSettings())
     map.putBoolean("vendorStartupGuideConfirmed", store.isVendorStartupGuideConfirmed())
     map.putString("deviceManufacturer", Build.MANUFACTURER ?: "unknown")
-    map.putArray("apps", apps)
-    map.putArray("logs", logs)
-    map.putMap("settings", settings)
     map.putMap("installSource", installSourceDiagnostics())
-    return map
   }
 
   /** No app inventory, old preferences, device diagnostics, or system permission state is read here. */
@@ -267,7 +308,10 @@ class ClearScreenNativeModule(
     putString("accessibilityStoredServices", "")
     putBoolean("vpnPrepared", false)
     putBoolean("vpnRunning", false)
-    putBoolean("batteryOptimizationIgnored", false)
+    putNull("batteryOptimizationIgnored")
+    putNull("backgroundRestricted")
+    putNull("startupAllowed")
+    putNull("backgroundAllowed")
     putBoolean("isVivoFamily", false)
     putBoolean("vendorStartupSettingsAvailable", false)
     putBoolean("vendorStartupGuideConfirmed", false)
@@ -419,10 +463,23 @@ class ClearScreenNativeModule(
     return "data:image/png;base64," + Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
   }
 
-  private fun isBatteryOptimizationIgnored(): Boolean {
+  private fun isBatteryOptimizationIgnored(): Boolean? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
-    val power = reactContext.getSystemService(PowerManager::class.java)
-    return power?.isIgnoringBatteryOptimizations(reactContext.packageName) == true
+    return runCatching {
+      reactContext.getSystemService(PowerManager::class.java)
+        ?.isIgnoringBatteryOptimizations(reactContext.packageName)
+    }.getOrNull()
+  }
+
+  private fun isBackgroundRestricted(): Boolean? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+    return runCatching {
+      reactContext.getSystemService(ActivityManager::class.java)?.isBackgroundRestricted
+    }.getOrNull()
+  }
+
+  private fun WritableMap.putNullableBoolean(key: String, value: Boolean?) {
+    if (value == null) putNull(key) else putBoolean(key, value)
   }
 
   private data class AccessibilityState(
@@ -474,11 +531,24 @@ class ClearScreenNativeModule(
     return identity.contains("vivo") || identity.contains("iqoo")
   }
 
-  private fun vendorStartupSettingsIntent(): Intent? {
-    if (!isVivoFamilyDevice()) return null
-    val intent = Intent(VIVO_BG_STARTUP_ACTION)
-    return intent.takeIf { candidate ->
-      candidate.resolveActivity(reactContext.packageManager) != null
+  private fun openSettingsPage(promise: Promise, open: () -> Unit) {
+    try {
+      open()
+      promise.resolve(true)
+    } catch (error: Exception) {
+      promise.reject("SETTINGS_OPEN_FAILED", error)
+    }
+  }
+
+  private fun openObservedSettings(promise: Promise, kind: ClearScreenSettingsObserver.Kind, open: () -> Unit) {
+    try {
+      requirePrivacyConsent()
+      ClearScreenSettingsObserver.begin(reactContext, kind)
+      open()
+      promise.resolve(true)
+    } catch (error: Exception) {
+      ClearScreenSettingsObserver.clear()
+      promise.reject("SETTINGS_OPEN_FAILED", error)
     }
   }
 
@@ -495,8 +565,8 @@ class ClearScreenNativeModule(
   private fun formatTime(timestamp: Long): String =
     java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
 
-  private fun <T> runAsync(promise: Promise, block: () -> T) {
-    executor.execute {
+  private fun <T> runAsync(promise: Promise, worker: ExecutorService = executor, block: () -> T) {
+    worker.execute {
       try {
         promise.resolve(block())
       } catch (error: Exception) {
@@ -505,9 +575,4 @@ class ClearScreenNativeModule(
     }
   }
 
-  companion object {
-    // Resolved on the affected V2502DA device to
-    // com.vivo.permissionmanager/.activity.BgStartUpManagerActivity.
-    private const val VIVO_BG_STARTUP_ACTION = "com.iqoo.secure.BGSTARTUPMANAGER"
-  }
 }

@@ -101,4 +101,42 @@ class ProtectedUiPolicyTest {
       visibleLabels = listOf("广告", "×", "滴滴租车"),
     ))
   }
+
+  private val calendarHomeLabels = listOf("2026年10月", "日历", "黄历", "天气", "我的", "提醒", "广告", "×")
+
+  @Test fun calendarHomeSolarTermShortcutIsNotAnActiveReminder() {
+    assertFalse(ProtectedUiPolicy.isProtectedScreen(
+      packageName = WifiPromotionRules.CALENDAR_PACKAGE_NAME,
+      windowClassName = "cn.etouch.ecalendar.module.main.ui.MainActivity",
+      visibleLabels = calendarHomeLabels,
+    ))
+  }
+
+  @Test fun calendarExceptionNeverIncludesReminderDialogsControlsOrOtherHosts() {
+    assertTrue(ProtectedUiPolicy.isProtectedScreen(
+      packageName = WifiPromotionRules.CALENDAR_PACKAGE_NAME,
+      windowClassName = "cn.etouch.ecalendar.module.main.ui.MainActivity",
+      visibleLabels = calendarHomeLabels + "稍后提醒",
+    ))
+    assertTrue(ProtectedUiPolicy.isProtectedScreen(
+      packageName = WifiPromotionRules.CALENDAR_PACKAGE_NAME,
+      windowClassName = "cn.etouch.ecalendar.module.main.ui.MainActivity",
+      visibleLabels = calendarHomeLabels,
+      visibleResourceIds = listOf("cn.etouch.ecalendar:id/reminder_dismiss"),
+    ))
+    assertTrue(ProtectedUiPolicy.isProtectedScreen(
+      packageName = WifiPromotionRules.CALENDAR_PACKAGE_NAME,
+      windowClassName = "cn.etouch.ecalendar.ReminderAlertDialog",
+      visibleLabels = calendarHomeLabels,
+    ))
+    assertTrue(ProtectedUiPolicy.isProtectedScreen(
+      packageName = WifiPromotionRules.CALENDAR_PACKAGE_NAME,
+      visibleLabels = calendarHomeLabels,
+    ))
+    assertTrue(ProtectedUiPolicy.isProtectedScreen(
+      packageName = "example.calendar",
+      windowClassName = "cn.etouch.ecalendar.module.main.ui.MainActivity",
+      visibleLabels = calendarHomeLabels,
+    ))
+  }
 }

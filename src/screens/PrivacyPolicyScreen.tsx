@@ -1,18 +1,17 @@
 import React from 'react';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Background, Card, PrimaryButton, TopBar } from '../components/UI';
-import { APP_FILING_NUMBER, PRIVACY_CONTACT_EMAIL, PRIVACY_POLICY_URL } from '../privacy';
 import { C } from '../theme';
 
 type Section = { title: string; body: string };
 const ANDROID_SECTIONS: Section[] = [
   {
     title: '收集和使用的信息',
-    body: '同意后，净屏读取可启动应用的名称、包名和图标，用于应用列表和规则设置。开启无障碍服务后，净屏读取当前应用标识及相关界面控件；Android 11 及以上可能截取当前界面并在本机进行文字识别。仅在你开启总开关并为该应用开启规则后，才尝试处理广告控件。截图和识别出的界面文字不会保存。',
+    body: '同意后，净屏读取可启动应用的名称、包名和图标，用于应用列表和规则设置。开启无障碍服务后，净屏读取当前应用标识及相关界面控件；Android 11 及以上可能截取当前界面，在本机识别文字、图形和按钮边界。仅在你开启总开关并为该应用开启规则后，才尝试处理广告控件。对已确认但点击无效的广告按钮，净屏可能重新核对后向同一按钮中心补发一次短触摸。没有对应按钮节点时，除中国移动的限定开屏规则，还可能在两张截图均确认同一全屏广告、明确关闭文字和独立按钮边界，且当前窗口未被遮挡后短触摸一次；不按普通叉号或未知位置触摸，不拖动、不长按。截图和识别出的界面文字不会保存。',
   },
   {
     title: '本地记录和诊断',
-    body: '应用规则和处理记录保存在本机。记录可能包含应用包名、规则编号、处理结果和时间，默认保留 7 天，可在设置中选择关闭、1 天、7 天或 30 天，最多保存 5000 条。故障诊断还会读取设备品牌、安装来源、净屏自身的安装/更新时间、签名证书指纹及无障碍状态，仅在本机显示。',
+    body: '应用规则和处理记录保存在本机。记录可能包含应用包名、规则编号、处理结果和时间，默认保留 7 天，可在设置中选择关闭、1 天、7 天或 30 天，最多保存 5000 条。故障诊断还会读取设备品牌、安装来源、净屏自身的安装/更新时间、签名证书指纹及权限状态，仅在本机显示。你主动从净屏打开自启动或后台设置时，如系统未开放读取接口且无障碍服务已开启，净屏会临时定位系统设置中的净屏项目，只读核对对应开关；不自动操作设置、不截图、不保存或上传页面文字。核验不要求开启广告处理总开关。',
   },
   {
     title: '第三方组件和网络',
@@ -20,15 +19,11 @@ const ANDROID_SECTIONS: Section[] = [
   },
   {
     title: '保存、删除和你的选择',
-    body: '数据保存在 Android 应用私有空间，不提供云端同步，且不参与系统备份。应用规则保留到你删除规则、撤回同意或卸载应用；处理记录按上方周期自动清理。你可以在设置中清空记录，或在本页撤回同意并删除本机规则、记录和设置。撤回后净屏停止读取其他应用界面；Android 系统中的无障碍开关由你在系统设置中管理，净屏不会代替你修改。',
+    body: '数据保存在 Android 应用私有空间，不提供云端同步，且不参与系统备份。应用规则保留到你删除规则、撤回同意或卸载应用；处理记录按上方周期自动清理。你可以在设置中清空记录，或撤回同意并删除本机规则、记录和设置。撤回后净屏停止读取其他应用界面；Android 系统中的无障碍开关由你在系统设置中管理，净屏不会代替你修改。',
   },
   {
     title: '未成年人保护',
-    body: '净屏不是专门面向未满14周岁儿童设计的产品。如需处理未满14周岁未成年人的个人信息，应依法取得其父母或其他监护人的同意。监护人如需帮助，请通过下方邮箱联系。',
-  },
-  {
-    title: '开发者和联系',
-    body: `APP备案号：${APP_FILING_NUMBER}。深圳市曜构智能科技有限公司（Shenzhen LumaForge Technologies Co., Ltd.）。如需查询、更正或删除个人信息，或提出隐私问题，请联系 ${PRIVACY_CONTACT_EMAIL}。`,
+    body: '净屏不是专门面向未满14周岁儿童设计的产品。如需处理未满14周岁未成年人的个人信息，应依法取得其父母或其他监护人的同意。',
   },
 ];
 
@@ -51,11 +46,7 @@ const IOS_SECTIONS: Section[] = [
   },
   {
     title: '未成年人保护',
-    body: '净屏不是专门面向未满14周岁儿童设计的产品。如需处理未满14周岁未成年人的个人信息，应依法取得其父母或其他监护人的同意。监护人如需帮助，请通过下方邮箱联系。',
-  },
-  {
-    title: '开发者和联系',
-    body: `APP备案号：${APP_FILING_NUMBER}。深圳市曜构智能科技有限公司（Shenzhen LumaForge Technologies Co., Ltd.）。如需提出隐私问题，请联系 ${PRIVACY_CONTACT_EMAIL}。`,
+    body: '净屏不是专门面向未满14周岁儿童设计的产品。如需处理未满14周岁未成年人的个人信息，应依法取得其父母或其他监护人的同意。',
   },
 ];
 
@@ -64,15 +55,12 @@ export default function PrivacyPolicyScreen({
   onBack,
   onAccept,
   onDecline,
-  onWithdrawConsent,
 }: {
   mode: 'consent' | 'read';
   onBack: () => void;
   onAccept?: () => void;
   onDecline?: () => void;
-  onWithdrawConsent?: () => void;
 }) {
-  const openFullPolicy = () => Linking.openURL(PRIVACY_POLICY_URL);
   const sections = Platform.OS === 'ios' ? IOS_SECTIONS : ANDROID_SECTIONS;
   return (
     <Background>
@@ -96,16 +84,6 @@ export default function PrivacyPolicyScreen({
               <Text style={s.body}>{section.body}</Text>
             </Card>
           ))}
-          {Platform.OS === 'android' ? (
-            <Pressable accessibilityRole="link" onPress={openFullPolicy} style={s.linkButton}>
-              <Text style={s.link}>打开公开版隐私政策</Text>
-            </Pressable>
-          ) : null}
-          {Platform.OS === 'android' && mode === 'read' && onWithdrawConsent ? (
-            <Pressable accessibilityRole="button" onPress={onWithdrawConsent} style={s.withdrawButton}>
-              <Text style={s.withdrawText}>撤回并删除</Text>
-            </Pressable>
-          ) : null}
         </ScrollView>
         {mode === 'consent' ? (
           <View style={s.actions}>
@@ -122,16 +100,12 @@ export default function PrivacyPolicyScreen({
 
 const s = StyleSheet.create({
   root: { flex: 1, paddingHorizontal: 16 },
-  pageTitle: { fontSize: 28, fontWeight: '900', color: C.navy, paddingVertical: 15 },
+  pageTitle: { fontSize: 28, fontWeight: '900', color: C.navy, paddingBottom: 15 },
   content: { paddingBottom: 20 },
   intro: { fontSize: 16, lineHeight: 24, fontWeight: '700', color: C.text, marginBottom: 14 },
   card: { padding: 18, marginBottom: 13 },
   sectionTitle: { fontSize: 18, fontWeight: '900', color: C.navy, marginBottom: 9 },
   body: { fontSize: 16, lineHeight: 25, color: C.text },
-  linkButton: { alignSelf: 'center', paddingVertical: 12, paddingHorizontal: 16 },
-  link: { color: C.blue, fontSize: 16, fontWeight: '800', textDecorationLine: 'underline' },
-  withdrawButton: { alignSelf: 'center', paddingVertical: 12, paddingHorizontal: 16 },
-  withdrawText: { color: C.red, fontSize: 16, fontWeight: '800' },
   actions: { gap: 7, paddingTop: 13, paddingBottom: 10, borderTopWidth: 1, borderTopColor: C.line, backgroundColor:'rgba(244,252,255,0.97)' },
   decline: { minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   declineText: { color: C.text2, fontSize: 16, fontWeight: '800' },

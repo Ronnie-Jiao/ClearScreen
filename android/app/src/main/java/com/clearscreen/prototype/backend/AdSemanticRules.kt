@@ -24,17 +24,18 @@ internal object AdSemanticRules {
     "跳过视频广告", "跳过贴片广告", "跳过片前广告", "跳过中插广告",
     "跳过推广", "跳过开屏", "跳过开屏广告",
     "skipad", "skipads", "skipthisad", "skipvideoad", "skipvideo",
-    "skipadvertisement", "skipnow",
+    "skipadvertisement", "skipadvertisements", "skipnow", "跳过此推广",
   )
   private val close = setOf(
     "关闭", "关掉", "关闭弹窗", "关闭广告", "关闭此广告",
-    "关闭推广", "关闭开屏广告",
-    "close", "dismiss", "closead", "closeadvertisement", "dismissad",
+    "关闭推广", "关闭开屏广告", "关闭这条广告", "关闭视频广告", "关闭此推广",
+    "close", "dismiss", "closead", "closeadvertisement", "dismissad", "closethisad",
     "×", "✕", "✖", "✗", "╳", "⨯", "x",
   )
   private val explicitAdClose = setOf(
     "关闭广告", "关闭此广告", "关闭推广", "关闭开屏广告",
-    "closead", "closeadvertisement", "dismissad",
+    "关闭这条广告", "关闭视频广告", "关闭此推广",
+    "closead", "closeadvertisement", "dismissad", "closethisad",
   )
   private val strongAdSignals = listOf(
     "广告", "广告位", "开屏广告", "推广", "赞助",
@@ -57,6 +58,47 @@ internal object AdSemanticRules {
     "skipintro", "skipoutro", "skiprecap", "skiptutorial", "skiplogin", "skipverification",
   )
   private val pendingSkip = Regex("""(?:\d{1,3}(?:秒|s)?后(?:可|可以)?跳过|后可(?:以)?跳过|skipin\d|跳过倒计时)""")
+  private val businessControls = listOf(
+    "跳过剧情", "关闭视频", "关闭播放器", "退出播放", "退出全屏", "关闭自动续费",
+    "关闭账户", "关闭账号", "关闭权限", "关闭提醒", "取消订阅", "支付确认", "验证码",
+    "实名认证", "新手引导", "操作教程", "跳过本步骤", "跳过当前步骤", "skipguide", "skiponboard", "skipwelcome",
+    "skipauth", "skippermission", "skipprivacy", "closeplayer", "exitfullscreen",
+  )
+  private val glyphs = setOf("×", "✕", "✖", "✗", "╳", "⨯", "x")
+  private val businessResourceMarkers = listOf(
+    "skip_intro", "skip_tutorial", "skip_guide", "skip_onboard", "skip_welcome",
+    "skip_login", "skip_auth", "skip_verify", "skip_payment", "skip_permission", "skip_privacy",
+    "close_player", "closeplayer", "exit_fullscreen", "exitfullscreen", "close_settings",
+  )
+
+  enum class ControlKind { SKIP, CLOSE, GLYPH }
+  data class ControlLabel(val value: String, val kind: ControlKind, val explicitAd: Boolean)
+
+  /** Only whole action labels qualify; a matching word inside business copy does not. */
+  fun controlLabel(labels: List<String>): ControlLabel? {
+    if (labels.any(::isBlockedControlLabel)) return null
+    val actions = labels.map { value ->
+      val compact = normalize(value)
+      val action = compact.removeSuffix("按钮").removeSuffix("button")
+      if (isPlainSkip(action) || isExplicitSkip(action) || isClose(action)) action else compact
+    }
+    selectSkipLabel(actions)?.let { return ControlLabel(it, ControlKind.SKIP, isExplicitSkip(it)) }
+    selectCloseLabel(actions)?.let {
+      return ControlLabel(it, if (it in glyphs) ControlKind.GLYPH else ControlKind.CLOSE, isExplicitAdClose(it))
+    }
+    return null
+  }
+
+  fun isBlockedControlLabel(value: String): Boolean {
+    val compact = normalize(value)
+    if (compact in explicitAdClose) return false
+    return isBlockedSkipLabel(value) || businessControls.any(compact::contains)
+  }
+
+  fun isControlCounter(value: String): Boolean = Regex("""^\d{1,3}(?:秒|s)?$""").matches(normalize(value))
+
+  fun isBusinessControlResource(resourceId: String): Boolean =
+    businessResourceMarkers.any(resourceId.lowercase(Locale.ROOT).substringAfter(":id/")::contains)
   // Token boundaries matter: "jump" and "skip" within unrelated long ids
   // should not automatically mark a button as a skip.
   private val skipId = Regex(
@@ -102,6 +144,7 @@ internal object AdSemanticRules {
   }
 
   fun selectCloseLabel(labels: List<String>): String? {
+    if (labels.any(::isBlockedControlLabel)) return null
     val variants = labels.map(::normalize).distinct()
     return variants.firstOrNull(::isExplicitAdClose) ?: variants.firstOrNull(::isClose)
   }
@@ -116,21 +159,14 @@ internal object AdSemanticRules {
     numericSkip.any { it.matches(compact) }
 
   fun isExplicitSkip(compact: String): Boolean =
-    compact in explicitSkip ||
-      (compact.startsWith("跳过") && compact.length <= 12 &&
-        (compact.contains("广告") || compact.contains("推广") || compact.contains("开屏"))) ||
-      (compact.startsWith("skipad") && compact.length <= 20)
+    compact in explicitSkip
 
   fun isClose(compact: String): Boolean = compact in close
 
   fun isExplicitAdClose(compact: String): Boolean = compact in explicitAdClose
 
   fun isSkipResource(id: String): Boolean =
-    !listOf(
-      "skip_intro", "skip_tutorial", "skip_guide", "skip_onboard",
-      "skip_welcome", "skip_login", "skip_auth", "skip_verify",
-      "skip_payment", "skip_permission", "skip_privacy",
-    ).any(id::contains) && skipId.containsMatchIn(id)
+    !isBusinessControlResource(id) && skipId.containsMatchIn(id)
 
   fun isAdCloseResource(id: String): Boolean = adCloseId.containsMatchIn(id)
 

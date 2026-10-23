@@ -36,7 +36,7 @@ class AdSemanticRulesTest {
     assertFalse(AdSemanticRules.isNeutralControlLabel("下一步"))
   }
   @Test fun recognizesCommonCountdownFormats() {
-    for (raw in listOf("3 跳过", "03秒跳过广告", "跳过 3s", "Skip in 3", "跳过倒计时 5 秒")) {
+    for (raw in listOf("3 跳过", "03秒跳过广告", "跳过 3s", "跳过 02", "Skip in 3", "跳过倒计时 5 秒")) {
       assertTrue(raw, AdSemanticRules.isCountdownSkip(AdSemanticRules.normalize(raw)))
     }
   }

@@ -19,3 +19,17 @@ export const C = {
 };
 
 export const R = { sm: 12, md: 18, lg: 24, xl: 30 };
+
+// Match secondary screens to the existing compact application list.
+export const COMPACT_UI = {
+  appIcon: 36,
+  title: 18,
+  heading: 16,
+  body: 14,
+  caption: 12,
+  rowHeight: 54,
+  buttonHeight: 44,
+  cardRadius: 18,
+  cardPadding: 14,
+  gap: 10,
+} as const;

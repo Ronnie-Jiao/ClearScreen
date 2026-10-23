@@ -1,58 +1,57 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { LogItem } from '../data';
+import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 import { Background, Card, Chevron, TopBar } from '../components/UI';
-import { C } from '../theme';
+import { useAppAlert } from '../components/AppDialog';
+import { C, COMPACT_UI } from '../theme';
+import type { BackendPermissions } from '../native/ClearScreenNative';
 
-type PermissionState={skip:boolean;skipRunning:boolean;bg:boolean;isVivoFamily?:boolean};
+type PermissionState=Pick<BackendPermissions,'skipRunning'|'accessibilitySettingEnabled'|'isVivoFamily'|'vendorStartupSettingsAvailable'|'batteryOptimizationIgnored'|'backgroundRestricted'|'startupAllowed'|'backgroundAllowed'>;
 
-export default function ServicePermissionsScreen({permissions,logs,onBack,onPermissions,onBackground}:{
+export default function ServicePermissionsScreen({permissions,checking=false,verificationFailed=false,onBack,onOpenAccessibility,onStartup,onBackground,onBatteryOptimization}:{
   permissions:PermissionState;
-  logs:LogItem[];
+  checking?:boolean;
+  verificationFailed?:boolean;
   onBack:()=>void;
-  onPermissions:()=>void;
+  onOpenAccessibility:()=>void;
+  onStartup:()=>void;
   onBackground:()=>void;
+  onBatteryOptimization:()=>void;
 }){
-  const skipStatus=permissions.skipRunning?'已连接':permissions.skip?'需要修复':'未开启';
-  const backgroundStatus=permissions.isVivoFamily?'待检查':permissions.bg?'已允许':'待检查';
-  const latestFailure=logs.find(log=>log.type==='fail');
+  const showAlert=useAppAlert();
+  const skipStatus=checking?'核验中':verificationFailed?'核验失败':permissions.skipRunning?'已连接':permissions.accessibilitySettingEnabled?'需要修复':'未开启';
+  const startupStatus=checking?'核验中':verificationFailed?'核验失败':permissions.startupAllowed===null?'需手动确认':permissions.startupAllowed?'已开启':'未开启';
+  const backgroundStatus=checking?'核验中':verificationFailed?'核验失败':permissions.backgroundRestricted===true?'受限制':permissions.backgroundAllowed!==null?(permissions.backgroundAllowed?'已允许':'未允许'):permissions.backgroundRestricted===false?'未受限':'需手动确认';
+  const batteryStatus=checking?'核验中':verificationFailed?'核验失败':permissions.batteryOptimizationIgnored===null?'读取失败':permissions.batteryOptimizationIgnored?'已忽略':'未忽略';
+  const openStartupGuide=()=>{
+    if(!permissions.isVivoFamily||!permissions.vendorStartupSettingsAvailable){onStartup();return}
+    showAlert('开启开机自启动','在 vivo「自启动管理」中找到「净屏」并开启“自启动”。',[
+      {text:'取消',style:'cancel'},
+      {text:'打开自启动',onPress:onStartup},
+    ],{cancelable:true});
+  };
   const row=(title:string,value:string|undefined,onPress:()=>void,last=false)=>(
     <Pressable accessibilityRole="button" onPress={onPress} style={[s.row,last&&{borderBottomWidth:0}]}>
       <Text style={s.rowTitle}>{title}</Text>
       {value?<Text style={s.value}>{value}</Text>:null}
-      <Chevron/>
+      <Chevron compact/>
     </Pressable>
   );
-  const statusRow=(title:string,value:string,good:boolean,last=false)=>(
-    <View style={[s.statusRow,last&&{borderBottomWidth:0}]}>
-      <Text style={s.statusLabel}>{title}</Text>
-      <Text style={[s.statusValue,!good&&s.statusValueOff]}>{value}</Text>
-    </View>
-  );
-
   return <Background><ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
-    <TopBar title="服务与权限" onBack={onBack}/>
-    <Card style={s.card}>
-      {row('自动跳过服务',skipStatus,onPermissions)}
-      {row('后台运行',backgroundStatus,onBackground,true)}
+    <TopBar compact title="服务与权限" onBack={onBack}/>
+    <Card compact style={s.card}>
+      {row('自动跳过服务',skipStatus,onOpenAccessibility)}
+      {row('开机自启动',startupStatus,openStartupGuide)}
+      {row('后台运行',backgroundStatus,onBackground)}
+      {row('电池优化',batteryStatus,onBatteryOptimization,true)}
     </Card>
-    <Card style={s.statusCard}>
-      {statusRow('系统授权',permissions.skip?'已授权':'未授权',permissions.skip)}
-      {statusRow('服务连接',permissions.skipRunning?'已连接':'未连接',permissions.skipRunning)}
-      {statusRow('最近异常',latestFailure?.time||'暂无',!latestFailure,true)}
-    </Card>
-  </ScrollView></Background>;
+  </ScrollView>
+  </Background>;
 }
 
 const s=StyleSheet.create({
-  page:{padding:18,paddingBottom:36},
-  card:{paddingHorizontal:16},
-  row:{minHeight:66,flexDirection:'row',alignItems:'center',gap:8,borderBottomWidth:1,borderBottomColor:C.line},
-  rowTitle:{flex:1,fontSize:17,fontWeight:'900',color:C.navy},
-  value:{fontSize:15,fontWeight:'800',color:C.text2},
-  statusCard:{paddingHorizontal:18,marginTop:14},
-  statusRow:{minHeight:64,flexDirection:'row',alignItems:'center',borderBottomWidth:1,borderBottomColor:C.line},
-  statusLabel:{flex:1,fontSize:17,fontWeight:'800',color:C.text2},
-  statusValue:{fontSize:17,fontWeight:'900',color:C.green},
-  statusValueOff:{color:C.red},
+  page:{paddingHorizontal:18,paddingBottom:36},
+  card:{paddingHorizontal:COMPACT_UI.cardPadding},
+  row:{minHeight:COMPACT_UI.rowHeight,flexDirection:'row',alignItems:'center',gap:8,borderBottomWidth:1,borderBottomColor:C.line},
+  rowTitle:{flex:1,fontSize:COMPACT_UI.body,fontWeight:'800',color:C.navy},
+  value:{fontSize:COMPACT_UI.body,fontWeight:'800',color:C.text2},
 });

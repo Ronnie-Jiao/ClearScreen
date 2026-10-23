@@ -40,6 +40,16 @@ class AdGeometryRulesTest {
     assertTrue(AdGeometryRules.isTightTapTarget(countdown, screen))
   }
 
+  @Test fun lowerLeftSkipMustBeSmallAndInTheSplashActionArea() {
+    val lowerLeftSkip = AdGeometryRules.Box(30, 1380, 120, 1445)
+    val centerAction = AdGeometryRules.Box(330, 1380, 500, 1445)
+    val oversizedAction = AdGeometryRules.Box(0, 1100, 400, 1500)
+
+    assertTrue(AdGeometryRules.isBottomLeftSplashSkip(lowerLeftSkip, screen))
+    assertFalse(AdGeometryRules.isBottomLeftSplashSkip(centerAction, screen))
+    assertFalse(AdGeometryRules.isBottomLeftSplashSkip(oversizedAction, screen))
+  }
+
   @Test fun largeClickableBackgroundIsNotAnAcceptableTarget() {
     val fullscreen = AdGeometryRules.Box(0, 0, 852, 1800)
     assertFalse(AdGeometryRules.isCompactControl(fullscreen, screen))
@@ -87,5 +97,50 @@ class AdGeometryRulesTest {
     val leftClose = AdGeometryRules.Box(40, 800, 90, 850)
     assertFalse(AdGeometryRules.isNearTopRight(leftClose, screen))
     assertFalse(AdGeometryRules.isTightTapTarget(leftClose, screen))
+  }
+
+  @Test fun thinAdBannerCanBeConsideredWithoutRelaxingSemanticChecks() {
+    val display = AdGeometryRules.Box(0, 0, 1260, 2800)
+    val banner = AdGeometryRules.Box(30, 180, 1100, 300)
+    val tallContentCard = AdGeometryRules.Box(30, 300, 900, 1100)
+
+    assertTrue(AdGeometryRules.isHorizontalAdBanner(banner, display))
+    assertFalse(AdGeometryRules.isHorizontalAdBanner(tallContentCard, display))
+  }
+
+  @Test fun bannerCloseMustBeSmallAndOverlapTheRecognizedX() {
+    val display = AdGeometryRules.Box(0, 0, 1260, 2800)
+    val banner = AdGeometryRules.Box(30, 180, 1100, 300)
+    val close = AdGeometryRules.Box(1010, 200, 1085, 275)
+    val xGlyph = AdGeometryRules.Box(1033, 221, 1062, 250)
+    val adjacentPlus = AdGeometryRules.Box(1115, 180, 1235, 320)
+    val broadBannerHitArea = AdGeometryRules.Box(931, 170, 1210, 269)
+
+    assertTrue(AdGeometryRules.isBannerCloseTarget(close, xGlyph, banner, display))
+    assertFalse(AdGeometryRules.isBannerCloseTarget(adjacentPlus, xGlyph, banner, display))
+    assertFalse(AdGeometryRules.isBannerCloseTarget(broadBannerHitArea, xGlyph, banner, display))
+  }
+
+  @Test fun fullScreenCreativeMayExposeALabelledClosePillButNotABroadButton() {
+    val display = AdGeometryRules.Box(0, 0, 922, 2048)
+    val closePill = AdGeometryRules.Box(665, 52, 872, 144)
+    val broadButton = AdGeometryRules.Box(500, 50, 920, 260)
+
+    assertTrue(AdGeometryRules.isCompactFullScreenAdClose(closePill, display))
+    assertFalse(AdGeometryRules.isCompactFullScreenAdClose(broadButton, display))
+  }
+
+  @Test fun floatingCreativeCloseMustBeSmallAndAttachedToItsOwnRightEdge() {
+    val creative = AdGeometryRules.Box(600, 1000, 820, 1300)
+    val close = AdGeometryRules.Box(790, 1015, 822, 1047)
+    val detached = AdGeometryRules.Box(790, 1410, 822, 1442)
+    val broadTarget = AdGeometryRules.Box(700, 980, 850, 1090)
+    val fullPage = AdGeometryRules.Box(0, 0, 852, 1846)
+
+    assertTrue(AdGeometryRules.isOcrFloatingCreative(creative, screen))
+    assertTrue(AdGeometryRules.isCompactFloatingCreativeClose(close, creative, screen))
+    assertFalse(AdGeometryRules.isCompactFloatingCreativeClose(detached, creative, screen))
+    assertFalse(AdGeometryRules.isCompactFloatingCreativeClose(broadTarget, creative, screen))
+    assertFalse(AdGeometryRules.isOcrFloatingCreative(fullPage, screen))
   }
 }

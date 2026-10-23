@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { StatusBar } from 'react-native';
+import { AppDialogProvider } from '../../src/components/AppDialog';
 import AppsScreen from '../../src/screens/AppsScreen';
 import HomeScreen from '../../src/screens/HomeScreen';
 import SettingsScreen from '../../src/screens/SettingsScreen';
+import SettingsDetailScreen, { type SettingsSection } from '../../src/screens/SettingsDetailScreen';
 import { APPS, type AppItem } from '../../src/data';
 
 type MainTab = 'home' | 'apps' | 'settings';
@@ -11,9 +13,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<MainTab>('home');
   const [apps, setApps] = useState<AppItem[]>(() => APPS.map((app) => ({ ...app })));
   const [retentionDays, setRetentionDays] = useState(7);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
 
   return (
-    <>
+    <AppDialogProvider>
       <StatusBar barStyle="dark-content" />
       {activeTab === 'home' ? (
         <HomeScreen
@@ -38,17 +41,23 @@ export default function App() {
           onTab={setActiveTab}
           onOpen={() => undefined}
         />
-      ) : (
-        <SettingsScreen
+      ) : settingsSection ? (
+        <SettingsDetailScreen
+          section={settingsSection}
           logRetentionDays={retentionDays}
           versionName="Harmony 试验"
-          onTab={setActiveTab}
-          onServicePermissions={() => undefined}
+          onBack={() => setSettingsSection(null)}
           onClear={() => undefined}
           onRetentionChange={setRetentionDays}
+        />
+      ) : (
+        <SettingsScreen
+          onTab={setActiveTab}
+          onServicePermissions={() => undefined}
+          onOpenSection={setSettingsSection}
           onPrivacyPolicy={() => undefined}
         />
       )}
-    </>
+    </AppDialogProvider>
   );
 }

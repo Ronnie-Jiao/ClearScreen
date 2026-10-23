@@ -59,6 +59,10 @@ internal object AdCreativeRules {
   private val redirectActions = setOf(
     "点击跳转详情页面", "点击跳转详情页", "点击跳转第三方应用", "点击跳转第三方页面",
   )
+  private val motionActions = setOf("扭动手机开启详情", "扭一扭开启详情", "摇一摇开启详情")
+  private val motionRedirectHints = setOf(
+    "互动跳转详情页或第三方应用", "互动跳转至详情页或第三方应用",
+  )
   private val badges = setOf("广告", "推广", "赞助", "sponsored", "advertisement")
 
   /** The weather-page samples expose download-ad disclosures instead of an ad badge. */
@@ -107,6 +111,19 @@ internal object AdCreativeRules {
     texts: List<Text>,
     skip: AdGeometryRules.Box,
     screen: AdGeometryRules.Box,
+  ): Boolean = hasSplashComposition(texts, skip, screen, motionOnly = false)
+
+  fun hasMotionRedirectSplashComposition(
+    texts: List<Text>,
+    skip: AdGeometryRules.Box,
+    screen: AdGeometryRules.Box,
+  ): Boolean = hasSplashComposition(texts, skip, screen, motionOnly = true)
+
+  private fun hasSplashComposition(
+    texts: List<Text>,
+    skip: AdGeometryRules.Box,
+    screen: AdGeometryRules.Box,
+    motionOnly: Boolean,
   ): Boolean {
     if (screen.width <= 0 || screen.height <= 0 || !contains(screen, skip) ||
       skip.width <= 0 || skip.height <= 0 ||
@@ -119,15 +136,30 @@ internal object AdCreativeRules {
       AdSemanticRules.normalize(text.value) in badges &&
         text.bounds.width <= screen.width * 0.20 &&
         text.bounds.height <= screen.height * 0.06 &&
-        text.bounds.centerX <= screen.left + screen.width * 0.40 &&
-        text.bounds.centerY <= screen.top + screen.height * 0.30
+        text.bounds.centerY <= screen.top + screen.height * 0.30 &&
+        (text.bounds.centerX <= screen.left + screen.width * 0.40 ||
+          (text.bounds.centerX >= screen.left + screen.width * 0.50 &&
+            text.bounds.right <= skip.left + screen.width * 0.02 &&
+            kotlin.math.abs(text.bounds.centerY - skip.centerY) <= screen.height * 0.06))
     }
     val redirect = local.any { text ->
       AdSemanticRules.normalize(text.value).trimEnd('›', '〉', '→', '❯') in redirectActions &&
         text.bounds.centerY >= screen.top + screen.height * 0.50 &&
         text.bounds.centerY <= screen.top + screen.height * 0.88
     }
-    return badge && redirect
+    // A motion instruction alone also occurs in normal product tutorials.
+    // Require the separate lower third-party redirect disclosure as well.
+    val motionAction = local.any { text ->
+      AdSemanticRules.normalize(text.value).trimEnd('›', '〉', '→', '❯') in motionActions &&
+        text.bounds.centerY >= screen.top + screen.height * 0.60 &&
+        text.bounds.centerY <= screen.top + screen.height * 0.92
+    }
+    val motionRedirect = local.any { text ->
+      AdSemanticRules.normalize(text.value) in motionRedirectHints &&
+        text.bounds.centerY >= screen.top + screen.height * 0.82 &&
+        text.bounds.centerY <= screen.top + screen.height * 0.97
+    }
+    return badge && ((motionAction && motionRedirect) || (!motionOnly && redirect))
   }
 
   /** A specific China Mobile traffic-card splash whose artwork may be a non-image view. */

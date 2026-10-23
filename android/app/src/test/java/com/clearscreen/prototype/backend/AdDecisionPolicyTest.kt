@@ -51,6 +51,50 @@ class AdDecisionPolicyTest {
     assertFalse(allowed(compactTopRight = false, hasExplicitAdMarker = true))
   }
 
+  @Test fun lowerLeftSplashSkipNeedsSameCreativeAdAndActionEvidence() {
+    fun allowed(
+      hasSkipLabel: Boolean = true,
+      compactBottomLeft: Boolean = true,
+      hasLargeCreative: Boolean = true,
+      currentWindowEvidence: Boolean = true,
+      controlInsideCreative: Boolean = true,
+      hasExplicitAdMarker: Boolean = true,
+      hasPromotionalAction: Boolean = true,
+    ) = AdDecisionPolicy.allowOcrBackedBottomLeftSplashSkip(
+      hasSkipLabel, compactBottomLeft, hasLargeCreative, currentWindowEvidence,
+      controlInsideCreative, hasExplicitAdMarker, hasPromotionalAction,
+    )
+
+    assertTrue(allowed())
+    assertFalse(allowed(hasSkipLabel = false))
+    assertFalse(allowed(compactBottomLeft = false))
+    assertFalse(allowed(hasLargeCreative = false))
+    assertFalse(allowed(currentWindowEvidence = false))
+    assertFalse(allowed(controlInsideCreative = false))
+    assertFalse(allowed(hasExplicitAdMarker = false))
+    assertFalse(allowed(hasPromotionalAction = false))
+  }
+
+  @Test fun floatingCreativeCloseNeedsARealEdgeControlAndSameWindowAdEvidence() {
+    fun allowed(
+      hasCloseSemantic: Boolean = true,
+      compactCreativeEdgeTarget: Boolean = true,
+      currentWindowEvidence: Boolean = true,
+      sameCreativeEvidence: Boolean = true,
+      hasAdMarkerOrPromoCluster: Boolean = true,
+    ) = AdDecisionPolicy.allowOcrBackedFloatingCreativeClose(
+      hasCloseSemantic, compactCreativeEdgeTarget, currentWindowEvidence,
+      sameCreativeEvidence, hasAdMarkerOrPromoCluster,
+    )
+
+    assertTrue(allowed())
+    assertFalse(allowed(hasCloseSemantic = false))
+    assertFalse(allowed(compactCreativeEdgeTarget = false))
+    assertFalse(allowed(currentWindowEvidence = false))
+    assertFalse(allowed(sameCreativeEvidence = false))
+    assertFalse(allowed(hasAdMarkerOrPromoCluster = false))
+  }
+
   @Test fun ocrPopupCloseNeedsLocalAdCopyAndAnIndependentEdgeControl() {
     fun allowed(
       hasCloseSemantic: Boolean = true,
@@ -91,6 +135,32 @@ class AdDecisionPolicyTest {
     assertFalse(AdDecisionPolicy.shouldMonitorMedia(false, false, true))
     assertTrue(AdDecisionPolicy.shouldMonitorMedia(false, true, true))
     assertTrue(AdDecisionPolicy.shouldMonitorMedia(true, false, false))
+  }
+
+  @Test fun genericAdRulesAreFallbackOnlyWhenVideoRulesHaveNoCandidate() {
+    assertTrue(AdDecisionPolicy.shouldEvaluateGenericAdCandidates(false, false))
+    assertTrue(AdDecisionPolicy.shouldEvaluateGenericAdCandidates(true, false))
+    assertFalse(AdDecisionPolicy.shouldEvaluateGenericAdCandidates(true, true))
+  }
+
+  @Test fun fullScreenCloseNeedsFreshCreativeAndExplicitAdMarker() {
+    fun allowed(
+      hasCloseSemantic: Boolean = true,
+      compactTopRightControl: Boolean = true,
+      currentWindowEvidence: Boolean = true,
+      controlBelongsToLargeCreative: Boolean = true,
+      hasExplicitAdMarker: Boolean = true,
+    ) = AdDecisionPolicy.allowOcrBackedFullScreenAdClose(
+      hasCloseSemantic, compactTopRightControl, currentWindowEvidence,
+      controlBelongsToLargeCreative, hasExplicitAdMarker,
+    )
+
+    assertTrue(allowed())
+    assertFalse(allowed(hasCloseSemantic = false))
+    assertFalse(allowed(compactTopRightControl = false))
+    assertFalse(allowed(currentWindowEvidence = false))
+    assertFalse(allowed(controlBelongsToLargeCreative = false))
+    assertFalse(allowed(hasExplicitAdMarker = false))
   }
 
   @Test fun anUnlabelledImageAloneIsNotAClosingAction() {

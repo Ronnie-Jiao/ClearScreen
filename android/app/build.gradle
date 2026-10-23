@@ -101,8 +101,8 @@ android {
         applicationId clearscreenApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion clearscreenTargetSdk
-        versionCode 51
-        versionName "1.0.45"
+        versionCode 64
+        versionName "1.0.58"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -162,6 +162,29 @@ android {
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
+}
+
+// Keep Gradle's standard artifact for tooling, and also emit the user-facing
+// installer with the product name. The app label remains "净屏" in strings.xml.
+def releaseApk = layout.buildDirectory.file('outputs/apk/release/app-release.apk')
+def namedReleaseApk = layout.buildDirectory.file('outputs/apk/净屏.apk')
+tasks.register('copyReleaseApkAsClearScreen') {
+    inputs.file(releaseApk)
+    outputs.file(namedReleaseApk)
+    doLast {
+        def sourceFile = releaseApk.get().asFile
+        def outputFile = namedReleaseApk.get().asFile
+        outputFile.parentFile.mkdirs()
+        java.nio.file.Files.copy(
+            sourceFile.toPath(),
+            outputFile.toPath(),
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING
+        )
+    }
+}
+
+tasks.matching { it.name == 'assembleRelease' }.configureEach {
+    finalizedBy(tasks.named('copyReleaseApkAsClearScreen'))
 }
 
 // Apply static values from `gradle.properties` to the `android.packagingOptions`

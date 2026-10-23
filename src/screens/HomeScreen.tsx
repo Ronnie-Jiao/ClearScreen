@@ -11,6 +11,10 @@ type MainTab='home'|'apps'|'settings';
 type HomePermissions={skip:boolean;skipRunning:boolean};
 type HomeStatus='permission'|'checking'|'repair'|'select'|'paused'|'working';
 
+const RECENT_RECORD_LIMIT=5;
+const RECENT_ROW_HEIGHT=60;
+const RECENT_HEADER_HEIGHT=48;
+
 export default function HomeScreen({master,onAction,onTab,onPermissions,onRecords,onOpenRecord,onOpenApp,apps,logs,today,permissions,checking,enabledAppCount}:{
  master:boolean;
  onAction:()=>void;
@@ -26,7 +30,7 @@ export default function HomeScreen({master,onAction,onTab,onPermissions,onRecord
  checking:boolean;
  enabledAppCount:number;
 }){
- const recent=logs.slice(0,3);
+ const recent=logs.slice(0,RECENT_RECORD_LIMIT);
  let state:HomeStatus;
  if(!permissions.skip)state='permission';
  else if(checking)state='checking';
@@ -41,7 +45,7 @@ export default function HomeScreen({master,onAction,onTab,onPermissions,onRecord
  const primaryAction=state==='permission'||state==='repair'?onPermissions:onAction;
 
  return <Background><View style={s.root}><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
-  <BrandHeader tagline/>
+  <BrandHeader tagline smallText/>
   <Card style={s.status}>
    <View style={s.statusHeader}>
     <LinearGradient colors={state==='repair'?['#F59E0B','#F9735B']:state==='paused'?['#8B9BB0','#B6C3D2']:['#0B78F2','#14B8B0']} style={s.orb}>
@@ -55,8 +59,9 @@ export default function HomeScreen({master,onAction,onTab,onPermissions,onRecord
    </View>
    {action?<PrimaryButton title={action} onPress={primaryAction}/>:null}
   </Card>
-  <Card style={s.block}>
-   <View style={s.blockHead}><Text style={s.blockTitle}>最近记录</Text><Pressable onPress={onRecords}><Text style={s.linkText}>查看全部 ›</Text></Pressable></View>
+  <Card style={[s.block,s.recentBlock]}>
+   <View style={s.blockHead}><Text style={s.blockTitle}>最近记录</Text><Pressable accessibilityRole="button" accessibilityLabel="查看全部记录" onPress={onRecords} style={s.viewAllButton}><Text style={s.linkText}>查看全部</Text><Ionicons name="chevron-forward" size={16} color={C.blue}/></Pressable></View>
+   <ScrollView style={s.recentList} nestedScrollEnabled showsVerticalScrollIndicator={false}>
    {recent.length?recent.map((log,index)=>{
     const app=apps.find(item=>item.id===log.appId);
     if(!app)return null;
@@ -66,14 +71,15 @@ export default function HomeScreen({master,onAction,onTab,onPermissions,onRecord
      <Text style={[s.logAction,log.type==='fail'&&{color:C.red}]} numberOfLines={1}>{result}</Text>
     </Pressable>;
    }):<Text style={s.empty}>还没有处理记录</Text>}
+   </ScrollView>
   </Card>
  </ScrollView><BottomNav active="home" onChange={onTab}/></View></Background>;
 }
 
 const s=StyleSheet.create({
- root:{flex:1},scroll:{flexGrow:1,paddingHorizontal:18,paddingTop:20,paddingBottom:28},
+ root:{flex:1},scroll:{flexGrow:1,paddingHorizontal:18,paddingBottom:84},
  status:{padding:18,gap:16,marginBottom:14},statusHeader:{minHeight:76,flexDirection:'row',alignItems:'center',gap:10},orb:{width:64,height:64,borderRadius:32,alignItems:'center',justifyContent:'center'},
- statusTitle:{fontSize:22,fontWeight:'900',color:C.navy,flex:1,minWidth:0},todaySummary:{minWidth:76,alignItems:'flex-end',paddingVertical:4},todayLabel:{fontSize:12,fontWeight:'800',color:C.text2},todayValueRow:{flexDirection:'row',alignItems:'center'},todayNum:{fontSize:26,fontWeight:'900',color:C.navy},todayUnit:{fontSize:12,fontWeight:'800',color:C.text2,marginLeft:3},
- block:{paddingHorizontal:16,marginBottom:14},blockHead:{minHeight:48,flexDirection:'row',alignItems:'center',borderBottomWidth:1,borderBottomColor:C.line},blockTitle:{fontSize:19,fontWeight:'900',color:C.navy,flex:1},linkText:{fontSize:14,fontWeight:'900',color:C.blue},
- logRow:{minHeight:60,flexDirection:'row',alignItems:'center',gap:9,borderBottomWidth:1,borderBottomColor:C.line},time:{width:46,fontSize:13,color:C.text2,fontWeight:'700'},logName:{flex:1,minWidth:0,fontSize:15,fontWeight:'800',color:C.text},logAction:{width:94,textAlign:'right',fontSize:13,fontWeight:'800',color:C.green},empty:{paddingVertical:22,textAlign:'center',color:C.text2,fontSize:16,fontWeight:'700'},
+ statusTitle:{fontSize:22,fontWeight:'900',color:C.navy,flex:1,minWidth:0},todaySummary:{minWidth:76,minHeight:76,alignItems:'flex-end',justifyContent:'center'},todayLabel:{position:'absolute',top:8,right:0,fontSize:12,fontWeight:'800',color:C.text2},todayValueRow:{flexDirection:'row',alignItems:'center'},todayNum:{fontSize:26,fontWeight:'900',color:C.navy},todayUnit:{fontSize:12,fontWeight:'800',color:C.text2,marginLeft:3},
+ block:{paddingHorizontal:16,marginBottom:14},recentBlock:{height:RECENT_HEADER_HEIGHT+RECENT_ROW_HEIGHT*RECENT_RECORD_LIMIT+2,flexGrow:1,flexShrink:0},recentList:{flex:1},blockHead:{minHeight:RECENT_HEADER_HEIGHT,flexShrink:0,flexDirection:'row',alignItems:'center',borderBottomWidth:1,borderBottomColor:C.line},blockTitle:{fontSize:19,fontWeight:'900',color:C.navy,flex:1},viewAllButton:{height:44,flexDirection:'row',alignItems:'center',justifyContent:'flex-end',gap:2},linkText:{fontSize:14,lineHeight:20,fontWeight:'900',color:C.blue},
+ logRow:{height:RECENT_ROW_HEIGHT,flexShrink:0,flexDirection:'row',alignItems:'center',gap:9,borderBottomWidth:1,borderBottomColor:C.line},time:{width:46,fontSize:13,color:C.text2,fontWeight:'700'},logName:{flex:1,minWidth:0,fontSize:15,fontWeight:'800',color:C.text},logAction:{width:94,textAlign:'right',fontSize:13,fontWeight:'800',color:C.green},empty:{paddingVertical:22,textAlign:'center',color:C.text2,fontSize:16,fontWeight:'700'},
 });

@@ -25,9 +25,13 @@ export type BackendPermissions = {
   network: boolean;
   networkRunning: boolean;
   bg: boolean;
+  batteryOptimizationIgnored: boolean | null;
+  backgroundRestricted: boolean | null;
+  startupAllowed: boolean | null;
+  backgroundAllowed: boolean | null;
   isVivoFamily: boolean;
   vendorStartupSettingsAvailable: boolean;
-  // Android has no public API for vivo/iQOO's self-start switch. This field
+  // Android has no public API for OEM self-start switches. This field
   // means the user completed the guided check, not that the system exposed a
   // verifiable permission grant to the app.
   vendorStartupGuideConfirmed: boolean;
@@ -75,6 +79,20 @@ export type BackendSnapshot = {
 
 const native = Platform.OS === 'android' ? NativeModules.ClearScreenBackend : undefined;
 
+type SettingsMethod='openAccessibilitySettings'|'openAppDetailsSettings'|'openStartupSettings'|'openBackgroundSettings'|'openBatterySettings';
+async function openNativeSettings(method: SettingsMethod): Promise<void> {
+  if (typeof native?.[method] !== 'function' || await native[method]() !== true) {
+    throw new Error('系统设置入口不可用');
+  }
+}
+
+function withPermissionTimeout<T>(read: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('权限状态读取超时')), 4000);
+    read.then(value => { clearTimeout(timer); resolve(value) }, error => { clearTimeout(timer); reject(error) });
+  });
+}
+
 function normalizeApp(app: NativeApp): AppItem {
   return {
     id: app.id || app.packageName || `unknown-${app.name || 'app'}`,
@@ -111,6 +129,10 @@ function fallbackSnapshot(): BackendSnapshot {
       network: false,
       networkRunning: false,
       bg: false,
+      batteryOptimizationIgnored: null,
+      backgroundRestricted: null,
+      startupAllowed: null,
+      backgroundAllowed: null,
       isVivoFamily: false,
       vendorStartupSettingsAvailable: false,
       vendorStartupGuideConfirmed: false,
@@ -172,7 +194,7 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
     todaySkipCount: Number(raw.todaySkipCount || 0),
     todayNetworkCount: 0,
     permissions: {
-      skip: Boolean(raw.accessibilityEnabled),
+      skip: Boolean(raw.accessibilitySettingEnabled ?? raw.accessibilityEnabled),
       skipRunning: Boolean(raw.accessibilityRunning),
       accessibilitySettingEnabled: Boolean(raw.accessibilitySettingEnabled ?? raw.accessibilityEnabled),
       accessibilityServiceBound: Boolean(raw.accessibilityServiceBound ?? raw.accessibilityRunning),
@@ -181,6 +203,10 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
       network: false,
       networkRunning: false,
       bg: Boolean(raw.batteryOptimizationIgnored),
+      batteryOptimizationIgnored: typeof raw.batteryOptimizationIgnored === 'boolean' ? raw.batteryOptimizationIgnored : null,
+      backgroundRestricted: typeof raw.backgroundRestricted === 'boolean' ? raw.backgroundRestricted : null,
+      startupAllowed: typeof raw.startupAllowed === 'boolean' ? raw.startupAllowed : null,
+      backgroundAllowed: typeof raw.backgroundAllowed === 'boolean' ? raw.backgroundAllowed : null,
       isVivoFamily: Boolean(raw.isVivoFamily),
       vendorStartupSettingsAvailable: Boolean(raw.vendorStartupSettingsAvailable),
       vendorStartupGuideConfirmed: Boolean(raw.vendorStartupGuideConfirmed),
@@ -210,6 +236,11 @@ export const ClearScreenNative = {
   getSnapshot: async (): Promise<BackendSnapshot> => {
     if (!native?.getSnapshot) return fallbackSnapshot();
     return normalizeSnapshot(await native.getSnapshot());
+  },
+  getPermissionSnapshot: async (): Promise<Pick<BackendSnapshot,'privacyConsentAccepted'|'permissions'>> => {
+    if (native?.getPermissionSnapshot) return normalizeSnapshot(await withPermissionTimeout(native.getPermissionSnapshot()));
+    if (native?.getSnapshot) return normalizeSnapshot(await withPermissionTimeout(native.getSnapshot()));
+    return fallbackSnapshot();
   },
   acceptPrivacyPolicy: async (): Promise<BackendSnapshot> => {
     if (!native?.acceptPrivacyPolicy) {
@@ -246,8 +277,8 @@ export const ClearScreenNative = {
     }
   },
   setLogRetentionDays: async (days: number) => {
-    if (!native?.setLogRetentionDays) return fallbackSnapshot();
-    return normalizeSnapshot(await native.setLogRetentionDays(days));
+    if (!native?.setLogRetentionDays) return;
+    await native.setLogRetentionDays(days);
   },
   setSetting: async (
     key: 'startup' | 'autoUpdate' | 'debug' | 'skipSplashVideo' | 'closePopupAds' | 'closeFeedAds',
@@ -263,9 +294,11 @@ export const ClearScreenNative = {
     if (!native?.clearLogs) return fallbackSnapshot();
     return normalizeSnapshot(await native.clearLogs());
   },
-  openAccessibilitySettings: async () => native?.openAccessibilitySettings?.(),
-  openAppDetailsSettings: async () => native?.openAppDetailsSettings?.(),
-  openBatterySettings: async () => native?.openBatterySettings?.(),
+  openAccessibilitySettings: () => openNativeSettings('openAccessibilitySettings'),
+  openAppDetailsSettings: () => openNativeSettings('openAppDetailsSettings'),
+  openStartupSettings: () => openNativeSettings('openStartupSettings'),
+  openBackgroundSettings: () => openNativeSettings('openBackgroundSettings'),
+  openBatterySettings: () => openNativeSettings('openBatterySettings'),
   confirmVendorStartupGuide: async (): Promise<BackendSnapshot | undefined> => {
     if (!native?.confirmVendorStartupGuide) return undefined;
     return normalizeSnapshot(await native.confirmVendorStartupGuide());

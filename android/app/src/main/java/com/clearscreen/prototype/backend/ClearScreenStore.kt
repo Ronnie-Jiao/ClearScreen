@@ -131,6 +131,7 @@ class ClearScreenStore internal constructor(private val preferences: SharedPrefe
       .putBoolean(KEY_SKIP_SPLASH_VIDEO, true)
       .putBoolean(KEY_CLOSE_POPUP_ADS, true)
       .putBoolean(KEY_CLOSE_FEED_ADS, true)
+      .putInt(KEY_LOG_RETENTION_DAYS, DEFAULT_LOG_RETENTION_DAYS)
       .commit()) {
       "Unable to restore default preferences"
     }

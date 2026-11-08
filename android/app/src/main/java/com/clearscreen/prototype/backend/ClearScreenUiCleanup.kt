@@ -7,7 +7,7 @@ import android.os.Build
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 
-/** Explicit one-item sessions for exact vivo pages. No coordinates, OCR, or navigation clicks. */
+/** Exact-target one-item sessions. No coordinates or OCR; some destinations require user navigation. */
 internal object ClearScreenUiCleanup {
   /** One extra page to open before the switch appears: the row to click and the header it should land on. */
   data class Stage(val entry: String, val page: String,

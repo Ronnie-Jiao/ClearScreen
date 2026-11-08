@@ -29,6 +29,7 @@ internal object ClearScreenAdbOperations {
   private const val CONNECT_TIMEOUT_SECONDS = 12L
   private val SAFE_ARG = Regex("[A-Za-z0-9_./:=+-]{1,200}")
   private val lock = Any()
+  private val connectionLock = Any()
 
   private var client: ClearScreenAdbClient? = null
   private var state: State = State.IDLE
@@ -47,6 +48,7 @@ internal object ClearScreenAdbOperations {
       },
       "connected" to (state == State.CONNECTED && runCatching { client?.isConnected() == true }.getOrDefault(false)),
       "paired" to isPaired(context),
+      "reconnectRequested" to reconnectRequested(context),
       "host" to host,
       "port" to port,
       "message" to message,
@@ -56,14 +58,21 @@ internal object ClearScreenAdbOperations {
     )
   }
 
-  fun pair(context: Context, host: String, port: Int, code: String): Map<String, Any?> {
+  fun pair(context: Context, host: String, port: Int, code: String): Map<String, Any?> =
+    synchronized(connectionLock) { pairLocked(context, host, port, code) }
+
+  private fun pairLocked(context: Context, host: String, port: Int, code: String): Map<String, Any?> {
     synchronized(lock) { state = State.PAIRING; message = "正在配对" }
     return try {
       require(isSupported()) { "Android 11 以下不支持无线调试配对" }
+      if (!connectionAllowed(context)) return cancelled()
       val manager = ensureClient(context)
-      val paired = manager.pair(host, port, code)
+      val paired = synchronized(ClearScreenPrivacyConsentStore.operationLock) {
+        if (!connectionAllowed(context)) false
+        else manager.pair(host, port, code).also { if (it) markPaired(context) }
+      }
+      if (!connectionAllowed(context)) return cancelled()
       if (paired) {
-        markPaired(context)
         synchronized(lock) { this.host = host; state = State.IDLE; message = "配对成功，请读取无线调试页的连接端口" }
         result(true, "配对成功")
       } else {
@@ -75,60 +84,143 @@ internal object ClearScreenAdbOperations {
   }
 
   fun connect(context: Context, host: String, port: Int): Map<String, Any?> {
+    requestReconnect(context)
+    return synchronized(connectionLock) {
+      if (!connectionAllowed(context)) cancelled(synchronized(lock) { client })
+      else if (isVerifiedConnected()) result(true, "已连接")
+      else connectDirect(context, host, port, reportFailure = true)
+    }
+  }
+
+  /** Pairing has already recorded the user's request; stopping it must not be undone. */
+  fun connectFromPairing(context: Context, host: String, port: Int): Map<String, Any?> =
+    synchronized(connectionLock) { connectDirect(context, host, port, reportFailure = true) }
+
+  private fun connectDirect(context: Context, host: String, port: Int, reportFailure: Boolean): Map<String, Any?> {
     synchronized(lock) { state = State.CONNECTING; message = "正在连接" }
+    var manager: ClearScreenAdbClient? = null
     return try {
       require(isSupported()) { "Android 11 以下不支持无线调试连接" }
-      val manager = ensureClient(context)
+      if (!connectionAllowed(context)) return cancelled()
+      val active = ensureClient(context)
+      manager = active
       // libadb refuses to connect while the old socket still reports as
       // connected, which turns every manual retry into a silent failure.
-      dropConnection(manager)
-      val connected = manager.connect(host, port)
-      if (!connected) return fail("连接失败，请确认无线调试已开启且连接端口正确")
+      dropConnection(active)
+      if (!active.connect(host, port)) {
+        dropConnection(active)
+        return connectionFailure(context, "连接失败，请确认无线调试已开启且连接端口正确", reportFailure)
+      }
       // A TCP handshake alone does not prove the shell identity: when the phone
       // has not yet allowed this key, the daemon accepts the socket but not the
       // command. `id` must report the adb shell uid.
-      val identity = executeInternal(manager, "id", 12L, 200_000, null)
-      if (!identity.output.contains("uid=2000")) {
-        dropConnection(manager)
-        return fail("已连接但未获得调试授权，请在手机上点“允许”后重试连接")
+      val authorized = synchronized(ClearScreenPrivacyConsentStore.operationLock) {
+        connectionAllowed(context) && executeInternal(active, "id", 12L, 200_000, null).output.contains("uid=2000")
       }
-      synchronized(lock) { this.host = host; this.port = port; state = State.CONNECTED; message = "已连接" }
+      if (!connectionAllowed(context)) return cancelled(active)
+      if (!authorized) {
+        dropConnection(active)
+        return connectionFailure(context, "已连接但未获得调试授权，请在手机上点“允许”后重试连接", reportFailure)
+      }
+      synchronized(ClearScreenPrivacyConsentStore.operationLock) {
+        if (!connectionAllowed(context)) return cancelled(active)
+        markPaired(context)
+        rememberEndpoint(context, host, port)
+        synchronized(lock) { this.host = host; this.port = port; state = State.CONNECTED; message = "已连接" }
+      }
       result(true, "已连接")
     } catch (error: AdbAuthenticationFailedException) {
-      fail("调试授权被拒绝，请在手机上允许后重试连接")
+      manager?.let(::dropConnection)
+      connectionFailure(context, "调试授权被拒绝，请在手机上允许后重试连接", reportFailure)
     } catch (error: AdbPairingRequiredException) {
-      fail("需要先完成无线调试配对")
+      manager?.let(::dropConnection)
+      connectionFailure(context, "需要先完成无线调试配对", reportFailure)
     } catch (error: Exception) {
-      fail(readable(error, "连接失败"))
+      manager?.let(::dropConnection)
+      connectionFailure(context, readable(error, "连接失败"), reportFailure)
     }
   }
 
   fun autoConnect(context: Context): Map<String, Any?> {
-    synchronized(lock) { state = State.CONNECTING; message = "正在查找无线调试设备" }
-    return try {
-      require(isSupported()) { "Android 11 以下不支持无线调试连接" }
-      val manager = ensureClient(context)
-      dropConnection(manager)
-      val connected = manager.autoConnect(context, 5000L)
-      if (!connected) return fail("同一网络下没有发现已开启的无线调试，请手动填写地址")
-      val identity = executeInternal(manager, "id", 12L, 200_000, null)
-      if (!identity.output.contains("uid=2000")) {
-        dropConnection(manager)
-        return fail("已连接但未获得调试授权，请在手机上点“允许”后重试连接")
-      }
-      synchronized(lock) { state = State.CONNECTED; message = "已连接" }
-      result(true, "已连接")
-    } catch (error: Exception) {
-      fail(readable(error, "连接失败"))
+    requestReconnect(context)
+    return synchronized(connectionLock) {
+      if (!connectionAllowed(context)) cancelled(synchronized(lock) { client })
+      else if (isVerifiedConnected()) result(true, "已连接")
+      else connectKnownOrDiscover(context)
     }
   }
 
-  fun disconnect() {
-    synchronized(lock) {
-      client?.let { dropConnection(it) }
-      state = State.IDLE
-      message = "已断开"
+  /** A previous paired connection is restored only while the user still wants it. */
+  fun shouldRestore(context: Context): Boolean {
+    if (!isSupported() || !ClearScreenPrivacyConsentStore(context).hasCurrentConsent() ||
+      !isPaired(context) || !reconnectRequested(context) || ClearScreenAdbPairingHelper.isActive()) return false
+    return synchronized(lock) {
+      state != State.CONNECTING && state != State.PAIRING &&
+        !(state == State.CONNECTED && runCatching { client?.isConnected() == true }.getOrDefault(false))
     }
+  }
+
+  fun restoreIfRequested(context: Context) {
+    synchronized(connectionLock) {
+      if (shouldRestore(context)) connectKnownOrDiscover(context)
+    }
+  }
+
+  private fun connectKnownOrDiscover(context: Context): Map<String, Any?> {
+    if (!connectionAllowed(context)) return cancelled()
+    val prefs = adbPrefs(context)
+    val savedHost = prefs.getString(PREF_LAST_HOST, "").orEmpty()
+    val savedPort = prefs.getInt(PREF_LAST_PORT, 0)
+    // Only retry an endpoint that is still this device's current local address.
+    if (savedHost.isNotEmpty() && savedHost == localAddress() && savedPort in 1..65535) {
+      val previous = connectDirect(context, savedHost, savedPort, reportFailure = false)
+      if (previous["ok"] == true || !connectionAllowed(context)) return previous
+      forgetEndpoint(context)
+    }
+    return discoverConnection(context)
+  }
+
+  private fun discoverConnection(context: Context): Map<String, Any?> {
+    synchronized(lock) { state = State.CONNECTING; message = "正在查找无线调试设备" }
+    var manager: ClearScreenAdbClient? = null
+    return try {
+      require(isSupported()) { "Android 11 以下不支持无线调试连接" }
+      if (!connectionAllowed(context)) return cancelled()
+      val active = ensureClient(context)
+      manager = active
+      dropConnection(active)
+      if (!active.autoConnect(context, 5000L)) {
+        dropConnection(active)
+        return connectionFailure(context, "同一网络下没有发现已开启的无线调试，请手动填写地址", true)
+      }
+      val authorized = synchronized(ClearScreenPrivacyConsentStore.operationLock) {
+        connectionAllowed(context) && executeInternal(active, "id", 12L, 200_000, null).output.contains("uid=2000")
+      }
+      if (!connectionAllowed(context)) return cancelled(active)
+      if (!authorized) {
+        dropConnection(active)
+        return connectionFailure(context, "已连接但未获得调试授权，请在手机上点“允许”后重试连接", true)
+      }
+      synchronized(ClearScreenPrivacyConsentStore.operationLock) {
+        if (!connectionAllowed(context)) return cancelled(active)
+        markPaired(context)
+        synchronized(lock) { state = State.CONNECTED; message = "已连接" }
+      }
+      result(true, "已连接")
+    } catch (error: Exception) {
+      manager?.let(::dropConnection)
+      connectionFailure(context, readable(error, "连接失败"), true)
+    }
+  }
+
+  fun disconnect(context: Context, forgetEndpoint: Boolean = false) {
+    var persistenceError: Exception? = null
+    try { setReconnectRequested(context, false, forgetEndpoint) } catch (error: Exception) { persistenceError = error }
+    synchronized(connectionLock) {
+      val active = synchronized(lock) { state = State.IDLE; message = "已断开"; client }
+      active?.let(::dropConnection)
+    }
+    persistenceError?.let { throw it }
   }
 
   fun isVerifiedConnected(): Boolean = synchronized(lock) {
@@ -252,16 +344,62 @@ internal object ClearScreenAdbOperations {
       ?: addresses.firstOrNull())?.second?.hostAddress ?: ""
   }.getOrDefault("")
 
+  private const val PREF_RECONNECT = "reconnect_requested"
+  private const val PREF_LAST_HOST = "last_connection_host"
+  private const val PREF_LAST_PORT = "last_connection_port"
+
   private fun adbPrefs(context: Context) =
     context.getSharedPreferences("clearscreen_adb", Context.MODE_PRIVATE)
 
-  /** Pairing success is a durable fact; a key file alone only proves a key was generated. */
+  fun requestReconnect(context: Context) {
+    check(ClearScreenPrivacyConsentStore(context).hasCurrentConsent()) { "请先同意隐私政策" }
+    setReconnectRequested(context, true)
+  }
+
+  fun cancelReconnectRequest(context: Context) = setReconnectRequested(context, false)
+
+  private fun setReconnectRequested(context: Context, requested: Boolean, forgetEndpoint: Boolean = false) {
+    val editor = adbPrefs(context).edit().putBoolean(PREF_RECONNECT, requested)
+    if (forgetEndpoint) editor.remove(PREF_LAST_HOST).remove(PREF_LAST_PORT)
+    check(editor.commit()) { "无法保存连接状态" }
+  }
+
+  /** Older installs had only the paired flag; keep their existing connection available. */
+  private fun reconnectRequested(context: Context): Boolean = runCatching {
+    val prefs = adbPrefs(context)
+    if (prefs.contains(PREF_RECONNECT)) prefs.getBoolean(PREF_RECONNECT, false)
+    else prefs.getBoolean("paired", false)
+  }.getOrDefault(false)
+
+  private fun connectionAllowed(context: Context): Boolean =
+    ClearScreenPrivacyConsentStore(context).hasCurrentConsent() && reconnectRequested(context)
+
+  private fun rememberEndpoint(context: Context, host: String, port: Int) {
+    runCatching { adbPrefs(context).edit().putString(PREF_LAST_HOST, host).putInt(PREF_LAST_PORT, port).commit() }
+  }
+
+  private fun forgetEndpoint(context: Context) {
+    runCatching { adbPrefs(context).edit().remove(PREF_LAST_HOST).remove(PREF_LAST_PORT).apply() }
+  }
+
+  private fun cancelled(manager: ClearScreenAdbClient? = null): Map<String, Any?> {
+    manager?.let(::dropConnection)
+    synchronized(lock) { state = State.IDLE; message = "已断开" }
+    return result(false, "连接已取消")
+  }
+
+  private fun connectionFailure(context: Context, text: String, reportFailure: Boolean): Map<String, Any?> {
+    if (!connectionAllowed(context)) return cancelled()
+    return if (reportFailure) fail(text) else result(false, text)
+  }
+
+  /** Pairing or a verified shell connection proves authorization; a key file alone does not. */
   private fun isPaired(context: Context): Boolean = runCatching {
     adbPrefs(context).getBoolean("paired", false)
   }.getOrDefault(false)
 
   private fun markPaired(context: Context) {
-    runCatching { adbPrefs(context).edit().putBoolean("paired", true).apply() }
+    runCatching { adbPrefs(context).edit().putBoolean("paired", true).commit() }
   }
 
   private fun result(ok: Boolean, text: String): Map<String, Any?> = mapOf("ok" to ok, "message" to text)

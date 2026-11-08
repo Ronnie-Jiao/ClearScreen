@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAppAlert } from '../components/AppDialog';
 import { Background, Card, Toggle, TopBar } from '../components/UI';
 import { ClearScreenNative, type CleanupAccess, type CleanupTarget } from '../native/ClearScreenNative';
@@ -7,9 +7,6 @@ import { C, COMPACT_UI } from '../theme';
 
 const CHECK_TIMEOUT_MS = 30_000;
 const ACCESS_TIMEOUT_MS = 8_000;
-
-type StatusKind = 'idle' | 'working' | 'error' | 'blocked';
-type Status = { kind: StatusKind; text: string };
 
 /** A hung native call must surface as a sentence instead of an endless「检查中…」. */
 const withTimeout = <T,>(work: Promise<T>, ms: number): Promise<T> =>
@@ -28,8 +25,8 @@ export default function QuickComponentsScreen({ onBack }: { onBack: () => void }
   const [targets, setTargets] = useState<CleanupTarget[]>([]);
   const [targetsScanned, setTargetsScanned] = useState(false);
   const [busy, setBusy] = useState('');
-  const [status, setStatus] = useState<Status>({ kind: 'idle', text: '' });
   const pendingInspect = useRef(false);
+  const entryInspectStarted = useRef(false);
   const guideSeen = useRef<boolean | null>(null);
   const guideReady = useRef<Promise<boolean> | null>(null);
   useEffect(() => {
@@ -81,7 +78,7 @@ export default function QuickComponentsScreen({ onBack }: { onBack: () => void }
       }
       const health = await ClearScreenNative.getAccessibilityHealth().catch(() => null);
       if (health && !health.permissions.skip) {
-        showAlert('还差一步：开启自动跳过服务', '净屏要靠它在你打开配对弹窗时读出配对码。开启后再回来点「检查本机组件」，就能自己连上。', [
+        showAlert('还差一步：开启自动跳过服务', '净屏要靠它在配对弹窗出现时读出配对码。开启后重新进入本页，按提示连接；连上后会自动检查。', [
           { text: '取消', style: 'cancel' },
           { text: '去开启', onPress: openAccessibility },
         ], { tone: 'warning' });
@@ -89,13 +86,11 @@ export default function QuickComponentsScreen({ onBack }: { onBack: () => void }
       }
       await ClearScreenNative.startAdbAutoPair();
       pendingInspect.current = true;
-      setStatus({ kind: 'blocked', text: '等你在系统里完成配对，连上后会自动开始检查。' });
-      showAlert('去系统里点两下', '现在净屏会自动读出配对码，不用抄。打开「开发者选项」→「无线调试」，点亮开关，再点「使用配对码配对设备」；配对弹窗出现后净屏会自己连上。连好后回到净屏，会自动开始检查。', [
+      showAlert('去系统里点两下', '现在净屏会自动读出配对码，不用抄。请在系统设置里打开「开发者选项」→「无线调试」，点亮开关，再点「使用配对码配对设备」；配对弹窗出现后净屏会自己连上。连好后回到净屏，会自动开始检查。', [
         { text: '稍后', style: 'cancel' },
-        { text: '去开发者选项', onPress: () => { void ClearScreenNative.openDeveloperOptions().catch(error => fail('无法打开系统设置', error)) } },
+        { text: '打开系统设置', onPress: () => { void ClearScreenNative.openDeveloperOptions().catch(error => fail('无法打开系统设置', error)) } },
       ], { tone: 'info' });
     } catch (error) {
-      setStatus({ kind: 'error', text: `没能开始配对：${explainError(error)}` });
       fail('无法开始配对', error);
     } finally {
       setBusy('');
@@ -115,7 +110,6 @@ export default function QuickComponentsScreen({ onBack }: { onBack: () => void }
   const inspect = async () => {
     if (busy) return;
     setBusy('targets');
-    setStatus({ kind: 'working', text: '正在读取本机组件…' });
     try {
       // Re-read the channel first: the cached value can be stale after the
       // system drops the wireless debugging session. A failed read is a real
@@ -124,7 +118,7 @@ export default function QuickComponentsScreen({ onBack }: { onBack: () => void }
       try {
         current = await withTimeout(ClearScreenNative.getCleanupAccessStatus(), ACCESS_TIMEOUT_MS);
       } catch (error) {
-        setStatus({ kind: 'error', text: `检查没完成：${explainError(error)}` });
+        fail('检查失败', error);
         void refreshAccess();
         return;
       }
@@ -132,28 +126,28 @@ export default function QuickComponentsScreen({ onBack }: { onBack: () => void }
       const ready = current.adbConnected || (current.running && current.granted);
       if (!ready) {
         pendingInspect.current = true;
-        setStatus({ kind: 'blocked', text: '还没连上这台手机，所以没法检查。点「现在连上」，用无线调试配对一次，连好后会自动检查。' });
         askToConnect();
         return;
       }
       const list = await withTimeout(ClearScreenNative.inspectCleanupTargets(), CHECK_TIMEOUT_MS);
+      if (guideSeen.current === null) await (guideReady.current ?? Promise.resolve(true));
       setTargets(list);
       setTargetsScanned(true);
-      setStatus({ kind: 'idle', text: '' });
-      // Explain the switches once, the first time the list is actually seen.
-      const seen = guideSeen.current === null
-        ? await (guideReady.current ?? Promise.resolve(true))
-        : guideSeen.current;
-      if (list.length && !seen) showSwitchGuide();
     } catch (error) {
-      setStatus({ kind: 'error', text: `检查没完成：${explainError(error)}` });
+      fail('检查失败', error);
       // The channel may have dropped between the status read and the scan:
-      // refresh so the「现在连上」button matches what actually happened.
+      // refresh the actual connection state after a failed read.
       void refreshAccess();
     } finally {
       setBusy('');
     }
   };
+  // Check automatically on every entry; a connection prompt handles devices that are not ready yet.
+  useEffect(() => {
+    if (!accessKnown || entryInspectStarted.current) return;
+    entryInspectStarted.current = true;
+    void inspect();
+  }, [accessKnown, inspect]);
   // Pairing was started from this page: run the check as soon as the channel comes back.
   useEffect(() => {
     if (!pendingInspect.current || !connected) return;
@@ -191,49 +185,33 @@ export default function QuickComponentsScreen({ onBack }: { onBack: () => void }
           showAlert('处理结果', messages[result.result] || '处理结束。', undefined, { tone: 'success' });
         } catch (error) {
           try { setTargets(await ClearScreenNative.inspectCleanupTargets()) } catch { /* keep the last display */ }
-          setStatus({ kind: 'error', text: `${restore ? '恢复' : '关闭'}${target.title}没完成：${explainError(error)}` });
           fail('处理失败', error);
         } finally { setBusy('') }
       })() } },
     ], { tone: 'warning' });
   };
   const rows = () => {
-    if (!targetsScanned) return <Text style={s.empty}>未检查 · 查完会列出本机有哪些组件</Text>;
-    if (!targets.length) return <Text style={s.empty}>未检测到可处理组件</Text>;
-    // Keep the previous order (quick app components first) without repeating
-    // the category in a heading above every row.
+    if (!targetsScanned) return null;
+    if (!targets.length) return <Card compact style={s.emptyCard}><Text style={s.empty}>未检测到可处理组件</Text></Card>;
+    // Keep the previous order while giving every component its own card.
     const ordered = [
       ...targets.filter(item => item.category === 'quick'),
       ...targets.filter(item => item.category === 'ads'),
     ];
-    return ordered.map(item => <View key={item.id} style={s.row}>
-      <Text style={s.rowTitle}>{item.title}</Text>
-      <View style={busy ? s.toggleBusy : undefined} pointerEvents={busy ? 'none' : 'auto'}>
-        <Toggle compact value={item.state === 'blocked'} unknown={item.state === 'unknown'} onChange={() => changeTarget(item)} />
+    return ordered.map(item => <Card key={item.id} compact style={s.targetCard}>
+      <View style={s.targetRow}>
+        <Text style={s.rowTitle}>{item.title}</Text>
+        <View style={busy ? s.toggleBusy : undefined} pointerEvents={busy ? 'none' : 'auto'}>
+          <Toggle compact value={item.state === 'blocked'} unknown={item.state === 'unknown'} onChange={() => changeTarget(item)} />
+        </View>
       </View>
-    </View>);
+    </Card>);
   };
-  const needsConnection = accessKnown && !connected;
-  const statusText = needsConnection && status.kind === 'idle'
-    ? { kind: 'blocked' as StatusKind, text: '还没连上这台手机，检查前需要先连一次。' }
-    : status;
-
   return (
     <Background>
       <ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
         <TopBar compact title="快应用与系统广告组件" onBack={onBack} />
-        <Card compact style={s.card}>
-          <Text style={s.intro}>快应用和系统广告组件会在后台自启、推广告、占内存。检查只读取本机信息，不会改动任何东西；下面按本机实际情况列出可处理的组件。</Text>
-          <Pressable accessibilityRole="button" disabled={!!busy} onPress={() => { void inspect() }} style={[s.action, !!busy && s.actionBusy]}>
-            {busy === 'targets' ? <ActivityIndicator size="small" color={C.blue} /> : null}
-            <Text style={s.actionText}>{busy === 'targets' ? '检查中…' : '检查本机组件'}</Text>
-          </Pressable>
-          {statusText.kind !== 'idle' ? <Text style={[s.status, statusText.kind === 'error' && s.statusError]}>{statusText.text}</Text> : null}
-          {needsConnection ? <Pressable accessibilityRole="button" disabled={!!busy} onPress={() => { void startPhonePairing() }} style={[s.connect, !!busy && s.actionBusy]}>
-            <Text style={s.connectText}>{busy === 'pair' ? '正在准备连接…' : '现在连上'}</Text>
-          </Pressable> : null}
-          {rows()}
-        </Card>
+        {rows()}
       </ScrollView>
     </Background>
   );
@@ -252,17 +230,10 @@ function explainError(error: unknown): string {
 
 const s = StyleSheet.create({
   page: { paddingHorizontal: 18, paddingBottom: 36 },
-  card: { paddingHorizontal: COMPACT_UI.cardPadding, paddingTop: 4, paddingBottom: 12, marginBottom: 12 },
-  row: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: C.line, paddingVertical: 8 },
+  targetCard: { paddingHorizontal: COMPACT_UI.cardPadding, paddingVertical: 8, marginBottom: 12 },
+  targetRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10 },
   rowTitle: { flex: 1, fontSize: COMPACT_UI.body, fontWeight: '800', color: C.text },
   toggleBusy: { opacity: 0.45 },
   empty: { paddingVertical: 22, textAlign: 'center', fontSize: COMPACT_UI.body, fontWeight: '700', color: C.text },
-  intro: { marginTop: 8, fontSize: COMPACT_UI.body, lineHeight: 21, color: C.text },
-  status: { fontSize: COMPACT_UI.body, lineHeight: 21, color: C.text, marginTop: 10 },
-  statusError: { color: '#DF1645' },
-  action: { minHeight: COMPACT_UI.buttonHeight, marginTop: 12, marginBottom: 5, paddingHorizontal: 13, borderRadius: 13, backgroundColor: '#E9F4FF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  actionBusy: { opacity: 0.55 },
-  actionText: { fontSize: COMPACT_UI.body, fontWeight: '800', color: C.blue },
-  connect: { minHeight: 40, marginTop: 8, paddingHorizontal: 13, borderRadius: 12, backgroundColor: '#E9F4FF', alignItems: 'center', justifyContent: 'center' },
-  connectText: { fontSize: COMPACT_UI.body, fontWeight: '800', color: C.blue },
+  emptyCard: { paddingHorizontal: COMPACT_UI.cardPadding, paddingVertical: 8, marginBottom: 12 },
 });

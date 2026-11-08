@@ -19,7 +19,6 @@ import AppNotificationsScreen from './src/screens/AppNotificationsScreen';
 import QuickComponentsScreen from './src/screens/QuickComponentsScreen';
 import MarketingChannelsScreen from './src/screens/MarketingChannelsScreen';
 import SystemRecommendScreen from './src/screens/SystemRecommendScreen';
-import AdbAccessScreen from './src/screens/AdbAccessScreen';
 import WhitelistScreen from './src/screens/WhitelistScreen';
 import RecordDetailScreen from './src/screens/RecordDetailScreen';
 import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
@@ -27,7 +26,7 @@ import IOSSafariScreen from './src/screens/IOSSafariScreen';
 import { AppItem, LogItem, LearnedCloseRecord } from './src/data';
 import { BackendSnapshot, ClearScreenNative, pickAccessibilityPermissions, type BackendPermissions, type AdLearningState } from './src/native/ClearScreenNative';
 
-type Page='splash'|'privacyConsent'|'privacyPolicy'|'permissions'|'home'|'apps'|'appDetail'|'records'|'recordDetail'|'learnedRecords'|'settings'|'servicePermissions'|'systemCleanup'|'systemRecommend'|'adbAccess'|'appNotifications'|'quickComponents'|'marketingChannels'|'whitelist'|SettingsSection;
+type Page='splash'|'privacyConsent'|'privacyPolicy'|'permissions'|'home'|'apps'|'appDetail'|'records'|'recordDetail'|'learnedRecords'|'settings'|'servicePermissions'|'systemCleanup'|'systemRecommend'|'appNotifications'|'quickComponents'|'marketingChannels'|'whitelist'|SettingsSection;
 type MainTab='home'|'apps'|'settings';
 type SettingsHandoff='accessibility'|'appInfo'|'startup'|'background'|'battery'|null;
 type RecordsQuery={appId?:string;todayOnly?:boolean};
@@ -289,7 +288,7 @@ function AppContent(){
  const tab=(t:MainTab)=>{setHistory([]);setPage(t)};
  useEffect(()=>{
    const settingsDetail=page==='privacyData'||page==='helpFeedback'||page==='about';
-   const settingsChild=(page==='privacyPolicy'||page==='servicePermissions'||page==='systemCleanup'||page==='systemRecommend'||page==='adbAccess'||page==='appNotifications'||page==='quickComponents'||page==='marketingChannels'||page==='permissions')&&history.includes('settings');
+   const settingsChild=(page==='privacyPolicy'||page==='servicePermissions'||page==='systemCleanup'||page==='systemRecommend'||page==='appNotifications'||page==='quickComponents'||page==='marketingChannels'||page==='permissions')&&history.includes('settings');
    if(!settingsDetail&&!settingsChild)return;
    const subscription=BackHandler.addEventListener('hardwareBackPress',()=>{
      setHistory(history.slice(0,-1));
@@ -438,19 +437,18 @@ function AppContent(){
  }
  else if(page==='whitelist')overlay=<WhitelistScreen apps={apps} onChangeApps={updateApps} onBack={back}/>;
  else if(page==='learnedRecords')overlay=<LearnedCloseRecords records={learning.records} apps={apps} onBack={back} onDelete={deleteLearned}/>;
- else if(page==='servicePermissions')overlay=<ServicePermissionsScreen permissions={permissions} checking={permissionVerification==='checking'} verificationFailed={permissionVerification==='failed'} onBack={back} onOpenAccessibility={()=>openPermission('skip')} onStartup={()=>openPermission('startup')} onBackground={()=>openPermission('bg')} onBatteryOptimization={()=>openPermission('battery')}/>;
- else if(page==='systemCleanup')overlay=<SystemCleanupScreen apps={apps} onBack={back} onOpenSystemRecommend={()=>go('systemRecommend')} onOpenAppNotifications={()=>go('appNotifications')} onOpenAdbAccess={()=>go('adbAccess')} onOpenQuickComponents={()=>go('quickComponents')} onOpenMarketingChannels={()=>go('marketingChannels')}/>;
- else if(page==='systemRecommend')overlay=<SystemRecommendScreen manufacturer={permissions.deviceManufacturer} onBack={back} onOpenSystemPrivacy={()=>{void ClearScreenNative.openSystemAdPrivacySettings().catch(()=>showAlert('无法打开系统设置','请在手机系统设置中搜索“广告”或“个性化推荐”。',undefined,{tone:'error'}))}} onOpenAdbAccess={()=>go('adbAccess')}/>;
- else if(page==='adbAccess')overlay=<AdbAccessScreen onBack={back}/>;
- else if(page==='appNotifications')overlay=<AppNotificationsScreen apps={apps} onBack={back} onOpenAccess={()=>go('adbAccess')}/>;
+ else if(page==='servicePermissions')overlay=<ServicePermissionsScreen permissions={permissions} checking={permissionVerification==='checking'} verificationFailed={permissionVerification==='failed'} accessibilityChecking={accessibilityChecking} onBack={back} onOpenAccessibility={()=>openPermission('skip')} onStartup={()=>openPermission('startup')} onBackground={()=>openPermission('bg')} onBatteryOptimization={()=>openPermission('battery')}/>;
+ else if(page==='systemCleanup')overlay=<SystemCleanupScreen onBack={back} onOpenSystemRecommend={()=>go('systemRecommend')} onOpenAppNotifications={()=>go('appNotifications')} onOpenQuickComponents={()=>go('quickComponents')}/>;
+ else if(page==='systemRecommend')overlay=<SystemRecommendScreen manufacturer={permissions.deviceManufacturer} onBack={back} onOpenSystemPrivacy={()=>{void ClearScreenNative.openSystemAdPrivacySettings().catch(()=>showAlert('无法打开系统设置','请在手机系统设置中搜索“广告”或“个性化推荐”。',undefined,{tone:'error'}))}} onOpenServicePermissions={()=>go('servicePermissions')}/>;
+ else if(page==='appNotifications')overlay=<AppNotificationsScreen apps={apps} onBack={back} onOpenAccess={()=>go('servicePermissions')}/>;
  else if(page==='quickComponents')overlay=<QuickComponentsScreen onBack={back}/>;
- else if(page==='marketingChannels')overlay=<MarketingChannelsScreen apps={apps} onBack={back}/>;
+ else if(page==='marketingChannels')overlay=<MarketingChannelsScreen apps={apps} onBack={back} onOpenServicePermissions={()=>go('servicePermissions')}/>;
  else if(page==='privacyData'||page==='helpFeedback'||page==='about')overlay=<SettingsDetailScreen key={page} section={page} logRetentionDays={settings.logRetentionDays} versionName={versionName} onBack={back} onClear={handleClearLogs} onRetentionChange={days=>handleRetentionChange(days).catch(error=>showAlert('保存失败',String(error),undefined,{tone:'error'}))} onWithdrawConsent={Platform.OS==='android'?withdrawPrivacyConsent:undefined}/>;
  const homeScreen=Platform.OS==='ios'
    ? <IOSSafariScreen onPrivacyPolicy={()=>go('privacyPolicy')}/>
    : <HomeScreen master={master} onAction={handleHomeAction} checking={accessibilityChecking} onTab={tab} onPermissions={()=>go('permissions')} onRecords={()=>goRecords()} onTodayRecords={()=>goRecords({todayOnly:true})} onOpenRecord={openRecord} onOpenApp={goApp} apps={apps} logs={logs} today={today} permissions={permissions} enabledAppCount={enabledAppCount} onLearn={Platform.OS==='android'?()=>{void handleLearn().catch(error=>showAlert('操作失败',String(error)))}:undefined} learning={learning.active} learnedRecords={learning.records} onLearnedRecords={Platform.OS==='android'?()=>go('learnedRecords'):undefined} onDeleteLearned={Platform.OS==='android'?deleteLearned:undefined}/>;
  const appsScreen=<AppsScreen apps={apps} onChangeApps={updateApps} onTab={tab} onOpen={goApp}/>;
- const settingsScreen=<SettingsScreen onTab={tab} onServicePermissions={()=>go('servicePermissions')} onSystemCleanup={Platform.OS==='android'?()=>go('systemCleanup'):undefined} onOpenSection={go} onPrivacyPolicy={()=>go('privacyPolicy')} onRestoreDefaults={Platform.OS==='android'?handleRestoreDefaults:undefined}/>;
+ const settingsScreen=<SettingsScreen onTab={tab} onServicePermissions={()=>go('servicePermissions')} onSystemAds={Platform.OS==='android'?()=>go('systemCleanup'):undefined} onMarketingChannels={Platform.OS==='android'?()=>go('marketingChannels'):undefined} onOpenSection={go} onPrivacyPolicy={()=>go('privacyPolicy')} onRestoreDefaults={Platform.OS==='android'?handleRestoreDefaults:undefined}/>;
  const recordsScreen=<RecordsScreen apps={apps} logs={logs} onBack={back} onOpenRecord={openRecord} filterAppId={recordsQuery.appId} todayOnly={recordsQuery.todayOnly}/>;
  return <ScreenInsetsContext.Provider value={sharedInsets}><StatusBar hidden={false} style="dark"/><View style={s.viewport}>
    <View style={[s.screenLayer,{display:page==='home'?'flex':'none'}]}>{homeScreen}</View>

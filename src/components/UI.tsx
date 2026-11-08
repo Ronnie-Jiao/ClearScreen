@@ -17,10 +17,16 @@ export function Card({children,style,compact=false}:{children:React.ReactNode;st
   return <View style={[styles.card,compact&&styles.cardCompact,style]}>{children}</View>;
 }
 
-export function Toggle({value,onChange,compact=false,unknown=false}:{value:boolean;onChange?:()=>void;compact?:boolean;unknown?:boolean}){
-  return <Pressable accessibilityRole="switch" accessibilityState={{checked:value}} accessibilityValue={unknown?{text:'未知'}:undefined} hitSlop={compact?{top:11,bottom:11,left:3,right:3}:undefined} onPress={onChange} style={[styles.toggle,compact&&styles.toggleCompact,value&&styles.toggleOn,unknown&&styles.toggleUnknown]}>
+export function Toggle({value,onChange,compact=false,unknown=false,accessibilityLabel}:{value:boolean;onChange?:()=>void;compact?:boolean;unknown?:boolean;accessibilityLabel?:string}){
+  return <Pressable accessibilityRole="switch" accessibilityLabel={accessibilityLabel} accessibilityState={{checked:value}} accessibilityValue={unknown?{text:'未知'}:undefined} hitSlop={compact?{top:11,bottom:11,left:3,right:3}:undefined} onPress={onChange} style={[styles.toggle,compact&&styles.toggleCompact,value&&styles.toggleOn,unknown&&styles.toggleUnknown]}>
     <View style={[styles.knob,compact&&styles.knobCompact,value&&styles.knobOn,unknown&&styles.knobUnknown]}/>
   </Pressable>;
+}
+
+export function SwitchIndicator({value,compact=false}:{value:boolean;compact?:boolean}){
+  return <View pointerEvents="none" accessible={false} style={[styles.toggle,compact&&styles.toggleCompact,value&&styles.toggleOn]}>
+    <View style={[styles.knob,compact&&styles.knobCompact,value&&styles.knobOn]}/>
+  </View>;
 }
 
 export function Badge({children,green=true,compact=false}:{children:React.ReactNode;green?:boolean;compact?:boolean}){
@@ -70,9 +76,9 @@ const styles=StyleSheet.create({
   toggle:{width:50,height:30,borderRadius:16,backgroundColor:C.graySwitch,padding:3,justifyContent:'center'},toggleCompact:{width:42,height:26,borderRadius:14},
   toggleOn:{backgroundColor:C.blue},
   toggleUnknown:{backgroundColor:'#D8DEE8',borderWidth:1,borderColor:'#B9C4D2'},
-  knob:{width:24,height:24,borderRadius:12,backgroundColor:'#fff',shadowColor:'#243B55',shadowOpacity:.14,shadowRadius:4,shadowOffset:{width:0,height:1}},knobCompact:{width:20,height:20,borderRadius:10},
+  knob:{width:24,height:24,borderRadius:12,alignSelf:'flex-start',backgroundColor:'#fff',shadowColor:'#243B55',shadowOpacity:.14,shadowRadius:4,shadowOffset:{width:0,height:1}},knobCompact:{width:20,height:20,borderRadius:10},
   knobOn:{alignSelf:'flex-end'},
-  knobUnknown:{alignSelf:'center',backgroundColor:'#F4F7FB',borderWidth:1,borderColor:'#C7D1DD'},
+  knobUnknown:{alignSelf:'flex-start',backgroundColor:'#F4F7FB',borderWidth:1,borderColor:'#C7D1DD'},
   badge:{alignSelf:'flex-start',backgroundColor:C.greenBg,borderRadius:20,paddingHorizontal:13,paddingVertical:6},
   badgeText:{fontSize:14,fontWeight:'800',color:C.green},
   badgeCompact:{paddingHorizontal:8,paddingVertical:3,borderRadius:12},badgeTextCompact:{fontSize:COMPACT_UI.caption,lineHeight:16},

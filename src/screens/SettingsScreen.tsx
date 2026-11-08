@@ -8,10 +8,11 @@ import type { SettingsSection } from './SettingsDetailScreen';
 
 type MainTab='home'|'apps'|'settings';
 
-export default function SettingsScreen({onTab,onServicePermissions,onSystemCleanup,onOpenSection,onPrivacyPolicy,onRestoreDefaults}:{
+export default function SettingsScreen({onTab,onServicePermissions,onSystemAds,onMarketingChannels,onOpenSection,onPrivacyPolicy,onRestoreDefaults}:{
  onTab:(tab:MainTab)=>void;
  onServicePermissions:()=>void;
- onSystemCleanup?:()=>void;
+ onSystemAds?:()=>void;
+ onMarketingChannels?:()=>void;
  onOpenSection:(section:SettingsSection)=>void;
  onPrivacyPolicy:()=>void;
  onRestoreDefaults?:()=>Promise<void>;
@@ -33,7 +34,8 @@ export default function SettingsScreen({onTab,onServicePermissions,onSystemClean
   <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[s.scroll,{paddingBottom:112+navInset}]}>
    <BrandHeader smallText/>
    <Card style={s.group}>{row('服务与权限',onServicePermissions,true)}</Card>
-   {onSystemCleanup?<Card style={s.group}>{row('系统广告与营销通知',onSystemCleanup,true)}</Card>:null}
+   {onSystemAds?<Card style={s.group}>{row('系统广告',onSystemAds,true)}</Card>:null}
+   {onMarketingChannels?<Card style={s.group}>{row('营销通知',onMarketingChannels,true)}</Card>:null}
    <Card style={s.group}>
     {row('隐私与数据',()=>onOpenSection('privacyData'))}
     {row('隐私政策',onPrivacyPolicy)}

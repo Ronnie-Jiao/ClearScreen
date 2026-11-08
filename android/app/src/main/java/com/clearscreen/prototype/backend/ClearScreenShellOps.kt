@@ -116,14 +116,30 @@ internal object ClearScreenShellOps {
   /** Discard all dump lines except channel metadata; never return notification bodies. */
   fun scanChannels(runner: ClearScreenShellRunner): String {
     val user = runner.userId()
-    val result = JSONArray()
+    data class ChannelCandidate(
+      val packageName: String,
+      val id: String,
+      val name: String,
+      val importance: Int,
+      val groupId: String?,
+    )
+
+    val channels = linkedMapOf<Pair<String, String>, ChannelCandidate>()
+    val appBlocked = mutableMapOf<String, Boolean>()
+    val groupBlocked = mutableMapOf<Pair<String, String>, Boolean>()
     var section = false
     var packageName: String? = null
-    var appAllowed = false
     var appRecords = 0
     var channelRecords = 0
     val appPattern = Regex("^\\s*AppSettings:\\s+(\\S+)\\s+\\((\\d+)\\)")
-    val channelPattern = Regex("NotificationChannel\\{mId='(.*?)', mName=(.*?), mDescription=.*?mImportance=(-?\\d+).*?mDeleted=(\\w+)")
+    val appImportancePattern = Regex("\\bimportance=([^\\s,]+)", RegexOption.IGNORE_CASE)
+    val groupIdPattern = Regex("mId='(.*?)'")
+    val groupBlockedPattern = Regex("mBlocked=(true|false)", RegexOption.IGNORE_CASE)
+    val channelIdPattern = Regex("mId='(.*?)'")
+    val channelNamePattern = Regex("mName=(.*?),\\s*mDescription=")
+    val channelImportancePattern = Regex("mImportance=(-?\\d+)")
+    val channelDeletedPattern = Regex("mDeleted=(\\w+)")
+    val channelGroupPattern = Regex("mGroup='(.*?)'")
     runner.execLines("/system/bin/dumpsys", "notification", "--noredact",
       timeoutSeconds = 35, maxBytes = 20_000_000) { line ->
       if (!section) {
@@ -134,31 +150,52 @@ internal object ClearScreenShellOps {
           appRecords++
           val uid = app.groupValues[2].toIntOrNull()
           packageName = app.groupValues[1].takeIf { uid != null && uid / 100000 == user }
-          appAllowed = !line.contains("importance=NONE") && !line.contains("fixedImportance=true")
+          val importance = appImportancePattern.find(line)?.groupValues?.get(1)
+          packageName?.let { pkg ->
+            if (importance != null) appBlocked[pkg] = importance.equals("NONE", ignoreCase = true)
+          }
         } else if (line.trimStart().startsWith("AppSettings:")) {
           packageName = null
-          appAllowed = false
         } else {
-          val channel = channelPattern.find(line)
-          if (channel != null) channelRecords++
           val pkg = packageName
-          if (channel != null && pkg != null && appAllowed) {
-            val id = channel.groupValues[1]
-            val name = channel.groupValues[2].trim()
-            val importance = channel.groupValues[3].toIntOrNull() ?: -1
-            val deleted = channel.groupValues[4].lowercase(Locale.ROOT) != "false"
+          val group = if (line.contains("NotificationChannelGroup{")) {
+            val id = groupIdPattern.find(line)?.groupValues?.get(1)
+            val blocked = groupBlockedPattern.find(line)?.groupValues?.get(1)?.lowercase(Locale.ROOT)?.toBooleanStrictOrNull()
+            if (pkg != null && id != null && blocked != null) groupBlocked[pkg to id] = blocked
+            true
+          } else false
+          val channel = line.contains("NotificationChannel{")
+          if (channel) channelRecords++
+          if (channel && pkg != null && !group) {
+            val id = channelIdPattern.find(line)?.groupValues?.get(1)
+            val name = channelNamePattern.find(line)?.groupValues?.get(1)?.trim()
+            val importance = channelImportancePattern.find(line)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+            val deleted = channelDeletedPattern.find(line)?.groupValues?.get(1)?.lowercase(Locale.ROOT) != "false"
+            val groupId = channelGroupPattern.find(line)?.groupValues?.get(1)?.takeIf { it.isNotEmpty() }
+            if (id == null || name == null) return@execLines
             val text = "$name $id".lowercase(Locale.ROOT)
-            if (importance > 0 && !deleted && id.length in 1..256 && name.length in 1..120 &&
+            if (!deleted && id.length in 1..256 && name.length in 1..120 &&
               !id.endsWith("...") && !id.endsWith("…") && !id.any { it.isISOControl() } && !name.any { it.isISOControl() } &&
               MARKETING.containsMatchIn(text) && !PROTECTED.containsMatchIn(text)) {
-              check(result.length() < 500) { "候选渠道过多，未生成完整清单" }
-              result.put(JSONObject().put("packageName", pkg).put("id", id).put("name", name))
+              check(channels.size < 500 || (pkg to id) in channels) { "候选渠道过多，未生成完整清单" }
+              channels[pkg to id] = ChannelCandidate(pkg, id, name, importance, groupId)
             }
           }
         }
       }
     }
     check(section && appRecords > 0 && channelRecords > 0) { "系统未提供可识别的通知渠道格式" }
+    val result = JSONArray()
+    for (channel in channels.values) {
+      val state = when {
+        channel.importance == 0 || appBlocked[channel.packageName] == true ||
+          (channel.groupId != null && groupBlocked[channel.packageName to channel.groupId] == true) -> "off"
+        channel.importance > 0 -> "on"
+        else -> "unknown"
+      }
+      result.put(JSONObject().put("packageName", channel.packageName).put("id", channel.id)
+        .put("name", channel.name).put("state", state))
+    }
     return result.toString()
   }
 
@@ -306,4 +343,8 @@ internal object ClearScreenShellOps {
   private val VALUE_PATTERN = Regex("[A-Za-z0-9_.\\-]{1,64}")
   private val MARKETING = Regex("营销|推广|促销|优惠|特惠|广告|热搜|资讯|新闻|福利|recommend|promo|market|deal|news|offer", RegexOption.IGNORE_CASE)
   private val PROTECTED = Regex("订单|物流|快递|交易|支付|付款|账号|安全|验证|通话|来电|消息|聊天|私信|评论|提醒|闹钟|日程|预警|系统|前台|后台|服务|播放|媒体|驾驶|权限|告警|赛事|护眼|找机位|通知总开关|order|delivery|payment|security|verification|message|emergency|alarm|warning", RegexOption.IGNORE_CASE)
+
+  /** 通知渠道候选的同一套关键字判断，供公开通知接口的扫描复用。 */
+  internal fun isMarketingChannelText(text: String): Boolean =
+    MARKETING.containsMatchIn(text) && !PROTECTED.containsMatchIn(text)
 }

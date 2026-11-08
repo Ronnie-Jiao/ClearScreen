@@ -159,14 +159,47 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       root?.recycle()
     }
   }
+  private fun isInputMethodWindow(windowId: Int): Boolean = windowId >= 0 && runCatching {
+    windows.any { it.id == windowId && it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+  }.getOrDefault(false)
+
+  private fun settingsPermissionRoot(): AccessibilityNodeInfo? {
+    val active = runCatching { rootInActiveWindow }.getOrNull()
+    if (active != null && active.windowId == settingsPermissionWindow &&
+      active.packageName?.toString() == settingsPermissionPackage) return active
+    val activeId = active?.windowId ?: -1
+    @Suppress("DEPRECATION")
+    active?.recycle()
+
+    // When the keyboard owns the active window, only inspect the original
+    // settings application window if no other focused window is in front.
+    return runCatching {
+      val visible = windows
+      if (visible.none { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD &&
+          (it.id == activeId || it.isActive || it.isFocused) }) return@runCatching null
+      val target = visible.singleOrNull {
+        it.id == settingsPermissionWindow && it.type == AccessibilityWindowInfo.TYPE_APPLICATION
+      } ?: return@runCatching null
+      if (visible.any { (it.isActive || it.isFocused) && it.id != target.id &&
+          it.type != AccessibilityWindowInfo.TYPE_INPUT_METHOD }) return@runCatching null
+      val root = target.root ?: return@runCatching null
+      if (root.windowId == settingsPermissionWindow && root.packageName?.toString() == settingsPermissionPackage) {
+        root
+      } else {
+        @Suppress("DEPRECATION")
+        root.recycle()
+        null
+      }
+    }.getOrNull()
+  }
+
   private val settingsPermissionScan = Runnable {
     if (serviceDestroyed || !privacyConsentStore.hasCurrentConsent()) {
       ClearScreenSettingsObserver.clear()
     } else if (ClearScreenSettingsObserver.isWatching(settingsPermissionPackage)) {
-      val root = rootInActiveWindow
+      val root = settingsPermissionRoot()
       try {
-        if (root != null && root.packageName?.toString() == settingsPermissionPackage &&
-          root.windowId == settingsPermissionWindow) {
+        if (root != null) {
           ClearScreenSettingsObserver.observe(root)
         } else ClearScreenSettingsObserver.rejectSample()
       } finally {
@@ -220,7 +253,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       handler.postDelayed(adbPairingScan, 900L)
     }
     val windowChanged = event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-    if (windowChanged) ClearScreenSettingsObserver.onForegroundWindow(packageName)
+    if (windowChanged && ClearScreenSettingsObserver.hasActiveSession()) {
+      ClearScreenSettingsObserver.onForegroundWindow(
+        packageName, event.windowId, event.className?.toString().orEmpty(), isInputMethodWindow(event.windowId),
+      )
+    }
     if (ClearScreenUiCleanup.onForeground(packageName, windowChanged)) {
       adScans.cancel()
       stopMediaWatch()
@@ -242,6 +279,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       if (ClearScreenSettingsObserver.isWatching(packageName) && event.eventType in setOf(
           AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
           AccessibilityEvent.TYPE_VIEW_CLICKED, AccessibilityEvent.TYPE_VIEW_SCROLLED,
+          AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
         )) {
         settingsPermissionPackage = packageName
         settingsPermissionWindow = event.windowId

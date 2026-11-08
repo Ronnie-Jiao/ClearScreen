@@ -4,6 +4,330 @@
 
 ## 2026-11-08
 
+### 2026-11-08 21:44:43 +08:00 — 覆盖安装净屏 Release 1.0.92 到小米手机
+
+- Release 构建成功且 Gradle 判定产物为最新；安装包 SHA-256：`078C3CC091B6F8A909D4E4AFD7B353E9AF39D89490C8BF4321CAAFB6A0EBA21E`。
+- 使用 `adb install -r` 安装到 Xiaomi 22101317C（`2f8898c80822`），返回 `Success`。设备读回版本 `1.0.92 / 98`，首次安装时间保持 `2026-11-06 18:47:52`，更新安装时间为 `2026-11-08 21:43:52`；净屏无障碍服务仍启用。未启动应用或进行界面验收。
+- 验证：`:app:assembleRelease --offline --console=plain` 成功，APK 散列与当前 Release 记录一致；覆盖安装与设备状态读回通过。
+- 涉及文件：本修改记录；APK：`android/app/build/outputs/apk/净屏.apk`。
+
+### 2026-11-08 18:49:06 +08:00 — 营销通知改为已连接读完整清单、未连接只观察部分渠道
+
+- 「营销通知」按混合方案拆分读取路径：已连接应用内直接改设置通道（ADB Shell 或 Shizuku）时，用系统诊断输出读取完整渠道清单，行为与之前一致；未连接时通过「通知使用权」观察正在发通知或刚发生变更的渠道，名称不可得时按「应用名 · 营销渠道」呈现，页面标注结果不完整并提供「去连接补全」入口；未连接且没有观察到渠道时显示「未连接，暂未观察到营销渠道」，不再显示「未发现候选渠道」。
+- 确认并记录系统限制：普通第三方应用即使已授予「通知使用权」，调用 `getNotificationChannels` 仍会被拒绝（`SecurityException ... isSystem=false ... does not have access`），该接口只对系统级监听服务开放，不能作为完整清单方案。监听服务仅记录渠道 id 与元数据，不读取通知标题或正文。
+- 兼容已有授权：未连接时若已授予「通知使用权」自动进入观察扫描；两者都没有时弹窗说明未连接结果不完整，并提供「去授予权限」与「去连接」两个入口。已连接时隐藏未连接说明。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain`、`:app:assembleRelease --offline --console=plain` 通过；Release APK 为 `1.0.92 / 98`，SHA-256 `078C3CC091B6F8A909D4E4AFD7B353E9AF39D89490C8BF4321CAAFB6A0EBA21E`，大小 118,662,035 字节。通过 USB `adb install -r --no-streaming` 覆盖安装到 Xiaomi 22101317C（`2f8898c80822`）成功，设备读回 `1.0.92 / 98`，`firstInstallTime` 保持 `2026-11-06 18:47:52`，`lastUpdateTime=2026-11-08 18:44:26`。
+- 真机验收：已连接状态读取完整清单（营销推广等渠道正常显示）；断开 ADB 后显示未连接说明、连接入口与空态；已连接时点按渠道行可进入对应 Android 通知渠道设置页（实测「营销推广」）。截图见 `screenshots/2026-11-08-营销通知-已连接.png`、`screenshots/2026-11-08-营销通知-未连接.png`。
+- 涉及文件：`src/screens/MarketingChannelsScreen.tsx`、`App.tsx`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenNotificationChannels.kt`、`ClearScreenCleanupController.kt`、`README.md`、`docs/wiki/README.md`、`app.json`、`android/app/build.gradle`、本修改记录。
+
+### 2026-11-08 18:19:20 +08:00 — 修复重启后的服务状态与 ADB 自动重连
+
+- 已配对且未主动断开的 ADB 连接在应用启动或回到前台时尝试恢复；优先重试已保存且仍属于本机的连接地址，失败后自动查找。主动断开会持久保留，撤回隐私同意时停止连接并清除保存的地址与端口；配对和连接操作相互串行并检查取消状态。
+- 自动跳过服务独立依据系统授权和服务健康状态展示，检查中显示进度，无法确认或服务未就绪时如实显示状态。ADB 恢复期间显示进度，连接成功后才显示开启，失败后保留手动连接入口。
+- 只读核查小米设备：系统记录显示安全中心于 17:29:59 强行停止净屏，当前系统无障碍启用列表已无净屏服务，无线调试仍开启；该系统授权需用户自行重新开启。同步修正 README 和 Wiki 的恢复及状态说明。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain --quiet`、相关文件的 `git diff --check` 通过。未运行功能测试或真机界面验收，未打包或安装。
+- 涉及文件：`App.tsx`、`src/screens/ServicePermissionsScreen.tsx`、`src/native/ClearScreenNative.ts`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAdbOperations.kt`、`ClearScreenAdbPairingHelper.kt`、`ClearScreenNativeModule.kt`、`README.md`、`docs/wiki/README.md`、`docs/wiki/权限状态核验.md`、本修改记录。
+
+### 2026-11-08 17:47:06 +08:00 — 修正小米自启动搜索页的状态核验
+
+- 小米自启动设置进入搜索模式时，允许在已确认的同一系统窗口内只读核验净屏的唯一开关；系统识别的输入法窗口不结束会话，并跳过搜索输入框的文字和子节点。两次一致读取和原有身份校验仍保留。
+- 页面核验结果在私有查询完成后再次优先读取；自启动状态无法核验时显示「待确认」，避免把未知状态描述为关闭。同步更新 README 与 Wiki。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain` 和相关文件的 `git diff --check` 通过；未运行功能测试或真机界面验收，未打包或安装。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenSettingsObserver.kt`、`ClearScreenAccessibilityService.kt`、`ClearScreenPermissionReader.kt`、`src/screens/ServicePermissionsScreen.tsx`、`README.md`、`docs/wiki/README.md`、`docs/wiki/权限状态核验.md`、本修改记录。
+
+### 2026-11-08 17:20:00 +08:00 — 更新小米上的净屏 APK 至 1.0.90
+
+- 版本由 `1.0.89 / 95` 升至 `1.0.90 / 96`；Release 构建成功。正式签名证书 SHA-256 保持 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`；Gradle 原始 APK 与 `android/app/build/outputs/apk/净屏.apk` 哈希一致，SHA-256 为 `46AB7FC696517C89B35ED18D861F2CCD7476DAB070E2F0CCB6964CE823D7D4EA`，大小 118,644,031 字节。
+- 通过 USB `adb install -r --no-streaming` 覆盖安装到 Xiaomi 22101317C（`2f8898c80822`）成功。设备读回 `1.0.90 / 96`，`firstInstallTime` 保持 `2026-11-06 18:47:52`，`lastUpdateTime=2026-11-08 17:19:39`；无障碍启用列表仍包含净屏服务。未卸载、清除数据或启动应用，未进行功能/UI验收。
+- 验证：`:app:assembleRelease --offline --console=plain` 成功；APK 元数据与正式签名验证通过；安装后包信息和无障碍服务状态回读通过。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`android/app/build/outputs/apk/净屏.apk`、本修改记录。
+
+### 2026-11-08 15:57:32 +08:00 — 在营销通知结果中显示实际通知状态
+
+- 营销通知候选项右侧改为状态开关，状态由通知渠道重要性读取；应用级通知关闭或通知分组关闭时也显示为关闭，无法解析状态时显示为未知。扫描会保留已关闭但符合筛选条件的候选渠道。
+- 点按开关或渠道名称进入对应 Android 通知设置，返回页面后自动重新扫描并刷新状态；应用不直接改写通知渠道。
+- 同步更新 README 与 Wiki 的状态说明。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain`、`git diff --check` 通过；未打包、安装或进行应用界面/真机验收。
+- 涉及文件：`src/screens/MarketingChannelsScreen.tsx`、`src/components/UI.tsx`、`src/native/ClearScreenNative.ts`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenShellOps.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenCleanupController.kt`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 15:56:54 +08:00 — 移除快应用与系统广告组件页的检查卡片
+
+- 按截图删除子页中的检查/重新检查按钮、状态结果及连接卡片；进入子页后自动检查，未连接时提示配对并在连上后自动检查。检查失败仍通过错误提示反馈，组件列表和开关保留。
+- 同步更新 README 与 Wiki 的页面流程说明。
+- 验证：`npx tsc --noEmit` 与目标文件/文档的 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/QuickComponentsScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 15:52:40 +08:00 — 将系统推荐开关分为开启和关闭两类
+
+- 将系统推荐列表按关闭广告或推荐功能所需的系统开关状态分为「需要开启」与「需要关闭」；方向取自原生适配定义的反向开关语义，不改变状态读取和开关操作逻辑。无项目时显示空状态。
+- 同步更新 Wiki 说明。
+- 验证：`npx tsc --noEmit` 与 `:app:compileDebugKotlin --offline --console=plain` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、`src/native/ClearScreenNative.ts`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenNativeModule.kt`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 15:50:13 +08:00 — 修正应用通知开关成功后误报失败
+
+- 原生层返回包含 result 字段的对象，界面层却按字符串判断，导致系统改写成功后仍显示失败。现在解析原生结果，并将 README 与 Wiki 改为准确说明该功能通过 ADB Shell 或 Shizuku 修改并回读系统通知状态。
+- 验证：TypeScript 静态检查未通过，错误来自本次未修改的 QuickComponentsScreen.tsx（缺少 ActivityIndicator 导入，且将原因列表按 string 类型使用）；git diff --check 通过。未进行真机验收，未打包或安装。
+- 涉及文件：src/native/ClearScreenNative.ts、README.md、docs/wiki/README.md、本修改记录。
+
+### 2026-11-08 15:49:47 +08:00 — 快应用组件子页进入后自动显示开关
+
+- 子页打开时若无线调试或 Shizuku 连接已可用，自动读取一次组件状态并显示实际组件开关；后续仍可手动重新检查。连接不可用时不自动读取、不展示未经核验的开关状态，保留原有连接入口。
+- 同步更新 README 与 Wiki。检查结果继续不显示发现数量。
+- 验证：`npx tsc --noEmit` 与涉及文件的 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/QuickComponentsScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 15:48:58 +08:00 — 移除应用通知搜索框内层边线
+
+- 移除搜索输入区域的内侧边线，保留外层卡片、搜索图标、输入和背景。
+- 验证：`npx tsc --noEmit` 与目标文件的 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/AppNotificationsScreen.tsx`、本修改记录。
+
+### 2026-11-08 15:46:50 +08:00 — 修正小米自启动开关已开启但净屏显示关闭
+
+- 小米自启动管理是长列表时，输入搜索词会触发只读重扫；此前没有处理文字变化事件，导致初始列表超过节点预算后无法核验净屏这一行。
+- 本次引导中已稳定读取到的净屏自启动开关优先于小米私有查询，避免系统查询覆盖当前可见开关。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAccessibilityService.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenPermissionReader.kt`、`docs/wiki/权限状态核验.md`、本修改记录。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain`、目标文件 `git diff --check` 均通过；未运行功能/UI验收，未打包或安装。
+
+### 2026-11-08 15:45:11 +08:00 — 删除快应用组件检查完成数量提示
+
+- 检查成功后不再显示发现数量文字；组件开关列表和未发现时的空态保留。
+- 同步更新 README 与 Wiki。
+- 验证：`npx tsc --noEmit` 与相关文件的 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/QuickComponentsScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 15:44:07 +08:00 — 移除系统推荐开关的确认弹窗
+
+- 点击可操作的系统推荐开关后直接执行开关操作；未开启无障碍、无法恢复原状态及操作失败等提示保留。
+- 验证：未执行功能或真机验收，未打包或安装。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、本修改记录。
+
+### 2026-11-08 15:42:08 +08:00 — 删除营销通知页顶部说明
+
+- 删除营销通知列表上方的自动扫描与通知内容隐私说明；连接、自动扫描和结果展示逻辑保持不变。
+- 验证：`npx tsc --noEmit` 与目标文件的 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/MarketingChannelsScreen.tsx`、本修改记录。
+
+### 2026-11-08 15:42:11 +08:00 — 移除营销通知渠道跳转确认弹窗
+
+- 点击扫描结果中的通知渠道时，直接打开对应的系统渠道设置页；保留未连接时的连接提示和打开失败提示。
+- 验证：`npx tsc --noEmit` 与 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/MarketingChannelsScreen.tsx`、本修改记录。
+
+### 2026-11-08 15:10:59 +08:00 — 构建并覆盖安装净屏 1.0.89 到小米手机
+
+- 将 Android 版本升至 1.0.89 / versionCode 95；Release APK 为 `android/app/build/outputs/apk/净屏.apk`，包名 `com.clearscreen.prototype`，大小 118,645,859 字节，SHA-256 `BA39B9F59079570C46E4F5D9EAAB21A69E6E0AFF27148378A493C1565F9125C9`。Gradle 原始 APK 与命名 APK 哈希一致；aapt 元数据、apksigner v2 验签通过，正式证书 SHA-256 保持 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。
+- `:app:assembleRelease --offline --console=plain` 成功；通过 USB `adb install -r --no-streaming` 覆盖安装到 Xiaomi 22101317C（`2f8898c80822`）返回 `Success`。安装后读回 1.0.89 / 95，首次安装时间保持 `2026-11-06 18:47:52`，`lastUpdateTime=2026-11-08 15:09:10`，无障碍启用列表仍包含净屏服务。未卸载、清除应用数据或启动应用；未进行功能/UI验收。
+- 涉及文件：`android/app/build.gradle`、`app.json`、本修改记录。
+
+### 2026-11-08 14:54:35 +08:00 — 服务与权限页以开关显示 ADB 实际连接状态
+
+- 将「ADB Shell 操作能力」箭头入口改为实时状态开关：只有原生连接状态确认成功时开启；关闭时发起自动配对或重连，开启时断开。自动连接失败后的手动端口输入留在本页，不再进入独立连接子页；首次连接直接启动配对流程。
+- 移除连接子页及其应用导航路由；系统推荐页和应用通知页需要连接时改为打开「服务与权限」。同步更新 README 与 Wiki。
+- 验证：`npx tsc --noEmit` 与涉及文件的 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`App.tsx`、`src/screens/ServicePermissionsScreen.tsx`、`src/screens/SystemRecommendScreen.tsx`、已删除的 `src/screens/AdbAccessScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:53:46 +08:00 — 将系统广告与营销通知拆成独立入口
+
+- 设置首页分别显示「系统广告」和「营销通知」；系统广告页保留系统推荐开关、应用通知和快应用/系统广告组件，营销通知入口直接打开渠道扫描页。
+- 将帮助与反馈中的说明拆分，并同步更新 README 与 Wiki 的页面结构和入口路径。
+- 验证：`npx tsc --noEmit` 与涉及文件的 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`App.tsx`、`src/screens/SettingsScreen.tsx`、`src/screens/SystemCleanupScreen.tsx`、`src/screens/SettingsDetailScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:50:28 +08:00 — 营销通知页改为进入后自动扫描
+
+- 移除扫描按钮和扫描确认弹窗；页面进入后检查授权连接，有连接时自动扫描一次，未连接时保留连接提示，连接后自动启动扫描。页面保留一行隐私告知、扫描状态、错误和结果；重新进入页面时会再次扫描。
+- 同步更新 README 与 Wiki 的页面交互说明。
+- 验证：`npx tsc --noEmit` 与目标文件的 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/MarketingChannelsScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:46:19 +08:00 — 补快应用组件检查完成反馈
+
+- 截图中的检查已列出「快应用服务框架」和「系统广告服务」两项，但成功后按钮恢复原文案且没有完成提示，容易被看成未响应。现在有结果时显示「检查完成，发现 N 项」，按钮改为「重新检查」；无结果时保留「未检测到可处理组件」空态。
+- 检查仍只读取组件状态，不自动修改组件。
+- 验证：未执行。
+- 涉及文件：`src/screens/QuickComponentsScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:44:50 +08:00 — 将组件开关拆分为独立卡片
+
+- 检查按钮与状态信息留在上方卡片；将检查到的每个快应用或系统广告组件开关各自放入独立卡片，显示在下方；保留原有组件操作逻辑。
+- 验证：`npx tsc --noEmit` 与 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/QuickComponentsScreen.tsx`、本修改记录。
+
+### 2026-11-08 14:44:20 +08:00 — 移除自动连接无线调试的首次说明弹窗
+
+- 按截图删除点击「连接无线调试」时出现的首次说明弹窗；点击后直接按当前状态自动连接，或启动配对并打开系统设置。缺少必要无障碍服务和连接失败时的提示保留。
+- 同步更新 Wiki 的连接页交互说明。
+- 验证：未执行。
+- 涉及文件：`src/screens/AdbAccessScreen.tsx`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:43:41 +08:00 — 删除营销通知页常驻说明
+
+- 移除扫描按钮上方的候选渠道说明，扫描流程和渠道列表保持不变；同步删除 Wiki 中对应的常驻提示例外。
+- 验证：TypeScript 静态检查与 git diff --check 通过；未进行界面或真机验收，未打包或安装。
+- 涉及文件：src/screens/MarketingChannelsScreen.tsx、docs/wiki/README.md、本修改记录。
+
+### 2026-11-08 14:42:09 +08:00 — 将通知入口名称改为「应用通知」
+
+- 设置入口从「关闭应用通知」改为「应用通知」，搜索应用并进入系统通知设置的功能不变；同步更新 README 与 Wiki 当前页面说明。
+- 验证：`git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:41:10 +08:00 — 删除连接成功说明并精简负一屏开关名称
+
+- ADB Shell 操作能力页删除已连接时的重连说明和其下方分隔线，保留「已连接」状态及「断开」操作。
+- 小米负一屏该项名称从「智能助理（负一屏总开关）」简化为「智能助理」，保持页面匹配和操作逻辑不变。
+- 验证：未执行。
+- 涉及文件：`src/screens/AdbAccessScreen.tsx`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenRecommendCatalog.kt`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:40:01 +08:00 — 合并系统推荐开关页面的两个列表区块
+
+- 将设备推荐开关列表与手动设置入口列表放入同一卡片，中间不再保留卡片外边距。
+- 验证：涉及文件的 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、本修改记录。
+
+### 2026-11-08 14:39:23 +08:00 — 移除 ADB Shell 连接成功弹窗
+
+- 手动或自动连接成功后不再显示确认弹窗，页面连接状态照常更新；连接失败和操作异常提示保留。
+- 验证：TypeScript 静态检查与 `git diff --check` 通过；未执行功能或真机验收，未打包或安装。
+- 涉及文件：`src/screens/AdbAccessScreen.tsx`、本修改记录。
+
+### 2026-11-08 14:38:45 +08:00 — 移除未连接状态行并精简无线调试按钮文案
+
+- 未连接时不再显示「未连接」状态行和分隔留白；已连接时保留「已连接」与断开操作。按钮从「自动连接无线调试」改为「连接无线调试」，自动配对及连接流程不变。
+- 同步更新 README 与 Wiki 的页面说明。
+- 验证：`npx tsc --noEmit` 与涉及文件的 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/AdbAccessScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:37:14 +08:00 — 合并无线调试的自动连接与失败备用流程
+
+- 将连接页收敛为单一「连接无线调试」入口：首次使用自动启动配对并打开系统设置，已配对时自动查找并连接；自动配对或连接失败后展开手动端口输入，连接成功后隐藏备用区。
+- 同步更新首次使用提示、README 与 Wiki 的连接流程说明。
+- 验证：`npx tsc --noEmit` 与 `git diff --check` 通过；未启动应用或进行真机验收，未打包或安装。
+- 涉及文件：`src/screens/AdbAccessScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:35:18 +08:00 — 构建并升级安装净屏 1.0.88 到小米手机
+
+- Android 版本由 1.0.87 / versionCode 93 升至 1.0.88 / 94；正式 Release 构建成功，用户安装包为 `android/app/build/outputs/apk/净屏.apk`，包名 `com.clearscreen.prototype`，应用名「净屏」。
+- APK SHA-256：`FF86A9709C01F222A094E783CAA0286F380264811B624B57231A800112630240`；正式签名证书 SHA-256 与项目记录一致：`93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。Gradle APK 与命名 APK 的 SHA-256 一致。
+- 使用 USB `adb install -r --no-streaming` 覆盖安装到 Xiaomi 22101317C，返回 `Success`。安装后读回 1.0.88 / 94，`lastUpdateTime=2026-11-08 14:34:55`；`firstInstallTime=2026-11-06 18:47:52` 保持不变，净屏无障碍服务仍在系统启用列表。未卸载、未清除数据，也未启动应用或做功能/UI验收。
+- 验证：`:app:assembleRelease --offline --console=plain` 成功；APK 包名、版本、应用名、签名与散列核验通过；覆盖安装和安装后状态读取通过。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`docs/wiki/CHANGELOG.md`；APK：`android/app/build/outputs/apk/净屏.apk`。
+
+### 2026-11-08 14:25:18 +08:00 — 将授权入口统一命名为「ADB Shell 操作能力」
+
+- 按截图将「服务与权限」中的入口名称改为「ADB Shell 操作能力」，并同步授权连接页标题、结果提示及依赖该通道的错误提示，保持用户从入口到子页看到同一名称。
+- 同步更新 README 与 Wiki 中的当前页面名称说明；未改变无线调试配对、连接和系统操作逻辑。
+- 验证：`git diff --check` 通过；未执行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/ServicePermissionsScreen.tsx`、`src/screens/AdbAccessScreen.tsx`、`src/screens/SystemRecommendScreen.tsx`、`src/screens/AppNotificationsScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:24:10 +08:00 — 将服务与权限状态改为开关指示
+
+- 自动跳过服务、开机自启动、后台运行和电池优化改为统一开关外观；只有经核验明确可用时显示开启，未授权、未知、核验中或失败时显示关闭。点按整行仍进入对应系统设置，返回后沿用现有权限核验刷新。
+- 同步更新 README 与 Wiki 的状态展示说明。
+- 验证：`npx tsc --noEmit` 与涉及文件的 `git diff --check` 通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/components/UI.tsx`、`src/screens/ServicePermissionsScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:23:48 +08:00 — 删除快应用子页顶部说明和空闲未连接提示
+
+- 按截图移除快应用与系统广告组件页的顶部说明，以及未连接时空闲显示的「还没连上这台手机，检查前需要先连一次。」；检查/连接按钮、实际操作状态与错误、检查结果和组件开关保留。
+- 同步更新 README 与 Wiki。
+- 验证：未执行。
+- 涉及文件：`src/screens/QuickComponentsScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:21:58 +08:00 — 将小米负一屏细分推荐改为开关
+- 将「资讯推荐、服务推荐、内容精选、热点资讯、推荐卡片、搜索框推荐词、热门活动、智能置顶」从「需手动」标识改为独立开关。启动操作后返回桌面，用户进入负一屏设置；无障碍服务仅在受信任桌面、页面标题和目标开关精确匹配并连续读取一致时操作一次、回读结果。
+- 在操作确认中补充负一屏入口路径，并同步 README 与 Wiki。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain`、`git diff --check` 均通过；未进行应用界面或真机验收，未打包或安装。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenRecommendCatalog.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenUiCleanup.kt`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:17:22 +08:00 — 移除「直接改系统设置」页的高级折叠栏
+
+- 按截图删除「高级」标题和展开/收起控件，让连接端口、本机地址（可读取时）和「连接」按钮直接显示；字段、连接行为及其他首次使用提示保留。
+- 同步更新 Wiki 的该页文案说明。
+- 验证：未执行。
+- 涉及文件：`src/screens/AdbAccessScreen.tsx`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:16:21 +08:00 — 移除关闭应用通知入口的副标题
+
+- 按截图删除「本机应用数，可逐个关闭通知」说明，同时移除只用于该说明的数量计算和样式；单行标题、箭头及跳转行为保留。
+- 验证：`git diff --check` 通过；未执行应用界面或真机验收，未打包或安装。
+- 涉及文件：`App.tsx`、`src/screens/SystemCleanupScreen.tsx`、本修改记录。
+
+### 2026-11-08 14:13:31 +08:00 — 删除系统推荐开关页的未知状态标签
+
+- 按截图移除「系统推荐开关」两个列表区块中开关旁的「未知」胶囊标签；未知状态仍按中性灰色开关处理，并保留读屏可访问状态与点击后的原有核验逻辑。
+- 更新 README 与 Wiki 对该页状态展示的说明。
+- 验证：未执行。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:11:30 +08:00 — 发布并安装 1.0.87 到小米手机
+
+- Android 版本从 1.0.86 / versionCode 92 提升至 1.0.87 / 93，正式 Release APK 已生成到 `android/app/build/outputs/apk/净屏.apk`。
+- 发布签名校验通过（SHA-256：`93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`）；通过 USB 使用 `adb install -r --no-streaming` 覆盖升级到 Xiaomi 22101317C。手机读回版本为 1.0.87 / 93，首次安装时间仍为 `2026-11-06 18:47:52`，无障碍服务保持启用。
+- 验证：`npx tsc --noEmit`、`:app:assembleRelease --offline --console=plain`、APK 包名/版本/签名核验、覆盖安装及安装后状态读取均通过；未进行界面或功能验收。
+- 涉及文件：`android/app/build.gradle`、`app.json`、本修改记录；APK：`android/app/build/outputs/apk/净屏.apk`。
+
+### 2026-11-08 14:10:59 +08:00 — 将「直接改系统设置」入口移入服务与权限
+- 将 Android「直接改系统设置」入口移入「服务与权限」权限卡片末尾，仅显示标题和箭头；从「系统广告与营销通知」页移除该入口，其余四项保留。
+- 更新 README 与 Wiki 中的页面层级和入口路径说明。
+- 验证：`npx tsc --noEmit`、`git diff --check` 均通过；未执行应用界面或真机验收，未打包或安装。
+- 涉及文件：`App.tsx`、`src/screens/ServicePermissionsScreen.tsx`、`src/screens/SystemCleanupScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:08:55 +08:00 — 修正开发者选项入口在小米设备上的错误落点
+
+- 用户反馈配对引导称将跳转到开发者选项，实际却进入净屏应用信息页。MIUI/HyperOS 上改为打开系统设置首页，并提示「更多设置 → 开发者选项 → 无线调试」；其他设备仍尝试直达开发者选项，无法直达时打开系统设置并提示搜索路径。
+- 将相关按钮文案改为「打开系统设置」，并同步调整配对说明与 Wiki，避免承诺直接跳转。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain`、`git diff --check` 均通过；未进行修改后的真机界面验收，未打包或安装。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenSettingsNavigator.kt`、`src/native/ClearScreenNative.ts`、`src/screens/AdbAccessScreen.tsx`、`src/screens/QuickComponentsScreen.tsx`、`src/screens/MarketingChannelsScreen.tsx`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:04:47 +08:00 — 删除系统广告入口上的连接状态标签
+
+- 按截图删除「直接改系统设置」入口右侧的「未连接」状态标签，同时移除仅用于显示该标签的连接状态读取；连接状态仍在连接页内显示，入口跳转不变。
+- 同步更新界面文案约束与项目功能说明。
+- 验证：未执行。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`docs/wiki/README.md`、`README.md`、本修改记录。
+
+### 2026-11-08 14:04:23 +08:00 — 删除快应用子页红框中的两条常驻说明
+
+- 按截图移除配对后的等待状态句「等你在系统里完成配对，连上后会自动开始检查。」及未检查时的占位说明「未检查 · 查完会列出本机有哪些组件」，未检查时不留空占位。顶部未标记说明、自动配对、连上后自动检查、检查按钮、实际状态/错误、扫描结果和组件开关保留。
+- 同步更正文案规范中的快应用子页例外。
+- 验证：`npx tsc --noEmit` 通过；涉及源码和 Wiki 的 `git diff --check` 通过；未运行应用或真机 UI 验收，未打包或安装。
+- 涉及文件：`src/screens/QuickComponentsScreen.tsx`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 14:02:32 +08:00 — 移除关闭应用通知页的常驻未连接横幅
+
+- 未连接时不再常驻显示「还没连上这台手机，暂时读不到通知开关」及「去连接」；用户尝试切换通知开关时仍弹出连接提示，修改失败仍弹出错误提示，读取失败的重试提示保留。
+- 验证：`npx tsc --noEmit` 与 `git diff --check -- src/screens/AppNotificationsScreen.tsx` 通过；未运行应用或真机 UI 验收，未打包或安装。
+- 涉及文件：`src/screens/AppNotificationsScreen.tsx`、本修改记录。
+
+### 2026-11-08 13:59:17 +08:00 — 删除直接改系统设置页红框中的状态说明
+
+- 删除「连接状态」和「自动配对」两个分区标题；未连接时不再显示「还没连上。按下面的顺序点一遍就能连上。」；空闲时隐藏「未开始自动配对」。连接结果、配对过程状态、按钮及操作逻辑保留。
+- 验证：`npx tsc --noEmit` 与 `git diff --check -- src/screens/AdbAccessScreen.tsx` 通过；未运行应用或真机 UI 验收，未打包或安装。
+- 涉及文件：`src/screens/AdbAccessScreen.tsx`、本修改记录。
+
+### 2026-11-08 13:59:15 +08:00 — 对齐系统推荐开关的滑块位置
+
+- 开关关闭时滑块靠左，开启时靠右；未知状态也不再居中，并在系统推荐开关页的常用项旁显示“未知”，避免被看作已关闭。开启为蓝色，关闭为灰色。
+- 验证：`npx tsc --noEmit` 与指定源码文件的 `git diff --check` 通过；未启动应用或做真机 UI 验收，未打包或安装。
+- 涉及文件：`src/components/UI.tsx`、`src/screens/SystemRecommendScreen.tsx`、本修改记录。
+
+### 2026-11-08 13:56:33 +08:00 — 删除系统推荐开关页的「常用推荐开关」标题
+
+- 按截图只移除红框中的分区标题和对应样式；标题下的三个设置行、开关及其交互保留。
+- 验证：`npx tsc --noEmit` 与 `git diff --check -- src/screens/SystemRecommendScreen.tsx` 通过；未运行应用或真机 UI 验收，未打包或安装。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、本修改记录。
+
+### 2026-11-08 13:55:02 +08:00 — 移除系统推荐开关中重复的手动操作小字
+
+- 用户指出负一屏等无法自动操作的多个条目下方重复显示“系统不允许其它应用打开负一屏设置……”一类说明，要求清掉整组同类小字，而不只是红框标注的一行。
+- `src/screens/SystemRecommendScreen.tsx` 不再渲染手动条目的 `target.reason`，并删除其专用样式；每项仍显示名称和「需手动」状态，其他开关、跳转与提示逻辑不变。
+- 同步更新 `docs/wiki/README.md` 的界面文案约定。
+- 验证：未运行自动化测试、类型检查、构建或真机验收。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、`docs/wiki/README.md`、本修改记录。
+
 ### 2026-11-08 13:45:54 +08:00 — 重建并覆盖安装净屏 1.0.86
 
 - 按用户要求基于已推送的 `main`（`16c349d494540c9dc72b2bc5cfdd2c772a180c44`）重新构建 Release：`:app:assembleRelease --offline --console=plain` 成功。APK 包名 `com.clearscreen.prototype`、版本 `1.0.86` / versionCode `92`、应用名“净屏”；Gradle APK 与 `android/app/build/outputs/apk/净屏.apk` 均为 118,651,403 字节、SHA-256 `BF459C0B59531A059E2C2F5777A556FED0B4B766778A638A251CEE8A6466A1F8`，apksigner v2 验签通过，正式签名证书 SHA-256 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。

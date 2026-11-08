@@ -74,23 +74,20 @@ internal class ClearScreenSettingsNavigator(private val context: Context) {
 
   private fun isMiui(): Boolean = Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)
 
-  /**
-   * Opens developer options. Returns "developer" when the system page opened, or "appDetails"
-   * when only the application info fallback was available, so the page can tell the user
-   * which entry to look for next.
-   */
+  /** Opens developer options, or the system settings home when the OEM blocks direct navigation. */
   fun openDeveloperOptions(): String {
-    // MIUI routes the implicit action to the app info page, so try known vendor components first.
-    val developerCandidates = developerCandidates()
-    if (tryOpen(developerCandidates)) {
-      // MIUI/HyperOS redirects settings sub-pages opened by third-party apps to the app info page,
-      // so report the fallback destination and let the page tell the user where to tap next.
-      if (!isMiui()) return "developer"
-      notifyAppDetailsFallback("已打开净屏的应用信息页，请从系统设置首页进入「开发者选项」")
-      return "appDetails"
+    // MIUI/HyperOS redirects third-party launches of the developer sub-page to this app's details.
+    // Open the settings home instead; Xiaomi's user path is Additional settings → Developer options.
+    if (!isMiui() && tryOpen(developerCandidates())) return "developer"
+
+    openSystemHomeSettings()
+    val nextStep = if (isMiui()) {
+      "已打开系统设置，请前往「更多设置 → 开发者选项 → 无线调试」"
+    } else {
+      "已打开系统设置，请搜索「开发者选项」并进入「无线调试」"
     }
-    openAppDetailsOrThrow("已打开净屏的应用信息页，请从系统设置首页进入「开发者选项」")
-    return "appDetails"
+    notifySettingsFallback(nextStep)
+    return "settingsHome"
   }
 
   fun openSystemHomeSettings() = openFirst(listOf(Intent(Settings.ACTION_SETTINGS)))
@@ -168,7 +165,7 @@ internal class ClearScreenSettingsNavigator(private val context: Context) {
     else -> emptyList()
   }
 
-  private fun notifyAppDetailsFallback(message: String) {
+  private fun notifySettingsFallback(message: String) {
     Toast.makeText(context, message, Toast.LENGTH_LONG).show()
   }
 
@@ -178,7 +175,7 @@ internal class ClearScreenSettingsNavigator(private val context: Context) {
       Uri.parse("package:${context.packageName}"),
     )
     if (!tryOpen(listOf(appDetails))) throw ActivityNotFoundException("No available application details screen")
-    notifyAppDetailsFallback(notice)
+    notifySettingsFallback(notice)
   }
 
   private fun tryOpen(candidates: List<Intent>): Boolean {

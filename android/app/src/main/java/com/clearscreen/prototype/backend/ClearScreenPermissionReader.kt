@@ -15,6 +15,10 @@ internal class ClearScreenPermissionReader(private val context: Context) {
   private var pending: Pair<FutureTask<Boolean?>, CancellationSignal>? = null
 
   fun startupAllowed(): Boolean? {
+    // A just-confirmed switch from the user-guided OEM settings page reflects
+    // the visible, current row. Prefer this session-bound evidence over
+    // Xiaomi's broader private query if the two results disagree.
+    ClearScreenSettingsObserver.value(ClearScreenSettingsObserver.Kind.STARTUP)?.let { return it }
     if (profile != ClearScreenOemProfile.VIVO && profile != ClearScreenOemProfile.XIAOMI) {
       return ClearScreenSettingsObserver.value(ClearScreenSettingsObserver.Kind.STARTUP)
     }
@@ -48,7 +52,9 @@ internal class ClearScreenPermissionReader(private val context: Context) {
       query.first.cancel(true)
       null
     }
-    return queried ?: ClearScreenSettingsObserver.value(ClearScreenSettingsObserver.Kind.STARTUP)
+    // A page observation may have completed while the private query was in
+    // flight. Recheck it so the current visible switch still takes priority.
+    return ClearScreenSettingsObserver.value(ClearScreenSettingsObserver.Kind.STARTUP) ?: queried
   }
 
   private fun readXiaomiStartup(): Boolean? = runCatching {

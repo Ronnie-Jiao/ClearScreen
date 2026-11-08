@@ -102,8 +102,8 @@ android {
         applicationId clearscreenApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion clearscreenTargetSdk
-        versionCode 92
-        versionName "1.0.86"
+        versionCode 98
+        versionName "1.0.92"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

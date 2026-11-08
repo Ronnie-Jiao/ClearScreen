@@ -12,6 +12,7 @@ import android.graphics.Canvas
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Base64
 import android.view.accessibility.AccessibilityManager
@@ -42,6 +43,10 @@ class ClearScreenNativeModule(
   private val privacyConsentStore by lazy { ClearScreenPrivacyConsentStore(reactContext) }
   private val executor = Executors.newSingleThreadExecutor()
   private val permissionExecutor = Executors.newSingleThreadExecutor()
+  private val adbReconnectExecutor = Executors.newSingleThreadExecutor()
+  private val adbReconnectLock = Any()
+  private var adbReconnectScheduled = false
+  private var lastAdbReconnectAttempt = 0L
   @Volatile private var inventoryThreads: ExecutorService? = null
   private val permissionReader by lazy { ClearScreenPermissionReader(reactContext) }
   private val cleanupController by lazy { ClearScreenCleanupController(reactContext, { store }, ::requirePrivacyConsent) }
@@ -50,8 +55,46 @@ class ClearScreenNativeModule(
   init { reactContext.addLifecycleEventListener(this) }
 
   override fun onHostPause() { hostResumed = false; ClearScreenAccessibilityHealth.invalidate(); ClearScreenSettingsObserver.onHostPause(); ClearScreenUiCleanup.onHostPause() }
-  override fun onHostResume() { hostResumed = true; ClearScreenAccessibilityHealth.invalidate(); ClearScreenSettingsObserver.onHostResume(); ClearScreenUiCleanup.onHostResume() }
+  override fun onHostResume() {
+    hostResumed = true
+    ClearScreenAccessibilityHealth.invalidate()
+    ClearScreenSettingsObserver.onHostResume()
+    ClearScreenUiCleanup.onHostResume()
+    scheduleAdbReconnect()
+  }
   override fun onHostDestroy() { hostResumed = false; ClearScreenAccessibilityHealth.invalidate(); ClearScreenSettingsObserver.clear(); ClearScreenUiCleanup.stop() }
+
+  private fun scheduleAdbReconnect() {
+    if (!hostResumed) return
+    synchronized(adbReconnectLock) {
+      if (adbReconnectScheduled) return
+      adbReconnectScheduled = true
+    }
+    try {
+      adbReconnectExecutor.execute {
+        try {
+          if (!hostResumed || !privacyConsentStore.hasCurrentConsent() ||
+            !ClearScreenAdbOperations.shouldRestore(reactContext)) return@execute
+          val now = SystemClock.elapsedRealtime()
+          val delay = synchronized(adbReconnectLock) {
+            if (lastAdbReconnectAttempt == 0L) 0L
+            else (15_000L - (now - lastAdbReconnectAttempt)).coerceAtLeast(0L)
+          }
+          if (delay > 0L) Thread.sleep(delay)
+          if (!hostResumed || !privacyConsentStore.hasCurrentConsent() ||
+            !ClearScreenAdbOperations.shouldRestore(reactContext)) return@execute
+          synchronized(adbReconnectLock) { lastAdbReconnectAttempt = SystemClock.elapsedRealtime() }
+          ClearScreenAdbOperations.restoreIfRequested(reactContext)
+        } catch (_: Exception) {
+          // The status remains disconnected; a later foreground visit can retry.
+        } finally {
+          synchronized(adbReconnectLock) { adbReconnectScheduled = false }
+        }
+      }
+    } catch (_: Exception) {
+      synchronized(adbReconnectLock) { adbReconnectScheduled = false }
+    }
+  }
 
   override fun getName(): String = "ClearScreenBackend"
 
@@ -133,7 +176,9 @@ class ClearScreenNativeModule(
 
   @ReactMethod
   fun getSnapshot(promise: Promise) = runAsync(promise) {
-    snapshot()
+    val current = snapshot()
+    scheduleAdbReconnect()
+    current
   }
 
   @ReactMethod
@@ -181,7 +226,9 @@ class ClearScreenNativeModule(
   fun acceptPrivacyPolicy(promise: Promise) = runAsync(promise) {
     privacyConsentStore.acceptCurrentPolicy()
     store.prepareAfterConsent()
-    snapshot()
+    val current = snapshot()
+    scheduleAdbReconnect()
+    current
   }
 
   @ReactMethod
@@ -191,10 +238,12 @@ class ClearScreenNativeModule(
       if (storeDelegate.isInitialized()) store.clearUserData()
       else ClearScreenStore(reactContext).clearUserData()
     }
+    ClearScreenAdbPairingHelper.stop()
+    val adbStopped = runCatching { ClearScreenAdbOperations.disconnect(reactContext, forgetEndpoint = true) }.isSuccess
     ClearScreenSettingsObserver.clear()
     ClearScreenUiCleanup.clear()
     cleanupController.clear()
-    check(cleared) { "Unable to clear local app data" }
+    check(cleared && adbStopped) { "Unable to clear local app data" }
     privacySnapshot()
   }
 
@@ -353,6 +402,23 @@ class ClearScreenNativeModule(
   fun scanMarketingChannels(promise: Promise) = runAsync(promise) { cleanupController.scanChannels() }
 
   @ReactMethod
+  fun getNotificationAccessStatus(promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    Arguments.createMap().apply {
+      putBoolean("supported", Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+      putBoolean("granted", ClearScreenNotificationChannels.isGranted(reactContext))
+    }
+  }
+
+  @ReactMethod
+  fun openNotificationAccessSettings(promise: Promise) {
+    openSettingsPage(promise) {
+      requirePrivacyConsent()
+      ClearScreenNotificationChannels.openSettings(reactContext)
+    }
+  }
+
+  @ReactMethod
   fun isQuickComponentsGuideSeen(promise: Promise) = runAsync(promise) {
     requirePrivacyConsent()
     store.isQuickComponentsGuideSeen()
@@ -404,6 +470,7 @@ class ClearScreenNativeModule(
           putString("category", target.category); putString("page", target.page); putString("entry", target.entry)
           putBoolean("canRestore", ClearScreenUiCleanup.hasBackup(target, store))
           putBoolean("direct", spec != null)
+          putBoolean("needsSystemToggleOn", target.checkedWhenFeatureDisabled)
           putString("effect", target.effect)
           putString("support", target.support)
           target.reason?.let { putString("reason", it) }
@@ -444,6 +511,7 @@ class ClearScreenNativeModule(
     val pairingPort = requireAdbPort(port)
     val pairingCode = code.trim()
     check(pairingCode.matches(Regex("\\d{4,8}"))) { "配对码应为 4-8 位数字" }
+    ClearScreenAdbOperations.requestReconnect(reactContext)
     adbResult(ClearScreenAdbOperations.pair(reactContext, address, pairingPort, pairingCode))
   }
 
@@ -461,7 +529,7 @@ class ClearScreenNativeModule(
 
   @ReactMethod
   fun disconnectAdb(promise: Promise) = runAsync(promise) {
-    ClearScreenAdbOperations.disconnect()
+    ClearScreenAdbOperations.disconnect(reactContext)
     true
   }
 
@@ -470,6 +538,7 @@ class ClearScreenNativeModule(
     requirePrivacyConsent()
     check(ClearScreenAdbOperations.isSupported()) { "Android 11 以下不支持无线调试配对" }
     check(accessibilityServiceEnabled()) { "请先开启净屏的无障碍服务，自动配对需要读取配对弹窗" }
+    ClearScreenAdbOperations.requestReconnect(reactContext)
     ClearScreenAdbPairingHelper.start(reactContext)
     adbResult(ClearScreenAdbOperations.status(reactContext))
   }
@@ -477,6 +546,8 @@ class ClearScreenNativeModule(
   @ReactMethod
   fun stopAdbAutoPair(promise: Promise) = runAsync(promise) {
     ClearScreenAdbPairingHelper.stop()
+    ClearScreenAdbOperations.cancelReconnectRequest(reactContext)
+    if (ClearScreenAdbOperations.isVerifiedConnected()) ClearScreenAdbOperations.disconnect(reactContext)
     adbResult(ClearScreenAdbOperations.status(reactContext))
   }
 
@@ -583,11 +654,13 @@ class ClearScreenNativeModule(
   }
 
   override fun invalidate() {
+    hostResumed = false
     reactContext.removeLifecycleEventListener(this)
     ClearScreenSettingsObserver.clear()
     permissionReader.close()
     cleanupController.close()
     permissionExecutor.shutdownNow()
+    adbReconnectExecutor.shutdownNow()
     inventoryThreads?.shutdownNow()
     executor.shutdownNow()
     super.invalidate()

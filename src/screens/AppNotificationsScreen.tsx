@@ -134,10 +134,6 @@ export default function AppNotificationsScreen({
 
   const status = () => {
     if (!accessKnown) return null;
-    if (!connected) return <View style={s.notice}>
-      <Text style={s.noticeText}>还没连上这台手机，暂时读不到通知开关。</Text>
-      <Pressable accessibilityRole="button" onPress={askToConnect} hitSlop={8}><Text style={s.noticeAction}>去连接</Text></Pressable>
-    </View>;
     if (loadFailed) return <View style={s.notice}>
       <Text style={s.noticeText}>读取没完成，开关状态暂时未知。</Text>
       <Pressable accessibilityRole="button" onPress={() => { void loadStates() }} hitSlop={8}><Text style={s.noticeAction}>重试</Text></Pressable>
@@ -217,8 +213,8 @@ export default function AppNotificationsScreen({
 function explainError(error: unknown): string {
   const raw = (error instanceof Error ? error.message : String(error ?? '')).trim();
   if (/隐私|同意/.test(raw)) return '隐私授权已失效，请回首页重新同意隐私政策后再试。';
-  if (/没有响应|超时|timeout|timed out/i.test(raw)) return '手机系统命令没有响应，连接可能已经断了。去「直接改系统设置」重连后再试。';
-  if (/Shizuku|授权通道|未连接|没有连接|请先启动|请先授予/i.test(raw)) return '还没连上这台手机。去「直接改系统设置」连上后再试。';
+  if (/没有响应|超时|timeout|timed out/i.test(raw)) return '手机系统命令没有响应，连接可能已经断了。去「ADB Shell 操作能力」重连后再试。';
+  if (/Shizuku|授权通道|未连接|没有连接|请先启动|请先授予/i.test(raw)) return '还没连上这台手机。去「ADB Shell 操作能力」连上后再试。';
   if (!raw) return '系统没有给出原因，请重试；仍然不行就重新连接这台手机。';
   return raw;
 }
@@ -226,7 +222,7 @@ function explainError(error: unknown): string {
 const s = StyleSheet.create({
   page: { flex: 1, paddingHorizontal: 18, paddingBottom: 12 },
   searchCard: { paddingHorizontal: COMPACT_UI.cardPadding, paddingVertical: 8, marginBottom: 10 },
-  search: { height: 44, borderRadius: 13, backgroundColor: '#F7FBFF', borderWidth: 1, borderColor: C.line, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 11 },
+  search: { height: 44, borderRadius: 13, backgroundColor: '#F7FBFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 11 },
   input: { flex: 1, fontSize: COMPACT_UI.body, fontWeight: '600', marginLeft: 8, color: C.text, paddingVertical: 0 },
   notice: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, paddingHorizontal: 4 },
   noticeText: { flex: 1, fontSize: COMPACT_UI.caption, fontWeight: '600', color: C.text2 },

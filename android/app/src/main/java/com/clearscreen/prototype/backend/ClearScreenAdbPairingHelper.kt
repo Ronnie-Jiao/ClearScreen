@@ -15,8 +15,9 @@ import java.util.concurrent.Executors
  * the code and port without taking the user away from the dialog; the pairing
  * and connection then run in the background.
  *
- * Security boundaries: the code and port are used once, never logged or stored,
- * and only the fixed pairing/connect calls above are triggered.
+ * Security boundaries: the pairing code and pairing port are used once and never
+ * logged or stored. A successfully verified connection endpoint may be kept locally
+ * for reconnection; only the fixed pairing/connect calls above are triggered.
  */
 internal object ClearScreenAdbPairingHelper {
   private const val SETTINGS_PACKAGE = "com.android.settings"
@@ -35,14 +36,17 @@ internal object ClearScreenAdbPairingHelper {
   private var pairingHost = ""
   private var pairingPort = 0
   private var lastAttemptKey = ""
+  private var generation = 0L
 
   fun isActive(): Boolean = synchronized(lock) { active }
+  private fun isActiveAttempt(expected: Long): Boolean = synchronized(lock) { active && generation == expected }
 
   fun readStage(): String = synchronized(lock) { stageName }
 
   fun readMessage(): String = synchronized(lock) { statusText }
 
   fun start(context: Context) = synchronized(lock) {
+    generation++
     appContext = context.applicationContext
     active = true
     stageName = "waiting-code"
@@ -53,9 +57,14 @@ internal object ClearScreenAdbPairingHelper {
   }
 
   fun stop() = synchronized(lock) {
+    generation++
     active = false
     stageName = ""
     statusText = ""
+    appContext = null
+    pairingHost = ""
+    pairingPort = 0
+    lastAttemptKey = ""
   }
 
   /** Called by the accessibility service for windows of the settings app. */
@@ -76,21 +85,31 @@ internal object ClearScreenAdbPairingHelper {
       val port = match.groupValues[2].toInt()
       if (port !in 1..65535) return
       val key = "$host:$port:$code"
-      synchronized(lock) {
+      val attempt = synchronized(lock) {
+        if (!active || stageName != "waiting-code") return
         if (lastAttemptKey == key) return
         lastAttemptKey = key
         pairingHost = host
         pairingPort = port
         stageName = "pairing"
         statusText = "已读取配对码，正在配对"
+        generation
       }
       worker.execute {
+        if (!isActiveAttempt(attempt)) return@execute
         val result = runCatching { ClearScreenAdbOperations.pair(context, host, port, code) }.getOrNull()
         val ok = result?.get("ok") == true
         synchronized(lock) {
+          if (!active || generation != attempt || stageName != "pairing") return@synchronized
           stageName = if (ok) "waiting-port" else "failed"
           statusText = if (ok) "配对成功，正在读取连接端口"
           else (result?.get("message") as? String) ?: "配对失败"
+          if (!ok) {
+            active = false
+            pairingHost = ""
+            pairingPort = 0
+            lastAttemptKey = ""
+          }
         }
       }
       return
@@ -103,18 +122,24 @@ internal object ClearScreenAdbPairingHelper {
     val host = candidate.groupValues[1]
     val port = candidate.groupValues[2].toInt()
     if (host != pairingHost || port !in 1..65535) return
-    synchronized(lock) {
+    val attempt = synchronized(lock) {
       if (stageName != "waiting-port") return
       stageName = "connecting"
       statusText = "正在连接"
+      generation
     }
     worker.execute {
-      val result = runCatching { ClearScreenAdbOperations.connect(context, host, port) }.getOrNull()
+      if (!isActiveAttempt(attempt)) return@execute
+      val result = runCatching { ClearScreenAdbOperations.connectFromPairing(context, host, port) }.getOrNull()
       val ok = result?.get("ok") == true
       synchronized(lock) {
+        if (!active || generation != attempt || stageName != "connecting") return@synchronized
         stageName = if (ok) "connected" else "failed"
         statusText = if (ok) "已连接" else (result?.get("message") as? String) ?: "连接失败"
-        if (ok) active = false
+        active = false
+        pairingHost = ""
+        pairingPort = 0
+        lastAttemptKey = ""
       }
     }
   }

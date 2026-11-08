@@ -22,12 +22,14 @@ internal object ClearScreenSettingsObserver {
     val ownLabel: String,
     val uniqueLabel: Boolean,
     val allowGlobalStartupRow: Boolean,
+    val allowXiaomiStartupSearch: Boolean,
     val trustedPackages: Set<String>,
     val startedAt: Long,
     var candidate: Map<Kind, Boolean> = emptyMap(),
     var candidateAt: Long = 0,
     var windowId: Int = -1,
     var confirmed: Map<Kind, Boolean> = emptyMap(),
+    var xiaomiStartupWindowId: Int = -1,
   )
   private val lock = Any()
   private var session: Session? = null
@@ -56,11 +58,20 @@ internal object ClearScreenSettingsObserver {
     }.getOrDefault(false)
     synchronized(lock) {
       returnedValues = emptyMap()
-      session = Session(kind, context.packageName, label, uniqueLabel,
-        profile !in setOf(ClearScreenOemProfile.HUAWEI, ClearScreenOemProfile.HONOR, ClearScreenOemProfile.SAMSUNG),
-        trusted, SystemClock.elapsedRealtime())
+      session = Session(
+        kind = kind,
+        ownPackage = context.packageName,
+        ownLabel = label,
+        uniqueLabel = uniqueLabel,
+        allowGlobalStartupRow = profile !in setOf(ClearScreenOemProfile.HUAWEI, ClearScreenOemProfile.HONOR, ClearScreenOemProfile.SAMSUNG),
+        allowXiaomiStartupSearch = profile == ClearScreenOemProfile.XIAOMI && kind == Kind.STARTUP,
+        trustedPackages = trusted,
+        startedAt = SystemClock.elapsedRealtime(),
+      )
     }
   }
+
+  fun hasActiveSession(): Boolean = synchronized(lock) { activeSession() != null }
 
   fun isWatching(packageName: String): Boolean = synchronized(lock) {
     val current = activeSession() ?: return@synchronized false
@@ -96,17 +107,40 @@ internal object ClearScreenSettingsObserver {
     }
   }
 
-  fun onForegroundWindow(packageName: String) = synchronized(lock) {
+  fun onForegroundWindow(packageName: String, windowId: Int, className: String, inputMethod: Boolean) = synchronized(lock) {
     val current = activeSession() ?: return@synchronized
+    // A keyboard can become the active window while the user searches the OEM
+    // list. Its window type is checked by the service; its content is not read.
+    if (inputMethod) return@synchronized
     if (packageName == current.ownPackage) {
       onHostResume()
     } else if (packageName !in current.trustedPackages) {
       clear()
+    } else if (current.allowXiaomiStartupSearch && packageName == XIAOMI_SECURITY_PACKAGE) {
+      if (windowId >= 0 && className == XIAOMI_STARTUP_ACTIVITY) {
+        if (current.xiaomiStartupWindowId != windowId) resetCandidate(current)
+        current.xiaomiStartupWindowId = windowId
+      } else if (current.xiaomiStartupWindowId >= 0 &&
+        (windowId != current.xiaomiStartupWindowId ||
+          (className.endsWith("Activity") && className != XIAOMI_STARTUP_ACTIVITY))) {
+        resetCandidate(current)
+        current.xiaomiStartupWindowId = -1
+      }
+    } else {
+      if (current.xiaomiStartupWindowId >= 0) resetCandidate(current)
+      current.xiaomiStartupWindowId = -1
     }
   }
 
   fun rejectSample() = synchronized(lock) {
-    session?.let { it.candidate = emptyMap(); it.confirmed = emptyMap(); it.windowId = -1 }
+    session?.let(::resetCandidate)
+  }
+
+  private fun resetCandidate(current: Session) {
+    current.candidate = emptyMap()
+    current.candidateAt = 0
+    current.windowId = -1
+    current.confirmed = emptyMap()
   }
 
   fun value(kind: Kind): Boolean? = synchronized(lock) {
@@ -141,11 +175,28 @@ internal object ClearScreenSettingsObserver {
   private fun readPage(root: AccessibilityNodeInfo, current: Session): Map<Kind, Boolean> {
     val nodes = mutableListOf<Node>()
     val owned = mutableListOf<AccessibilityNodeInfo>()
+    val searchInputs = mutableListOf<Rect>()
+    val allowXiaomiSearch = current.allowXiaomiStartupSearch &&
+      root.packageName?.toString() == XIAOMI_SECURITY_PACKAGE &&
+      current.xiaomiStartupWindowId == root.windowId && root.windowId >= 0
     var complete = true
     fun visit(node: AccessibilityNodeInfo, parent: Int, depth: Int) {
       if (!complete || !node.isVisibleToUser) return
-      if (nodes.size >= 240 || depth > 18 || node.isPassword || (node.isEditable && node.isFocused)) {
+      if (nodes.size >= 240 || depth > 18 || node.isPassword) {
         complete = false
+        return
+      }
+      val bounds = Rect().also(node::getBoundsInScreen)
+      if (node.isEditable) {
+        if (node.isFocused && !allowXiaomiSearch) {
+          complete = false
+          return
+        }
+        // Never inspect or project input text. Only its position is needed to
+        // recognize search mode on the verified Xiaomi autostart activity.
+        if (allowXiaomiSearch) searchInputs += bounds
+        val index = nodes.size
+        nodes += Node("", parent, index + 1, bounds, false, null, node.isEnabled, 0)
         return
       }
       val text = normalize(node.text?.toString().orEmpty())
@@ -155,7 +206,6 @@ internal object ClearScreenSettingsObserver {
       // Discard unrelated text immediately; only exact labels needed for this
       // application's permission rows are present in the temporary projection.
       val label = when { relevant(text) -> text; relevant(description) -> description; else -> "" }
-      val bounds = Rect().also(node::getBoundsInScreen)
       val index = nodes.size
       nodes += Node(label, parent, index + 1, bounds, node.isCheckable, checkedState(node),
         node.isEnabled, node.collectionInfo?.rowCount ?: 0)
@@ -170,6 +220,16 @@ internal object ClearScreenSettingsObserver {
     }
     try {
       visit(root, -1, 0)
+      // The initial list can exceed the node budget. Its visible heading may
+      // still establish which Xiaomi window later enters search mode, but an
+      // incomplete traversal can never establish an on/off value.
+      if (current.allowXiaomiStartupSearch && root.packageName?.toString() == XIAOMI_SECURITY_PACKAGE &&
+        root.windowId >= 0 && nodes.isNotEmpty()) {
+        val screen = nodes.first().bounds
+        if (nodes.any { it.label in DIRECT_STARTUP_HEADERS && it.bounds.top < screen.top + screen.height() * .3 }) {
+          current.xiaomiStartupWindowId = root.windowId
+        }
+      }
       if (!complete || nodes.isEmpty()) return emptyMap()
       val packageMatches = nodes.indices.filter { nodes[it].label == current.ownPackage }
       val identities = packageMatches.ifEmpty {
@@ -189,6 +249,15 @@ internal object ClearScreenSettingsObserver {
         // heading and a single, unambiguous checkable own row are accepted.
         if (!current.allowGlobalStartupRow || headers.none { it in DIRECT_STARTUP_HEADERS } ||
           current.kind != Kind.STARTUP) return emptyMap()
+        val state = rowState(nodes, ownIndex)
+        return state?.let { mapOf(Kind.STARTUP to it) } ?: emptyMap()
+      }
+      // Xiaomi hides the title in search mode. Accept only the same verified
+      // autostart window, with one visible search input above our unique row.
+      if (allowXiaomiSearch && searchInputs.size == 1 &&
+        !searchInputs.single().isEmpty && searchInputs.single().top >= screen.top &&
+        searchInputs.single().top < screen.top + screen.height() * .3 &&
+        searchInputs.single().bottom <= own.bounds.top) {
         val state = rowState(nodes, ownIndex)
         return state?.let { mapOf(Kind.STARTUP to it) } ?: emptyMap()
       }
@@ -256,6 +325,8 @@ internal object ClearScreenSettingsObserver {
     return null
   }
 
+  private const val XIAOMI_SECURITY_PACKAGE = "com.miui.securitycenter"
+  private const val XIAOMI_STARTUP_ACTIVITY = "com.miui.permcenter.autostart.AutoStartManagementActivity"
   private fun normalize(value: String): String = value.trim().lowercase(Locale.ROOT).replace(Regex("\\s+"), " ")
   private val DIRECT_STARTUP_HEADERS = setOf("自启动", "自启动管理", "开机自启动", "后台自启动", "自动启动", "自动启动管理", "autostart", "auto-start", "auto start", "auto-launch", "auto launch", "background autostart")
   private val GLOBAL_STARTUP_HEADERS = DIRECT_STARTUP_HEADERS + setOf("应用启动管理", "应用启动", "启动管理", "app launch", "launch management")

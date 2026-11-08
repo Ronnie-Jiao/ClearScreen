@@ -1,5 +1,6 @@
 package com.clearscreen.prototype.backend
 
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -264,24 +265,60 @@ internal class ClearScreenCleanupController(
 
   fun scanChannels(): WritableArray {
     synchronized(lock) { channelCandidates = emptySet() }
-    return withOps { ops ->
-      val items = JSONArray(ops.scanChannels())
-      val candidates = mutableSetOf<Pair<String, String>>()
-      val result = Arguments.createArray()
+    requireConsent()
+    val candidates = mutableSetOf<Pair<String, String>>()
+    val result = Arguments.createArray()
+    val privileged = if (hasPrivilegedRead()) {
+      runCatching { withOps { ops -> ops.scanChannels() } }.getOrNull()
+    } else null
+    if (privileged != null) {
+      // 已连接授权通道：dumpsys 给出完整清单，应用级与分组级关闭也能读取。
+      val items = JSONArray(privileged)
       for (index in 0 until items.length()) {
         val item = items.getJSONObject(index)
-        val pkg = item.getString("packageName")
-        val id = item.getString("id")
-        val name = item.getString("name")
-        if (!pkg.matches(Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+")) || id.isBlank()) continue
+        val pkg = item.optString("packageName")
+        val id = item.optString("id")
+        if (!pkg.matches(APP_PACKAGE) || id.isBlank()) continue
         if (!candidates.add(pkg to id)) continue
+        val state = item.optString("state").takeIf { it in setOf("on", "off", "unknown") } ?: "unknown"
         result.pushMap(Arguments.createMap().apply {
-          putString("packageName", pkg); putString("id", id); putString("name", name)
+          putString("packageName", pkg)
+          putString("id", id)
+          putString("name", item.optString("name"))
+          putString("state", state)
+          putInt("importance", -1)
+          putNull("group")
         })
       }
-      synchronized(lock) { channelCandidates = candidates }
-      result
+    } else {
+      // 未连接：只能看到正在发通知或刚发生变更的渠道，结果不完整。
+      for (channel in ClearScreenNotificationChannels.scanObserved(context)) {
+        val pkg = channel.packageName
+        val id = channel.id
+        if (!pkg.matches(APP_PACKAGE) || id.isBlank()) continue
+        if (!candidates.add(pkg to id)) continue
+        val state = if (channel.importance == NotificationManager.IMPORTANCE_NONE) "off" else "unknown"
+        result.pushMap(Arguments.createMap().apply {
+          putString("packageName", pkg)
+          putString("id", id)
+          putString("name", channel.name)
+          putString("state", state)
+          putInt("importance", channel.importance)
+          if (channel.group != null) putString("group", channel.group) else putNull("group")
+        })
+      }
     }
+    synchronized(lock) { channelCandidates = candidates }
+    return result
+  }
+
+  /** 完整渠道清单只有 dumpsys/appops 能给出，应用内的直接改设置通道或 Shizuku 均可。 */
+  private fun hasPrivilegedRead(): Boolean {
+    if (ClearScreenAdbOperations.isVerifiedConnected()) return true
+    return runCatching {
+      Shizuku.pingBinder() && !Shizuku.isPreV11() &&
+        Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+    }.getOrDefault(false)
   }
 
   /**

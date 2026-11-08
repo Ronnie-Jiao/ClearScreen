@@ -73,6 +73,7 @@ export type AdbAccessStatus = {
   state: 'unsupported' | 'idle' | 'pairing' | 'connecting' | 'connected' | 'error';
   connected: boolean;
   paired: boolean;
+  reconnectRequested?: boolean;
   host: string;
   port: number;
   message: string;
@@ -86,10 +87,19 @@ export type CleanupTarget = {
   id: string; title: string; category: 'quick' | 'ads'; packageName: string;
   state: 'active' | 'blocked' | 'unknown'; canRestore: boolean;
 };
-export type MarketingChannel = { packageName: string; id: string; name: string };
+export type MarketingChannel = {
+  packageName: string; id: string; name: string; state: 'on' | 'off' | 'unknown';
+  /** 通知渠道的重要性；0 表示渠道自身的开关是关的。 */
+  importance?: number;
+  /** 渠道分组名；系统没有分组时为 null。 */
+  group?: string | null;
+};
+export type NotificationAccessStatus = { supported: boolean; granted: boolean };
 export type UiCleanupTarget = {
   id: string; title: string; category: 'system' | 'news' | 'store'; page: string; entry: 'settings' | 'home' | 'browser';
   canRestore: boolean; state: 'on' | 'off' | 'unknown'; direct: boolean;
+  /** Whether the system switch must be on to disable its ad/recommendation feature. */
+  needsSystemToggleOn: boolean;
   /** Plain-language outcome of closing this switch. */
   effect: string;
   /** assisted: accessibility tap · manual: jump only · unreachable: system blocks third-party apps. */
@@ -132,7 +142,7 @@ export type BackendSnapshot = {
 
 const native = Platform.OS === 'android' ? NativeModules.ClearScreenBackend : undefined;
 
-type SettingsMethod='openAccessibilitySettings'|'openAppDetailsSettings'|'openStartupSettings'|'openBackgroundSettings'|'openBatterySettings'|'openSystemPrivacySettings'|'openSystemAdPrivacySettings'|'openSystemHomeSettings'|'openAppNotificationSettings'|'openVendorStore'|'openMarketingChannel'|'openDeveloperOptions';
+type SettingsMethod='openAccessibilitySettings'|'openAppDetailsSettings'|'openStartupSettings'|'openBackgroundSettings'|'openBatterySettings'|'openSystemPrivacySettings'|'openSystemAdPrivacySettings'|'openSystemHomeSettings'|'openAppNotificationSettings'|'openVendorStore'|'openMarketingChannel'|'openDeveloperOptions'|'openNotificationAccessSettings';
 async function openNativeSettings(method: SettingsMethod, ...args: string[]): Promise<void> {
   if (typeof native?.[method] !== 'function' || await native[method](...args) !== true) {
     throw new Error('系统设置入口不可用');
@@ -402,9 +412,10 @@ export const ClearScreenNative = {
   openAppNotificationSettings: (packageName: string) => openNativeSettings('openAppNotificationSettings', packageName),
   openVendorStore: () => openNativeSettings('openVendorStore'),
   openMarketingChannel: (packageName: string, channelId: string) => openNativeSettings('openMarketingChannel', packageName, channelId),
-  openDeveloperOptions: async (): Promise<'developer' | 'appDetails'> => {
+  openNotificationAccessSettings: () => openNativeSettings('openNotificationAccessSettings'),
+  openDeveloperOptions: async (): Promise<'developer' | 'settingsHome'> => {
     if (typeof native?.openDeveloperOptions !== 'function') throw new Error('系统设置入口不可用');
-    return await native.openDeveloperOptions() === 'appDetails' ? 'appDetails' : 'developer';
+    return await native.openDeveloperOptions() === 'settingsHome' ? 'settingsHome' : 'developer';
   },
   getAdbAccessStatus: async (): Promise<AdbAccessStatus> => {
     if (!native?.getAdbAccessStatus) throw new Error('此设备不支持直接改系统设置');
@@ -460,7 +471,8 @@ export const ClearScreenNative = {
   },
   setAppNotificationEnabled: async (packageName: string, enabled: boolean): Promise<AppNotificationResult> => {
     if (!native?.setAppNotificationEnabled) throw new Error('此设备不支持修改应用通知状态');
-    const result = String(await native.setAppNotificationEnabled(packageName, enabled));
+    const response = await native.setAppNotificationEnabled(packageName, enabled);
+    const result = typeof response === 'string' ? response : String(response?.result ?? '');
     if (result === 'enabled' || result === 'disabled' || result === 'already_enabled' || result === 'already_disabled') return result;
     throw new Error('系统没有确认这次修改');
   },
@@ -483,6 +495,11 @@ export const ClearScreenNative = {
   scanMarketingChannels: async (): Promise<MarketingChannel[]> => {
     if (!native?.scanMarketingChannels) throw new Error('此设备不支持通知渠道扫描');
     return native.scanMarketingChannels();
+  },
+  getNotificationAccessStatus: async (): Promise<NotificationAccessStatus> => {
+    if (!native?.getNotificationAccessStatus) return { supported: false, granted: false };
+    const status = await native.getNotificationAccessStatus();
+    return { supported: Boolean(status?.supported), granted: Boolean(status?.granted) };
   },
   getUiCleanupTargets: async (): Promise<UiCleanupTarget[]> => {
     if (!native?.getUiCleanupTargets) return [];

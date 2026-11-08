@@ -1,5 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
-import { AppItem, LogItem } from '../data';
+import { AppItem, LogItem, LearnedCloseRecord } from '../data';
 import { LOGO } from '../assets';
 
 type NativeApp = {
@@ -15,12 +15,18 @@ type NativeApp = {
 
 type NativeLog = LogItem & { packageName?: string; result?: string; timestamp?: number };
 
+export type AccessibilityHealth = 'ready' | 'unavailable' | 'unknown';
+export type AccessibilityPermissions = Pick<BackendPermissions,
+  'skip' | 'skipRunning' | 'accessibilitySettingEnabled' | 'accessibilityServiceBound' |
+  'accessibilityProcessAlive' | 'accessibilityStoredServices' | 'accessibilityHealth'>;
+
 export type BackendPermissions = {
   skip: boolean;
   skipRunning: boolean;
   accessibilitySettingEnabled: boolean;
   accessibilityServiceBound: boolean;
   accessibilityProcessAlive: boolean;
+  accessibilityHealth: AccessibilityHealth;
   accessibilityStoredServices: string;
   network: boolean;
   networkRunning: boolean;
@@ -39,6 +45,13 @@ export type BackendPermissions = {
   restrictedSettingsLikely: boolean;
 };
 
+export function pickAccessibilityPermissions(value: BackendPermissions): AccessibilityPermissions {
+  const { skip, skipRunning, accessibilitySettingEnabled, accessibilityServiceBound,
+    accessibilityProcessAlive, accessibilityStoredServices, accessibilityHealth } = value;
+  return { skip, skipRunning, accessibilitySettingEnabled, accessibilityServiceBound,
+    accessibilityProcessAlive, accessibilityStoredServices, accessibilityHealth };
+}
+
 export type InstallSourceDiagnostics = {
   installingPackageName: string | null;
   initiatingPackageName: string | null;
@@ -50,6 +63,46 @@ export type InstallSourceDiagnostics = {
   firstInstallTime: number;
   lastUpdateTime: number;
   signingCertificateSha256: string | null;
+};
+
+export type CleanupAccess = { running: boolean; granted: boolean; adbSupported?: boolean; adbConnected?: boolean; adbState?: string };
+export type AppNotificationState = { packageName: string; enabled: boolean };
+export type AppNotificationResult = 'enabled' | 'disabled' | 'already_enabled' | 'already_disabled';
+export type AdbAccessStatus = {
+  supported: boolean;
+  state: 'unsupported' | 'idle' | 'pairing' | 'connecting' | 'connected' | 'error';
+  connected: boolean;
+  paired: boolean;
+  host: string;
+  port: number;
+  message: string;
+  localAddress: string;
+  autoPairStage?: '' | 'waiting-code' | 'pairing' | 'waiting-port' | 'connecting' | 'connected' | 'failed';
+  autoPairMessage?: string;
+};
+export type AdbActionResult = { ok: boolean; message: string };
+export type AdLearningState = { active: boolean; count: number; message: string; records: LearnedCloseRecord[] };
+export type CleanupTarget = {
+  id: string; title: string; category: 'quick' | 'ads'; packageName: string;
+  state: 'active' | 'blocked' | 'unknown'; canRestore: boolean;
+};
+export type MarketingChannel = { packageName: string; id: string; name: string };
+export type UiCleanupTarget = {
+  id: string; title: string; category: 'system' | 'news' | 'store'; page: string; entry: 'settings' | 'home' | 'browser';
+  canRestore: boolean; state: 'on' | 'off' | 'unknown'; direct: boolean;
+  /** Plain-language outcome of closing this switch. */
+  effect: string;
+  /** assisted: accessibility tap · manual: jump only · unreachable: system blocks third-party apps. */
+  support: 'assisted' | 'manual' | 'unreachable';
+  reason?: string | null;
+  navigate?: string | null;
+};
+export type UiCleanupDirectResult = { result: 'changed' | 'already'; state: 'on' | 'off' };
+/** Which fallback level a manual-setup row reached, for honest user feedback. */
+export type RecommendRouteResult = {
+  level: 'vendor' | 'system' | 'appDetails';
+  component: string;
+  hint?: string | null;
 };
 
 export type BackendSnapshot = {
@@ -79,9 +132,9 @@ export type BackendSnapshot = {
 
 const native = Platform.OS === 'android' ? NativeModules.ClearScreenBackend : undefined;
 
-type SettingsMethod='openAccessibilitySettings'|'openAppDetailsSettings'|'openStartupSettings'|'openBackgroundSettings'|'openBatterySettings';
-async function openNativeSettings(method: SettingsMethod): Promise<void> {
-  if (typeof native?.[method] !== 'function' || await native[method]() !== true) {
+type SettingsMethod='openAccessibilitySettings'|'openAppDetailsSettings'|'openStartupSettings'|'openBackgroundSettings'|'openBatterySettings'|'openSystemPrivacySettings'|'openSystemAdPrivacySettings'|'openSystemHomeSettings'|'openAppNotificationSettings'|'openVendorStore'|'openMarketingChannel'|'openDeveloperOptions';
+async function openNativeSettings(method: SettingsMethod, ...args: string[]): Promise<void> {
+  if (typeof native?.[method] !== 'function' || await native[method](...args) !== true) {
     throw new Error('系统设置入口不可用');
   }
 }
@@ -113,7 +166,7 @@ function fallbackSnapshot(): BackendSnapshot {
   return {
     backendReady: false,
     privacyConsentAccepted: false,
-    privacyPolicyVersion: '2026-10-16-v1',
+    privacyPolicyVersion: '2026-11-03-v3',
     onboardingCompleted: false,
     masterEnabled: false,
     installedAppCount: 0,
@@ -125,6 +178,7 @@ function fallbackSnapshot(): BackendSnapshot {
       accessibilitySettingEnabled: false,
       accessibilityServiceBound: false,
       accessibilityProcessAlive: false,
+      accessibilityHealth: 'unknown',
       accessibilityStoredServices: '',
       network: false,
       networkRunning: false,
@@ -187,7 +241,7 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
   return {
     backendReady: Boolean(raw.backendReady),
     privacyConsentAccepted: Boolean(raw.privacyConsentAccepted),
-    privacyPolicyVersion: String(raw.privacyPolicyVersion || '2026-10-16-v1'),
+    privacyPolicyVersion: String(raw.privacyPolicyVersion || '2026-10-29-v2'),
     onboardingCompleted: Boolean(raw.onboardingCompleted),
     masterEnabled: Boolean(raw.masterEnabled),
     installedAppCount: Number(raw.installedAppCount || apps.length),
@@ -195,10 +249,12 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
     todayNetworkCount: 0,
     permissions: {
       skip: Boolean(raw.accessibilitySettingEnabled ?? raw.accessibilityEnabled),
-      skipRunning: Boolean(raw.accessibilityRunning),
+      skipRunning: Boolean(raw.accessibilityRunning) && raw.accessibilityHealth === 'ready',
       accessibilitySettingEnabled: Boolean(raw.accessibilitySettingEnabled ?? raw.accessibilityEnabled),
       accessibilityServiceBound: Boolean(raw.accessibilityServiceBound ?? raw.accessibilityRunning),
       accessibilityProcessAlive: Boolean(raw.accessibilityProcessAlive),
+      accessibilityHealth: raw.accessibilityHealth === 'ready' || raw.accessibilityHealth === 'unavailable'
+        ? raw.accessibilityHealth : 'unknown',
       accessibilityStoredServices: String(raw.accessibilityStoredServices || ''),
       network: false,
       networkRunning: false,
@@ -233,6 +289,31 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
 
 export const ClearScreenNative = {
   available: Boolean(native),
+  getAdLearningState: async (): Promise<AdLearningState> => {
+    if (!native?.getAdLearningState) return {active:false,count:0,message:'',records:[]};
+    const state = await native.getAdLearningState();
+    return {...state, records: Array.isArray(state.records) ? state.records : []};
+  },
+  startAdLearning: async (): Promise<AdLearningState> => {
+    if (!native?.startAdLearning) throw new Error('当前客户端尚未接入学习关闭');
+    const state = await native.startAdLearning();
+    return {...state, records: Array.isArray(state.records) ? state.records : []};
+  },
+  stopAdLearning: async (): Promise<AdLearningState> => {
+    if (!native?.stopAdLearning) throw new Error('学习关闭不可用');
+    const state = await native.stopAdLearning();
+    return {...state, records: Array.isArray(state.records) ? state.records : []};
+  },
+  clearAdLearning: async (): Promise<AdLearningState> => {
+    if (!native?.clearAdLearning) throw new Error('学习关闭不可用');
+    const state = await native.clearAdLearning();
+    return {...state, records: Array.isArray(state.records) ? state.records : []};
+  },
+  deleteAdLearningRule: async (id: string): Promise<AdLearningState> => {
+    if (!native?.deleteAdLearningRule) throw new Error('当前客户端尚未接入单条删除');
+    const state = await native.deleteAdLearningRule(id);
+    return {...state, records: Array.isArray(state.records) ? state.records : []};
+  },
   getSnapshot: async (): Promise<BackendSnapshot> => {
     if (!native?.getSnapshot) return fallbackSnapshot();
     return normalizeSnapshot(await native.getSnapshot());
@@ -241,6 +322,12 @@ export const ClearScreenNative = {
     if (native?.getPermissionSnapshot) return normalizeSnapshot(await withPermissionTimeout(native.getPermissionSnapshot()));
     if (native?.getSnapshot) return normalizeSnapshot(await withPermissionTimeout(native.getSnapshot()));
     return fallbackSnapshot();
+  },
+  getAccessibilityHealth: async (): Promise<{ privacyConsentAccepted: boolean; permissions: AccessibilityPermissions }> => {
+    if (!native?.getAccessibilityHealth) return fallbackSnapshot();
+    const snapshot = normalizeSnapshot(await withPermissionTimeout(native.getAccessibilityHealth()));
+    return { privacyConsentAccepted: snapshot.privacyConsentAccepted,
+      permissions: pickAccessibilityPermissions(snapshot.permissions) };
   },
   acceptPrivacyPolicy: async (): Promise<BackendSnapshot> => {
     if (!native?.acceptPrivacyPolicy) {
@@ -299,6 +386,121 @@ export const ClearScreenNative = {
   openStartupSettings: () => openNativeSettings('openStartupSettings'),
   openBackgroundSettings: () => openNativeSettings('openBackgroundSettings'),
   openBatterySettings: () => openNativeSettings('openBatterySettings'),
+  openSystemPrivacySettings: () => openNativeSettings('openSystemPrivacySettings'),
+  openSystemAdPrivacySettings: () => openNativeSettings('openSystemAdPrivacySettings'),
+  openSystemHomeSettings: () => openNativeSettings('openSystemHomeSettings'),
+  openRecommendRoute: async (route: string): Promise<RecommendRouteResult> => {
+    if (typeof native?.openRecommendRoute !== 'function') throw new Error('系统设置入口不可用');
+    const landed = await native.openRecommendRoute(route);
+    const level = landed?.level;
+    return {
+      level: level === 'vendor' || level === 'system' ? level : 'appDetails',
+      component: String(landed?.component || ''),
+      hint: landed?.hint ? String(landed.hint) : null,
+    };
+  },
+  openAppNotificationSettings: (packageName: string) => openNativeSettings('openAppNotificationSettings', packageName),
+  openVendorStore: () => openNativeSettings('openVendorStore'),
+  openMarketingChannel: (packageName: string, channelId: string) => openNativeSettings('openMarketingChannel', packageName, channelId),
+  openDeveloperOptions: async (): Promise<'developer' | 'appDetails'> => {
+    if (typeof native?.openDeveloperOptions !== 'function') throw new Error('系统设置入口不可用');
+    return await native.openDeveloperOptions() === 'appDetails' ? 'appDetails' : 'developer';
+  },
+  getAdbAccessStatus: async (): Promise<AdbAccessStatus> => {
+    if (!native?.getAdbAccessStatus) throw new Error('此设备不支持直接改系统设置');
+    return native.getAdbAccessStatus();
+  },
+  pairAdb: async (host: string, port: number, code: string): Promise<AdbActionResult> => {
+    if (!native?.pairAdb) throw new Error('此设备不支持直接改系统设置');
+    return native.pairAdb(host, port, code);
+  },
+  connectAdb: async (host: string, port: number): Promise<AdbActionResult> => {
+    if (!native?.connectAdb) throw new Error('此设备不支持直接改系统设置');
+    return native.connectAdb(host, port);
+  },
+  autoConnectAdb: async (): Promise<AdbActionResult> => {
+    if (!native?.autoConnectAdb) throw new Error('此设备不支持直接改系统设置');
+    return native.autoConnectAdb();
+  },
+  startAdbAutoPair: async (): Promise<AdbAccessStatus> => {
+    if (!native?.startAdbAutoPair) throw new Error('此设备不支持直接改系统设置');
+    return native.startAdbAutoPair();
+  },
+  stopAdbAutoPair: async (): Promise<AdbAccessStatus> => {
+    if (!native?.stopAdbAutoPair) throw new Error('此设备不支持直接改系统设置');
+    return native.stopAdbAutoPair();
+  },
+  disconnectAdb: async (): Promise<void> => {
+    if (!native?.disconnectAdb) throw new Error('此设备不支持直接改系统设置');
+    await native.disconnectAdb();
+  },
+  getCleanupAccessStatus: async (): Promise<CleanupAccess> => {
+    if (!native?.getCleanupAccessStatus) throw new Error('此设备不支持系统清理');
+    return native.getCleanupAccessStatus();
+  },
+  requestCleanupAccess: async (): Promise<boolean> => {
+    if (!native?.requestCleanupAccess) throw new Error('此设备不支持系统清理');
+    return native.requestCleanupAccess();
+  },
+  inspectCleanupTargets: async (): Promise<CleanupTarget[]> => {
+    if (!native?.inspectCleanupTargets) throw new Error('此设备不支持系统清理');
+    return native.inspectCleanupTargets();
+  },
+  changeCleanupTarget: async (id: string, restore: boolean): Promise<{ result: string }> => {
+    if (!native?.changeCleanupTarget) throw new Error('此设备不支持系统清理');
+    return native.changeCleanupTarget(id, restore);
+  },
+  readAppNotificationStates: async (packageNames: string[]): Promise<AppNotificationState[]> => {
+    if (!native?.readAppNotificationStates) throw new Error('此设备不支持读取应用通知状态');
+    const list = await native.readAppNotificationStates(packageNames);
+    return Array.isArray(list)
+      ? list.map((item: any) => ({ packageName: String(item?.packageName || ''), enabled: Boolean(item?.enabled) }))
+          .filter((item: AppNotificationState) => item.packageName)
+      : [];
+  },
+  setAppNotificationEnabled: async (packageName: string, enabled: boolean): Promise<AppNotificationResult> => {
+    if (!native?.setAppNotificationEnabled) throw new Error('此设备不支持修改应用通知状态');
+    const result = String(await native.setAppNotificationEnabled(packageName, enabled));
+    if (result === 'enabled' || result === 'disabled' || result === 'already_enabled' || result === 'already_disabled') return result;
+    throw new Error('系统没有确认这次修改');
+  },
+  isQuickComponentsGuideSeen: async (): Promise<boolean> => {
+    if (!native?.isQuickComponentsGuideSeen) return true;
+    return native.isQuickComponentsGuideSeen();
+  },
+  setQuickComponentsGuideSeen: async (): Promise<void> => {
+    if (!native?.setQuickComponentsGuideSeen) return;
+    await native.setQuickComponentsGuideSeen();
+  },
+  readAdbGuideSeen: async (): Promise<string[]> => {
+    if (!native?.readAdbGuideSeen) return [];
+    const seen = await native.readAdbGuideSeen();
+    return Array.isArray(seen) ? seen.map(String) : [];
+  },
+  markAdbGuideSeen: async (key: string): Promise<void> => {
+    if (native?.markAdbGuideSeen) await native.markAdbGuideSeen(key);
+  },
+  scanMarketingChannels: async (): Promise<MarketingChannel[]> => {
+    if (!native?.scanMarketingChannels) throw new Error('此设备不支持通知渠道扫描');
+    return native.scanMarketingChannels();
+  },
+  getUiCleanupTargets: async (): Promise<UiCleanupTarget[]> => {
+    if (!native?.getUiCleanupTargets) return [];
+    return native.getUiCleanupTargets();
+  },
+  /** Rewrites a vendor switch inside the Android settings tables and verifies the new value. */
+  applyUiCleanupDirect: async (id: string, desired: 'on' | 'off'): Promise<UiCleanupDirectResult> => {
+    if (!native?.applyUiCleanupDirect) throw new Error('此设备不支持直接改写系统设置');
+    const result = String(await native.applyUiCleanupDirect(id, desired));
+    return { result: result === 'already' ? 'already' : 'changed', state: desired };
+  },
+  takeUiCleanupResult: async (): Promise<{ title: string; message: string } | null> => {
+    if (!native?.takeUiCleanupResult) return null;
+    return native.takeUiCleanupResult();
+  },
+  startUiCleanup: async (id: string, restore: boolean): Promise<void> => {
+    if (!native?.startUiCleanup || await native.startUiCleanup(id, restore) !== true) throw new Error('无法启动这个操作');
+  },
   confirmVendorStartupGuide: async (): Promise<BackendSnapshot | undefined> => {
     if (!native?.confirmVendorStartupGuide) return undefined;
     return normalizeSnapshot(await native.confirmVendorStartupGuide());

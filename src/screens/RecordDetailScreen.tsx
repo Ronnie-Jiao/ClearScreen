@@ -11,7 +11,7 @@ export default function RecordDetailScreen({log,app,onBack,onOpenApp,onStopApp}:
   <TopBar compact title="记录详情" onBack={onBack}/>
   <Card compact style={s.summary}>
    {app?<AppIcon source={app.icon} size={COMPACT_UI.appIcon}/>:null}
-   <View style={s.summaryText}><Text style={s.appName}>{app?.name||'应用'}</Text><Text style={[s.result,failed&&{color:C.red}]}>{result}</Text></View>
+   <View style={s.summaryText}><Text style={s.appName}>{app?.name||log.appId||'未知应用'}</Text><Text style={[s.result,failed&&{color:C.red}]}>{result}</Text></View>
   </Card>
   <Card compact style={s.details}>
    <View style={s.detailRow}><Text style={s.label}>时间</Text><Text style={s.value}>{log.time}</Text></View>

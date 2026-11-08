@@ -17,9 +17,9 @@ export function Card({children,style,compact=false}:{children:React.ReactNode;st
   return <View style={[styles.card,compact&&styles.cardCompact,style]}>{children}</View>;
 }
 
-export function Toggle({value,onChange,compact=false}:{value:boolean;onChange?:()=>void;compact?:boolean}){
-  return <Pressable accessibilityRole="switch" accessibilityState={{checked:value}} hitSlop={compact?{top:11,bottom:11,left:3,right:3}:undefined} onPress={onChange} style={[styles.toggle,compact&&styles.toggleCompact,value&&styles.toggleOn]}>
-    <View style={[styles.knob,compact&&styles.knobCompact,value&&styles.knobOn]}/>
+export function Toggle({value,onChange,compact=false,unknown=false}:{value:boolean;onChange?:()=>void;compact?:boolean;unknown?:boolean}){
+  return <Pressable accessibilityRole="switch" accessibilityState={{checked:value}} accessibilityValue={unknown?{text:'未知'}:undefined} hitSlop={compact?{top:11,bottom:11,left:3,right:3}:undefined} onPress={onChange} style={[styles.toggle,compact&&styles.toggleCompact,value&&styles.toggleOn,unknown&&styles.toggleUnknown]}>
+    <View style={[styles.knob,compact&&styles.knobCompact,value&&styles.knobOn,unknown&&styles.knobUnknown]}/>
   </Pressable>;
 }
 
@@ -64,13 +64,15 @@ export function SectionTitle({title}:{title:string}){return <Text style={styles.
 export function Chevron({compact=false}:{compact?:boolean}){return <Ionicons name="chevron-forward" size={compact?18:22} color={C.text2}/>}
 
 const styles=StyleSheet.create({
-  root:{flex:1,backgroundColor:C.bg,overflow:'hidden',paddingBottom:0},backgroundImage:{width:'100%',height:'100%'},
+  root:{flex:1,backgroundColor:C.bg,overflow:'hidden',paddingBottom:0},backgroundImage:StyleSheet.absoluteFillObject,
   card:{backgroundColor:'rgba(255,255,255,0.96)',borderRadius:R.lg,borderWidth:1,borderColor:'rgba(255,255,255,0.98)',shadowColor:'#4A7EA2',shadowOpacity:.10,shadowRadius:18,shadowOffset:{width:0,height:8},elevation:3},
   cardCompact:{borderRadius:COMPACT_UI.cardRadius},
   toggle:{width:50,height:30,borderRadius:16,backgroundColor:C.graySwitch,padding:3,justifyContent:'center'},toggleCompact:{width:42,height:26,borderRadius:14},
   toggleOn:{backgroundColor:C.blue},
+  toggleUnknown:{backgroundColor:'#D8DEE8',borderWidth:1,borderColor:'#B9C4D2'},
   knob:{width:24,height:24,borderRadius:12,backgroundColor:'#fff',shadowColor:'#243B55',shadowOpacity:.14,shadowRadius:4,shadowOffset:{width:0,height:1}},knobCompact:{width:20,height:20,borderRadius:10},
   knobOn:{alignSelf:'flex-end'},
+  knobUnknown:{alignSelf:'center',backgroundColor:'#F4F7FB',borderWidth:1,borderColor:'#C7D1DD'},
   badge:{alignSelf:'flex-start',backgroundColor:C.greenBg,borderRadius:20,paddingHorizontal:13,paddingVertical:6},
   badgeText:{fontSize:14,fontWeight:'800',color:C.green},
   badgeCompact:{paddingHorizontal:8,paddingVertical:3,borderRadius:12},badgeTextCompact:{fontSize:COMPACT_UI.caption,lineHeight:16},

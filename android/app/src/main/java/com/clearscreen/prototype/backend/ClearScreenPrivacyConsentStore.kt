@@ -52,7 +52,8 @@ class ClearScreenPrivacyConsentStore(context: Context) {
   }
 
   companion object {
-    const val POLICY_VERSION = "2026-10-16-v1"
+    internal val operationLock = Any()
+    const val POLICY_VERSION = "2026-11-03-v3"
     private const val FILE_NAME = "clearscreen_privacy_consent.json"
     private const val KEY_POLICY_VERSION = "policyVersion"
     private const val KEY_ACCEPTED_AT = "acceptedAt"

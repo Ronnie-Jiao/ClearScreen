@@ -26,6 +26,7 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.LifecycleEventListener
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.Locale
@@ -41,15 +42,94 @@ class ClearScreenNativeModule(
   private val privacyConsentStore by lazy { ClearScreenPrivacyConsentStore(reactContext) }
   private val executor = Executors.newSingleThreadExecutor()
   private val permissionExecutor = Executors.newSingleThreadExecutor()
+  @Volatile private var inventoryThreads: ExecutorService? = null
   private val permissionReader by lazy { ClearScreenPermissionReader(reactContext) }
+  private val cleanupController by lazy { ClearScreenCleanupController(reactContext, { store }, ::requirePrivacyConsent) }
+  @Volatile private var hostResumed = false
 
   init { reactContext.addLifecycleEventListener(this) }
 
-  override fun onHostPause() { ClearScreenSettingsObserver.onHostPause() }
-  override fun onHostResume() { ClearScreenSettingsObserver.onHostResume() }
-  override fun onHostDestroy() { ClearScreenSettingsObserver.clear() }
+  override fun onHostPause() { hostResumed = false; ClearScreenAccessibilityHealth.invalidate(); ClearScreenSettingsObserver.onHostPause(); ClearScreenUiCleanup.onHostPause() }
+  override fun onHostResume() { hostResumed = true; ClearScreenAccessibilityHealth.invalidate(); ClearScreenSettingsObserver.onHostResume(); ClearScreenUiCleanup.onHostResume() }
+  override fun onHostDestroy() { hostResumed = false; ClearScreenAccessibilityHealth.invalidate(); ClearScreenSettingsObserver.clear(); ClearScreenUiCleanup.stop() }
 
   override fun getName(): String = "ClearScreenBackend"
+
+  /**
+   * Launcher labels and icons are read per installed app, and each read loads
+   * that app's resources. Those reads are independent, so a small pool keeps
+   * the first screen from waiting for hundreds of serial resource loads.
+   */
+  private fun inventoryPool(): ExecutorService {
+    inventoryThreads?.let { return it }
+    return synchronized(this) {
+      inventoryThreads ?: Executors.newFixedThreadPool(
+        minOf(6, maxOf(2, Runtime.getRuntime().availableProcessors())),
+      ).also { inventoryThreads = it }
+    }
+  }
+
+  @ReactMethod
+  fun getAdLearningState(promise: Promise) = learningCommand(promise, "state")
+
+  @ReactMethod
+  fun startAdLearning(promise: Promise) = learningCommand(promise, "start")
+
+  @ReactMethod
+  fun stopAdLearning(promise: Promise) = learningCommand(promise, "stop")
+
+  @ReactMethod
+  fun clearAdLearning(promise: Promise) = learningCommand(promise, "clear")
+
+  @ReactMethod
+  fun deleteAdLearningRule(key: String, promise: Promise) = learningCommand(promise, "delete", key)
+
+  private fun learningCommand(promise: Promise, action: String, key: String? = null) {
+    android.os.Handler(android.os.Looper.getMainLooper()).post {
+      synchronized(ClearScreenPrivacyConsentStore.operationLock) {
+        try {
+          requirePrivacyConsent()
+          val learning = ClearScreenAccessibilityService.learningService?.adLearning
+          when (action) {
+            "start" -> {
+              check(store.isMasterEnabled()) { "请先开启净屏" }
+              check(learning != null) { "请先开启并连接无障碍服务" }
+              ClearScreenUiCleanup.stop()
+              ClearScreenAccessibilityService.learningService?.beginAdLearning()
+            }
+            "stop" -> learning?.stop("已取消学习")
+            "clear" -> {
+              learning?.stop()
+              check(store.clearLearnedAdRules()) { "学习规则清除失败" }
+            }
+            "delete" -> {
+              check(store.deleteLearnedAdRule(key.orEmpty())) { "记录不存在或删除失败" }
+              learning?.onRuleDeleted()
+            }
+          }
+          val rules = store.getLearnedAdRules()
+          val records = Arguments.createArray()
+          for (i in rules.length() - 1 downTo 0) {
+            val rule = rules.optJSONObject(i) ?: continue
+            val id = rule.optString("key")
+            if (id.isBlank()) continue
+            records.pushMap(Arguments.createMap().apply {
+              putString("id", id)
+              putString("appId", rule.optString("pkg"))
+              putDouble("timestamp", rule.optLong("created", 0L).toDouble())
+              putBoolean("needsRelearn", rule.optJSONObject("selector")?.optInt("version") != 2)
+            })
+          }
+          promise.resolve(Arguments.createMap().apply {
+            putBoolean("active", learning?.active == true)
+            putInt("count", rules.length())
+            putString("message", learning?.message.orEmpty())
+            putArray("records", records)
+          })
+        } catch (error: Exception) { promise.reject("AD_LEARNING", error.message, error) }
+      }
+    }
+  }
 
   @ReactMethod
   fun getSnapshot(promise: Promise) = runAsync(promise) {
@@ -62,10 +142,23 @@ class ClearScreenNativeModule(
     else {
       val map = Arguments.createMap().apply {
         putBoolean("privacyConsentAccepted", true)
-        writePermissionState(this)
+        writePermissionState(this, verifyAccessibility = true)
       }
       // Consent can be withdrawn on the main worker while a provider read is
       // in flight. Never return the old authorized snapshot after withdrawal.
+      if (privacyConsentStore.hasCurrentConsent()) map else privacySnapshot()
+    }
+  }
+
+  /** No app inventory, logs, signing diagnostics, or OEM provider reads. */
+  @ReactMethod
+  fun getAccessibilityHealth(promise: Promise) = runAsync(promise, permissionExecutor) {
+    if (!privacyConsentStore.hasCurrentConsent()) privacySnapshot()
+    else {
+      val map = Arguments.createMap().apply {
+        putBoolean("privacyConsentAccepted", true)
+        writeAccessibilityState(this, verify = true)
+      }
       if (privacyConsentStore.hasCurrentConsent()) map else privacySnapshot()
     }
   }
@@ -93,13 +186,14 @@ class ClearScreenNativeModule(
 
   @ReactMethod
   fun withdrawPrivacyConsent(promise: Promise) = runAsync(promise) {
-    privacyConsentStore.withdrawConsent()
-    ClearScreenSettingsObserver.clear()
-    val cleared = if (storeDelegate.isInitialized()) {
-      store.clearUserData()
-    } else {
-      ClearScreenStore(reactContext).clearUserData()
+    val cleared = synchronized(ClearScreenPrivacyConsentStore.operationLock) {
+      privacyConsentStore.withdrawConsent()
+      if (storeDelegate.isInitialized()) store.clearUserData()
+      else ClearScreenStore(reactContext).clearUserData()
     }
+    ClearScreenSettingsObserver.clear()
+    ClearScreenUiCleanup.clear()
+    cleanupController.clear()
     check(cleared) { "Unable to clear local app data" }
     privacySnapshot()
   }
@@ -188,6 +282,288 @@ class ClearScreenNativeModule(
   }
 
   @ReactMethod
+  fun openSystemPrivacySettings(promise: Promise) {
+    openSettingsPage(promise) { settingsNavigator.openSystemPrivacySettings() }
+  }
+
+  @ReactMethod
+  fun openSystemAdPrivacySettings(promise: Promise) {
+    openSettingsPage(promise) { settingsNavigator.openSystemAdPrivacySettings() }
+  }
+
+  @ReactMethod
+  fun openSystemHomeSettings(promise: Promise) {
+    openSettingsPage(promise) { settingsNavigator.openSystemHomeSettings() }
+  }
+
+  /**
+   * Opens one registered recommendation destination and reports which level was reached,
+   * so the page can tell the user what to tap when only the app info page was available.
+   */
+  @ReactMethod
+  fun openRecommendRoute(route: String, promise: Promise) {
+    try {
+      val landed = settingsNavigator.openRecommendRoute(route)
+      promise.resolve(Arguments.createMap().apply {
+        putString("level", landed.level)
+        putString("component", landed.component)
+        landed.hint?.let { putString("hint", it) }
+      })
+    } catch (error: Exception) {
+      promise.reject("SETTINGS_OPEN_FAILED", error)
+    }
+  }
+
+  @ReactMethod
+  fun openAppNotificationSettings(packageName: String, promise: Promise) {
+    openSettingsPage(promise) {
+      requirePrivacyConsent()
+      settingsNavigator.openAppNotificationSettings(packageName)
+    }
+  }
+
+  @ReactMethod
+  fun getCleanupAccessStatus(promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    cleanupController.accessStatus()
+  }
+
+  @ReactMethod
+  fun requestCleanupAccess(promise: Promise) { cleanupController.requestAccess(promise) }
+
+  @ReactMethod
+  fun inspectCleanupTargets(promise: Promise) = runAsync(promise) { cleanupController.inspectTargets() }
+
+  @ReactMethod
+  fun changeCleanupTarget(id: String, restore: Boolean, promise: Promise) = runAsync(promise) {
+    cleanupController.changeTarget(id, restore)
+  }
+
+  @ReactMethod
+  fun readAppNotificationStates(packageNames: ReadableArray, promise: Promise) = runAsync(promise) {
+    cleanupController.notificationStates(packageNames)
+  }
+
+  @ReactMethod
+  fun setAppNotificationEnabled(packageName: String, enabled: Boolean, promise: Promise) = runAsync(promise) {
+    cleanupController.setAppNotification(packageName, enabled)
+  }
+
+  @ReactMethod
+  fun scanMarketingChannels(promise: Promise) = runAsync(promise) { cleanupController.scanChannels() }
+
+  @ReactMethod
+  fun isQuickComponentsGuideSeen(promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    store.isQuickComponentsGuideSeen()
+  }
+
+  @ReactMethod
+  fun setQuickComponentsGuideSeen(promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    store.setQuickComponentsGuideSeen()
+    true
+  }
+
+  @ReactMethod
+  fun readAdbGuideSeen(promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    Arguments.createArray().apply {
+      store.readAdbGuideSeen().forEach { pushString(it) }
+    }
+  }
+
+  @ReactMethod
+  fun markAdbGuideSeen(key: String, promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    store.markAdbGuideSeen(key)
+    true
+  }
+
+  @ReactMethod
+  fun openMarketingChannel(packageName: String, channelId: String, promise: Promise) {
+    openSettingsPage(promise) { cleanupController.openChannel(packageName, channelId) }
+  }
+
+  @ReactMethod
+  fun openVendorStore(promise: Promise) {
+    openSettingsPage(promise) {
+      requirePrivacyConsent()
+      settingsNavigator.openVendorStore()
+    }
+  }
+
+  @ReactMethod
+  fun getUiCleanupTargets(promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    Arguments.createArray().apply {
+      ClearScreenUiCleanup.targets(reactContext).forEach { target ->
+        val spec = ClearScreenDirectSettings.spec(target)
+        pushMap(Arguments.createMap().apply {
+          putString("id", target.id); putString("title", target.title)
+          putString("category", target.category); putString("page", target.page); putString("entry", target.entry)
+          putBoolean("canRestore", ClearScreenUiCleanup.hasBackup(target, store))
+          putBoolean("direct", spec != null)
+          putString("effect", target.effect)
+          putString("support", target.support)
+          target.reason?.let { putString("reason", it) }
+          target.navigate?.let { putString("navigate", it) }
+          putString("state", when {
+            spec == null -> ClearScreenUiCleanup.state(target, store) ?: "unknown"
+            else -> {
+              val live = spec.stateOf(ClearScreenDirectSettings.readLocal(reactContext, spec))
+              if (live != "unknown") live else ClearScreenUiCleanup.state(target, store) ?: "unknown"
+            }
+          })
+        })
+      }
+    }
+  }
+
+  /**
+   * Rewrites one vendor switch inside the Android settings tables, then reads
+   * the value back. The original value is stored before the first change so the
+   * switch can be restored later. Only switches with a confirmed settings key
+   * can be handled here; the rest keep the page assisted flow.
+   */
+  @ReactMethod
+  fun applyUiCleanupDirect(id: String, desired: String, promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    cleanupController.applyDirectUiCleanup(id, desired)
+  }
+
+  @ReactMethod
+  fun getAdbAccessStatus(promise: Promise) = runAsync(promise) {
+    adbResult(ClearScreenAdbOperations.status(reactContext))
+  }
+
+  @ReactMethod
+  fun pairAdb(host: String, port: Double, code: String, promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    val address = requireAdbHost(host)
+    val pairingPort = requireAdbPort(port)
+    val pairingCode = code.trim()
+    check(pairingCode.matches(Regex("\\d{4,8}"))) { "配对码应为 4-8 位数字" }
+    adbResult(ClearScreenAdbOperations.pair(reactContext, address, pairingPort, pairingCode))
+  }
+
+  @ReactMethod
+  fun connectAdb(host: String, port: Double, promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    adbResult(ClearScreenAdbOperations.connect(reactContext, requireAdbHost(host), requireAdbPort(port)))
+  }
+
+  @ReactMethod
+  fun autoConnectAdb(promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    adbResult(ClearScreenAdbOperations.autoConnect(reactContext))
+  }
+
+  @ReactMethod
+  fun disconnectAdb(promise: Promise) = runAsync(promise) {
+    ClearScreenAdbOperations.disconnect()
+    true
+  }
+
+  @ReactMethod
+  fun startAdbAutoPair(promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    check(ClearScreenAdbOperations.isSupported()) { "Android 11 以下不支持无线调试配对" }
+    check(accessibilityServiceEnabled()) { "请先开启净屏的无障碍服务，自动配对需要读取配对弹窗" }
+    ClearScreenAdbPairingHelper.start(reactContext)
+    adbResult(ClearScreenAdbOperations.status(reactContext))
+  }
+
+  @ReactMethod
+  fun stopAdbAutoPair(promise: Promise) = runAsync(promise) {
+    ClearScreenAdbPairingHelper.stop()
+    adbResult(ClearScreenAdbOperations.status(reactContext))
+  }
+
+  private fun accessibilityServiceEnabled(): Boolean = runCatching {
+    val enabled = Settings.Secure.getString(
+      reactContext.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+    ).orEmpty()
+    val target = ComponentName(reactContext, ClearScreenAccessibilityService::class.java)
+    enabled.split(':').filter { it.isNotBlank() }.any { ComponentName.unflattenFromString(it) == target }
+  }.getOrDefault(false)
+
+  @ReactMethod
+  fun openDeveloperOptions(promise: Promise) {
+    try {
+      requirePrivacyConsent()
+      promise.resolve(settingsNavigator.openDeveloperOptions())
+    } catch (error: Exception) {
+      promise.reject("SETTINGS_OPEN_FAILED", error)
+    }
+  }
+
+  private fun requireAdbHost(host: String): String {
+    val address = host.trim()
+    check(address.matches(Regex("\\d{1,3}(\\.\\d{1,3}){3}"))) { "只支持同一网络内的 IPv4 地址" }
+    return address
+  }
+
+  private fun requireAdbPort(port: Double): Int {
+    val value = port.toInt()
+    check(value in 1..65535) { "端口不正确" }
+    return value
+  }
+
+  private fun adbResult(values: Map<String, Any?>): WritableMap = Arguments.createMap().apply {
+    for ((key, value) in values) {
+      when (value) {
+        null -> putNull(key)
+        is Boolean -> putBoolean(key, value)
+        is Int -> putInt(key, value)
+        is Double -> putDouble(key, value)
+        else -> putString(key, value.toString())
+      }
+    }
+  }
+
+  @ReactMethod
+  fun takeUiCleanupResult(promise: Promise) = runAsync(promise) {
+    requirePrivacyConsent()
+    ClearScreenUiCleanup.takeResult()?.let { result -> Arguments.createMap().apply {
+      putString("title", result.first); putString("message", result.second)
+    } }
+  }
+
+  @ReactMethod
+  fun startUiCleanup(id: String, restore: Boolean, promise: Promise) {
+    openSettingsPage(promise) {
+      synchronized(ClearScreenPrivacyConsentStore.operationLock) {
+        requirePrivacyConsent()
+        val target = ClearScreenUiCleanup.begin(reactContext, id, restore, store)
+        try {
+          val route = target.navigate
+          if (route != null) {
+            val landed = settingsNavigator.openRecommendRoute(route)
+            if (landed.level == ClearScreenRecommendRoutes.LEVEL_APP_DETAILS) {
+              ClearScreenUiCleanup.cancel()
+              error(landed.hint ?: "系统没有开放这个设置页")
+            }
+          } else {
+            when (target.category) {
+              "store" -> settingsNavigator.openVendorStore()
+              "news" -> when (target.entry) {
+                "home" -> settingsNavigator.openHomeScreen()
+                "browser" -> settingsNavigator.openVivoBrowser()
+                else -> settingsNavigator.openSystemHomeSettings()
+              }
+              else -> settingsNavigator.openSystemAdPrivacySettings()
+            }
+          }
+        } catch (error: Exception) {
+          ClearScreenUiCleanup.cancel()
+          throw error
+        }
+      }
+    }
+  }
+
+  @ReactMethod
   fun openStartupSettings(promise: Promise) {
     openObservedSettings(promise, ClearScreenSettingsObserver.Kind.STARTUP) { settingsNavigator.openStartupSettings() }
   }
@@ -210,7 +586,9 @@ class ClearScreenNativeModule(
     reactContext.removeLifecycleEventListener(this)
     ClearScreenSettingsObserver.clear()
     permissionReader.close()
+    cleanupController.close()
     permissionExecutor.shutdownNow()
+    inventoryThreads?.shutdownNow()
     executor.shutdownNow()
     super.invalidate()
   }
@@ -266,14 +644,19 @@ class ClearScreenNativeModule(
   }
 
   /** Re-read permission state without loading application icons or processing history. */
-  private fun writePermissionState(map: WritableMap) {
-    val accessibility = readAccessibilityState()
+  private fun writeAccessibilityState(map: WritableMap, verify: Boolean = false) {
+    val accessibility = readAccessibilityState(verify)
     map.putBoolean("accessibilityEnabled", accessibility.authorized)
     map.putBoolean("accessibilityRunning", accessibility.running)
     map.putBoolean("accessibilitySettingEnabled", accessibility.settingEnabled)
     map.putBoolean("accessibilityServiceBound", accessibility.serviceBound)
     map.putBoolean("accessibilityProcessAlive", accessibility.processAlive)
+    map.putString("accessibilityHealth", accessibility.health)
     map.putString("accessibilityStoredServices", accessibility.storedServices)
+  }
+
+  private fun writePermissionState(map: WritableMap, verifyAccessibility: Boolean = false) {
+    writeAccessibilityState(map, verifyAccessibility)
     // ClearScreen deliberately does not request or own a VPN. Keep these
     // fields false for older JS clients that still read them.
     map.putBoolean("vpnPrepared", false)
@@ -305,6 +688,7 @@ class ClearScreenNativeModule(
     putBoolean("accessibilitySettingEnabled", false)
     putBoolean("accessibilityServiceBound", false)
     putBoolean("accessibilityProcessAlive", false)
+    putString("accessibilityHealth", ClearScreenAccessibilityHealth.UNKNOWN)
     putString("accessibilityStoredServices", "")
     putBoolean("vpnPrepared", false)
     putBoolean("vpnRunning", false)
@@ -433,16 +817,38 @@ class ClearScreenNativeModule(
       .mapNotNull { packageName ->
         runCatching { packageManager.getApplicationInfo(packageName, PackageManager.MATCH_ALL) }.getOrNull()
       }
-      .sortedBy { packageManager.getApplicationLabel(it).toString().lowercase() }
+    // Resolving every app label and launcher icon is what makes the first
+    // screen slow, and PackageManager serves these reads concurrently. Spread
+    // them over a small pool, and read each label once instead of once for
+    // sorting and once for the payload.
+    val entries = packages.map { info ->
+      inventoryPool().submit<InventoryEntry> {
+        InventoryEntry(
+          info = info,
+          name = packageManager.getApplicationLabel(info).toString(),
+          iconUri = drawableToDataUri(packageManager.getApplicationIcon(info)),
+        )
+      }
+    }
+    val resolved = entries.map { future ->
+      try {
+        future.get()
+      } catch (error: InterruptedException) {
+        Thread.currentThread().interrupt()
+        throw error
+      } catch (error: ExecutionException) {
+        throw (error.cause ?: error)
+      }
+    }.sortedBy { it.name.lowercase() }
 
-    return packages.map { info ->
-      val packageName = info.packageName
-      val rule = store.getAppRule(packageName)
+    return resolved.map { entry ->
+      val info = entry.info
+      val rule = store.getAppRule(info.packageName)
       Arguments.createMap().apply {
-        putString("id", packageName)
-        putString("packageName", packageName)
-        putString("name", packageManager.getApplicationLabel(info).toString())
-        putString("iconUri", drawableToDataUri(packageManager.getApplicationIcon(info)))
+        putString("id", info.packageName)
+        putString("packageName", info.packageName)
+        putString("name", entry.name)
+        putString("iconUri", entry.iconUri)
         putBoolean("skip", rule.skipEnabled)
         putBoolean("network", rule.networkBlockEnabled)
         putBoolean("whitelist", rule.whitelist)
@@ -450,6 +856,12 @@ class ClearScreenNativeModule(
       }
     }
   }
+
+  private data class InventoryEntry(
+    val info: ApplicationInfo,
+    val name: String,
+    val iconUri: String,
+  )
 
   private fun drawableToDataUri(drawable: android.graphics.drawable.Drawable): String {
     val size = 96
@@ -487,14 +899,15 @@ class ClearScreenNativeModule(
     val serviceBound: Boolean,
     val processAlive: Boolean,
     val storedServices: String,
+    val health: String,
   ) {
     val authorized: Boolean
       get() = settingEnabled && serviceBound
     val running: Boolean
-      get() = serviceBound && processAlive
+      get() = settingEnabled && serviceBound && processAlive && health == ClearScreenAccessibilityHealth.READY
   }
 
-  private fun readAccessibilityState(): AccessibilityState {
+  private fun readAccessibilityState(verify: Boolean = false): AccessibilityState {
     val component = ComponentName(reactContext, ClearScreenAccessibilityService::class.java)
     val storedServices = Settings.Secure.getString(
       reactContext.contentResolver,
@@ -516,11 +929,15 @@ class ClearScreenNativeModule(
       }
     }.getOrDefault(false)
     val serviceBound = serviceEnabled && ClearScreenAccessibilityService.running
+    val health = if (!serviceBound) ClearScreenAccessibilityHealth.UNAVAILABLE
+      else if (verify && hostResumed) ClearScreenAccessibilityHealth.check(reactContext.currentActivity)
+      else ClearScreenAccessibilityHealth.current()
     return AccessibilityState(
       settingEnabled = ClearScreenAccessibilityService.isEnabled(reactContext),
       serviceBound = serviceBound,
       processAlive = processAlive,
       storedServices = storedServices,
+      health = health,
     )
   }
 

@@ -2,6 +2,781 @@
 
 本文件按时间倒序记录项目修改，供后续 AI 和开发者开始任务前快速了解最近变化。自本记录建立起，新增条目的时间使用中国标准时间（UTC+08:00）；既有条目的时间按文件系统记录的本地最后修改时间整理。
 
+## 2026-11-08
+
+### 2026-11-08 13:31:52 +08:00 — 同步 Android Expo 配置版本号
+
+- 核对待提交工作区时发现 `android/app/build.gradle` 为 `1.0.86 / versionCode 92`，`app.json` 仍为 `1.0.86 / versionCode 91`。已将 `app.json` 同步到 versionCode 92，避免后续 Expo 原生配置生成回退版本。
+- 验证：字段与 Gradle 配置逐项对照；本次只做 Git 汇总，未重新构建、安装或运行测试。
+- 涉及文件：`app.json`、本修改记录。
+
+### 2026-11-08 12:55:43 +08:00 — 「系统推荐开关」删掉行下方的「关掉后，…」说明与「直接改写与代点」小标题
+
+- 原因：用户圈出该页顶部的「直接改写与代点」以及前几行下方的「关掉后，系统广告不再按你的兴趣精准匹配」这类句子，要求把同类文字一并清掉。
+- 范围界定：只删纯展示的效果描述与内部机制小标题。第一个卡片去掉「直接改写与代点」标题；两个卡片（逐个开关、常用推荐）里每行只保留开关名（与状态标签），不再显示「关掉后，…」的效果句；`GROUP_ROWS` 中随之不再使用的 `effect` 字段一并删除。
+- 保留：未适配机型的空态句、空态下「系统广告设置」行的系统路径（可操作指引）、不可自动开关行下方的「系统不允许其它应用…请到负一屏设置里关闭」（可操作指引）、「未知」/「需手动」标签、弹窗与开关逻辑，均未改动。
+- 清理：行内说明文字删掉后无空白占位，行结构仍是「标题 + 开关」，分割线由行容器统一绘制，没有残迹；`rowStatus` 样式仍被空态路径行引用因此保留，未产生新死代码。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease --console=plain` BUILD SUCCESSFUL（698 modules）；版本递增到 1.0.86 / 92；安装前确认无并行 `adb install`，`adb -s 2f8898c80822 install -r` 返回 `Success`（未卸载、未 `pm clear`）。
+- 真机截图（小米 22101317C）：`screenshots/2026-11-08-系统推荐开关-删除行下说明.png`（首个卡片无小标题、各行只剩名称与开关/标签）、`screenshots/2026-11-08-系统推荐开关-删除行下说明-底部.png`（「常用推荐开关」三行只剩名称与开关）。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、`app.json`、`android/app/build.gradle`、本修改记录。
+
+### 2026-11-08 12:43:30 +08:00 — 用当前代码重新构建 release 并覆盖安装（不改功能）
+
+- 目的：按用户要求，把当前工作区代码构建成最新 release 包并覆盖安装到小米 22101317C，只做构建与装机，不改业务代码。
+- 版本：`app.json` 与 `android/app/build.gradle` 均为 `1.0.85` / `91`；手机上此前已装同版本（`lastUpdateTime` 2026-11-08 12:14:21）。构建产物版本与已装版本相同，属同版本覆盖安装，未降级，因此可正常 `-r` 安装。
+- 并行检查：构建前查看 `java.exe` / `adb.exe` 进程，无 Gradle 构建任务、无 `adb install`；安装前再次确认并行安装进程数为 0。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease --offline --console=plain` BUILD SUCCESSFUL（2m 5s）；`adb -s 2f8898c80822 install -r` 返回 `Success`，未卸载、未 `pm clear`、未跨签名。
+- 读回：`versionName=1.0.85`、`versionCode=91`、`lastUpdateTime=2026-11-08 12:42:33`、`firstInstallTime=2026-11-06 18:47:52`（与安装前一致，本地数据保留）。
+- 真机截图：`screenshots/2026-11-08-净屏1.0.85-装机后首页.png`（启动后首页正常，无白屏或异常）。
+- 涉及文件：`android/app/build.gradle`、`app.json`（本次未改，仅确认）、本修改记录；未修改业务代码。
+- 参考：当前工作区包含其它窗口尚未提交的改动，本次构建按其当前状态打包，未回滚任何人的修改。
+
+### 2026-11-08 12:17:40 +08:00 — 「授权通道」改名为「直接改系统设置」，并删除标题下的说明小字
+
+- 原因：用户看不懂「授权通道」——不知道授权的是什么、有什么用；要求改成普通用户一看就懂、能说明白“让净屏直接改这台手机上的设置”的说法，并把标题下面那几行小字删掉。
+- 界面名称统一改为「直接改系统设置」：父页 `SystemCleanupScreen` 入口卡片标题、`AdbAccessScreen` 顶部标题、连接成功弹窗标题、`SystemRecommendScreen` 的未连接提示文案与弹窗标题（按钮由「去连接」改为「去打开」）、`ClearScreenNative` 的不支持提示。
+- 原生弹窗文案同步：`ClearScreenAdbOperations` 的「授权通道未连接 / 请重新连接授权通道」改为「还没和这台手机连上 / 请重新连一次」，`ClearScreenAdbPairingHelper` 的状态文案改为「已连接」；`SystemRecommendScreen` 用于判定“需要先连接”的关键词随之从「授权」改为「还没和这台手机连上」，避免改名后漏判。
+- 删除两处常驻小字：父页入口卡片下的两句说明（连上后能做什么 / 没连上会怎样），以及页面标题下的一段自我说明；卡片改为与同页其它入口一致的单行形态（标题 + `已连接`/`未连接` 标签 + 箭头），并清理仅被这两段文字使用的 `entry*`、`intro` 样式，不留空白占位。
+- 页内其余描述文字的弹窗化由另一窗口完成（见上一条 12:08:46 记录），本窗口不重复改动、不回滚其改动。
+- 同步 `docs/wiki/README.md` 的页面索引、页面内结构说明与「界面文案约束」两条例外条款；根目录 `README.md` 的功能说明与页面清单同步改名。
+- 版本双写递增到 1.0.85 / 91（构建前另一窗口刚装上 1.0.84 / 90）。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功（`BUILD SUCCESSFUL`，产物 `versionCode 91 / versionName 1.0.85`）；`adb -s 2f8898c80822 install -r` 覆盖安装成功，读回 `versionName=1.0.85`、`versionCode=91`、`firstInstallTime` 仍为 2026-11-06 18:47:52（未卸载、未清数据）。装前确认本机无并行 `adb install` 进程，但期间有其它窗口在同一设备上操作，页面跳转曾被打断，已重做导航后截图。
+- 真机截图（小米 22101317C）：父页入口卡片 `docs/wiki/evidence-cleanup-entry.png`（「直接改系统设置」单行 + `未连接` + 箭头，卡片下无小字）；页面本体 `docs/wiki/evidence-direct-settings.png`（标题「直接改系统设置」，标题下直接是「连接状态」，无说明段）。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`src/screens/AdbAccessScreen.tsx`、`src/screens/SystemRecommendScreen.tsx`、`src/native/ClearScreenNative.ts`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAdbOperations.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAdbPairingHelper.kt`、`app.json`、`android/app/build.gradle`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 12:08:46 +08:00 — 授权通道页说明文字改为首次使用才弹的一次性弹窗
+
+- 原因：上一版把每个按钮的作用都常驻在页面上，整页堆了小字，用户觉得“描述性文字太多”。
+- 页面只保留状态与结果：`未连接`/`已连接`、一句“现在该做什么”、`未开始自动配对` 等运行状态，以及按钮本身；删除按钮上方的常驻说明、关闭服务警告、无配对项说明和底部密钥说明。
+- 新增四个一次性弹窗，按功能首次点击才弹出，记录在本机，看过不再重复：`打开开发者选项`（先打开「无线调试」，并说明连上之前别关掉）、`自动查找无线调试`（接回上次连接）、`开始自动配对`（第一次连接的操作步骤与密钥只留本机）、`高级`（展开时说明自动连接没成功才用，并解释那串数字怎么填）。
+- 弹窗文案不含端口、adb、配对码、包名、组件名等实现细节，只讲能得到什么、要注意什么。
+- 本机持久化新增 `readAdbGuideSeen` / `markAdbGuideSeen`（SharedPreferences 字符串集合 `adbGuideSeen`），避免重启后重复弹窗。
+- 与另一窗口的分工：页面标题「直接改系统设置」及其下方小字由另一窗口负责，本次未改动。
+- 同步更新 `docs/wiki/README.md` 的「界面文案约束」例外条款，改为“常驻说明迁到一次性弹窗”。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功；`adb -s 2f8898c80822 install -r` 覆盖安装成功（安装后读回 1.0.83 / 89，`firstInstallTime` 仍为 2026-11-06 18:47:52，未卸载、未清数据；装前确认无并行 `adb install`）。
+- 真机验证（小米 22101317C）：折叠态整页 `screenshots/2026-11-08-直接改系统设置-精简页.png`；首次点「高级」弹出说明 `screenshots/2026-11-08-直接改系统设置-首次点高级弹窗.png`；`am force-stop` 重启应用后再点「高级」直接展开、不再弹窗 `screenshots/2026-11-08-直接改系统设置-重启后展开高级.png`。其余三个按钮的弹窗走同一套逻辑，未逐个点击（会跳转或触发配对，避免干扰并行窗口）。
+- 涉及文件：`src/screens/AdbAccessScreen.tsx`、`src/native/ClearScreenNative.ts`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenNativeModule.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenStore.kt`、`docs/wiki/README.md`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+### 2026-11-08 12:04:40 +08:00 — 父页「查看应用」改名为「关闭应用通知」
+
+- 原因：按用户要求，把「系统广告与营销通知」页红框那一行（折叠后右侧显示「180 个」+ 箭头的入口）的名称由「查看应用」改为「关闭应用通知」。截图确认红框指向父页该折叠行，不是记录详情页里的「查看应用」按钮，也不涉及快应用子页。
+- 改动：`src/screens/SystemCleanupScreen.tsx` 仅改该行标题文案为「关闭应用通知」。同一行内不重复出现旧称，其余页面（记录详情按钮、营销通知子页、快应用子页、授权通道）均无同名入口，因此无第二处需要对齐。折叠时右侧仍显示应用数量、展开后仍是「收起」+「搜索应用」+ 结果列表，功能、数据与跳转未改。
+- 文档：`README.md` 与 `docs/wiki/README.md` 的页面清单与设置页说明中该入口称呼已同步为「关闭应用通知」（本窗口此前完成，本次核对无遗漏）。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease --offline --console=plain` 成功（安装前确认无并行 `adb install`；版本递增到 1.0.83 / 89，`app.json` 同步）；`adb -s 2f8898c80822 install -r` 覆盖安装成功（未卸载、未清数据，`firstInstallTime` 保持 2026-11-06 18:47:52，`lastUpdateTime` 2026-11-08 12:00:28），读回 1.0.83 / 89。
+- 真机验证（小米 22101317C）：父页显示「关闭应用通知」+「180 个」，点开后变「收起」并出现「搜索应用」输入框，截图 `screenshots/2026-11-08-系统广告与营销通知-关闭应用通知.png`、`screenshots/2026-11-08-关闭应用通知-展开搜索.png`。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`README.md`、`docs/wiki/README.md`、`android/app/build.gradle`、`app.json`、本修改记录。
+- 参考：当前工作区修改，未提交；系统推荐开关、授权通道、快应用子页相关改动由其它窗口负责，本次未触碰。
+
+### 2026-11-08 12:02:00 +08:00 — 「快应用与系统广告组件」子页删除检查结果与行状态小字
+
+- 原因：用户截图红框标出三段状态文字——检查完成后的「已检查：本机 N 项，其中 N 项已被净屏关掉。」，以及每个组件行下方的「开：已停用，不会再自启或推广告」。按图判断是纯展示文字，不是检查链路本身，因此只删文字与配套样式。
+- `src/screens/QuickComponentsScreen.tsx`：成功检查后不再写入 done 状态与结果句，改为回到 idle；`StatusKind` 去掉 `done`；行内删掉 `rowHint` 文本与 `rowText` 包裹层，行改为「标题 + 开关」两列，标题 `flex: 1` 保持开关右对齐；删除不再引用的 `rowText` / `rowHint` / `statusDone` 样式。检查按钮、空状态提示、出错与「还没连上」提示、开关逻辑全部保留，检查链路未改。
+- 保留状态提示：未连接时的「还没连上这台手机，检查前需要先连一次。」不在红框内，属于可操作提示，保留。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功；`adb -s 2f8898c80822 install -r` 覆盖安装成功（未卸载、未清数据、未跨签名；装前确认无并行 `adb install`）。
+- 真机截图（小米 22101317C）：`screenshots/2026-11-08-快应用子页-删除检查结果与行状态小字.png`，页面已无「已检查…」结果行，无空白和分割线残迹。该截图取自未连接状态，列表未生成，因此两个组件行下的状态小字未在截图中出现；本轮设备通道未连接且被并行窗口频繁占用，未能复现「已检查后的列表」状态，行小字删除以代码与类型检查为准，需在通道连上后补一张列表截图。
+- 涉及文件：`src/screens/QuickComponentsScreen.tsx`、本修改记录。
+
+### 2026-11-08 11:56:00 +08:00 — 查「快应用与系统广告组件」检出 0 项的原因，补通用空态
+
+- 排查（小米 22101317C，真机实跑，不只看代码）：本机存在 `com.miui.systemAdSolution`、`com.miui.hybrid` 两个组件，第三个 `com.miui.hybrid.accessory` 确实未安装。按原生代码逐字执行同样的命令（`pm list packages`、`dumpsys package … | grep suspended=`）均能正常返回，`state` 读出「正常运行」，不是 suspended 读不到被误判。装包后在真机点「检查本机组件」，结果列出 2 项（快应用服务框架、系统广告服务），说明当前检测链路在本机正常。
+- 找到的真实缺口：`ClearScreenShellOps.state()` 判断「组件是否存在」时用了 `pm list packages -s`，只列系统应用；厂商广告组件有时以用户应用的形式更新或安装，会被判成「不存在」，三项全被判不存在时就表现为「检查完成、列表 0 项、没有报错」。已去掉 `-s`，只按包名是否存在判断（未知包名与其它品牌仍不参与，改动只在既有白名单内放宽存在性判断）。
+- 空态：列表为空统一显示「未检测到可处理组件」，居中、带上下留白，不再是空白区域；这条分支对所有品牌通用（其它机型没有可处理组件时走同一文案）。
+- 文案遵守 Wiki：页面不出现包名、端口、adb 等实现细节；空态只给一句结论，不堆说明。
+- 验证：`npx tsc --noEmit` 通过（期间并发窗口正在改其它页面，短暂报错后等其完成后复验通过）；`:app:assembleRelease` BUILD SUCCESSFUL；`adb -s 2f8898c80822 install -r` 覆盖安装成功（未卸载、未 pm clear；安装前确认无并行 `adb install`）。
+- 真机截图：`screenshots/2026-11-08-快应用子页-检查后列出本机2项.png`（检查后状态行「已检查：本机 2 项，其中 0 项已被净屏关掉。」+ 两行组件）。
+- 未在真机复现空态：这台机器的 2 项始终存在，无法在不改动系统状态的前提下造出 0 项场景；「未检测到可处理组件」空态只有代码与类型检查，无真机截图。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenShellOps.kt`、`src/screens/QuickComponentsScreen.tsx`、本修改记录。
+
+### 2026-11-08 11:52:28 +08:00 — 「营销通知」改为单行入口 + 独立子页
+
+- 原因：按用户要求，把「系统广告与营销通知」页里的营销通知区块改成和「快应用与系统广告组件」一致的形态：父页只留一张单行卡片（标题 + 右侧箭头），点进独立二级页。
+- 父页：`SystemCleanupScreen.tsx` 删除营销通知的标题、说明、扫描按钮与渠道清单，替换为单行卡片入口（与「查看应用」「授权通道」「快应用与系统广告组件」同款），顺序仍为系统推荐开关、查看应用、授权通道、营销通知、快应用与系统广告组件；同时清理不再使用的扫描状态、渠道状态与相关弹窗逻辑。
+- 子页：新增 `src/screens/MarketingChannelsScreen.tsx`，顶部标题「营销通知」+ 返回箭头，内容原样搬运（候选渠道风险提示、扫描渠道按钮、未发现候选渠道空态、候选渠道清单与应用名）；扫描渠道入口的未连接提示、自动配对流程、打开通知渠道弹窗与原生调用保持原样。仅将配对弹窗中指向「检查本机组件」的措辞改为「扫描渠道」，避免本页出现不存在的按钮名；渠道应用名缺失时兜底显示「未知应用」，不展示包名。
+- 路由：`App.tsx` 新增 `marketingChannels` 页面类型、设置子页判定与渲染分支，父页新增 `onOpenMarketingChannels` 回调；返回键走父页返回栈，回到「系统广告与营销通知」而不是退出应用。
+- 文档：`README.md` 与 `docs/wiki/README.md` 同步页面清单、设置页结构、子页说明和文案例外条款。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功（发现并行窗口正在构建，等待其结束后执行；版本递增到 1.0.82 / 88）；`adb install -r` 覆盖安装成功（未卸载、未清数据，`lastUpdateTime` 2026-11-08 11:50:38）。
+- 真机验证（小米 22101317C）：父页单行入口、子页内容与返回均正常，截图 `screenshots/2026-11-08-系统广告与营销通知-营销通知入口.png`、`screenshots/2026-11-08-营销通知子页.png`、`screenshots/2026-11-08-营销通知子页-未连接提示.png`；未连接时点「扫描渠道」弹出连接提示，点返回箭头回到父页。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`src/screens/MarketingChannelsScreen.tsx`（新增）、`App.tsx`、`README.md`、`docs/wiki/README.md`、`android/app/build.gradle`、`app.json`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+### 2026-11-08 11:20:18 +08:00 — 「快应用与系统广告组件」文字层级复核：无重复、无包名，未再改代码
+
+- 目的：用户反馈该子页「分组标题 + 条目名」重复表达同一件事（「快应用」下第一条又叫「快应用服务框架」，「系统广告组件」下第一条又叫「系统广告服务」），且包名 `com.miui.hybrid`、`com.miui.systemAdSolution` 常驻显示。
+- 现状核对：上一个窗口整页重写时已完成该部分——`rows()` 不再渲染分类标题，直接按 `category`（快应用在前、系统广告组件在后）平铺条目；行内只显示 `item.title`，不再拼接或显示 `packageName`；单条、多条走同一套行结构，没有单条特判。
+- 结论：本窗口复核后未发现需要补改之处，未修改 `QuickComponentsScreen.tsx`，避免与并行窗口冲突。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` BUILD SUCCESSFUL（11:02 构建并 `adb install -r` 成功，随后被并行窗口 11:09:07 的安装覆盖，页面内容相同）。真机小米 22101317C 截图 `screenshots/2026-11-08-快应用子页-文字层级规整.png`：本机 2 项，列表仅「快应用服务框架」「系统广告服务」两行，无分组标题、无 `com.miui.*` 包名，两行排版一致（组件名 + 状态说明 + 开关）。
+- 未执行：本窗口未再单独重装（安装前确认到并行窗口正在安装，按约束等待并复用其安装结果）；未改动其他窗口负责的开关、检查链路和说明文案区域。
+- 涉及文件：本修改记录、上述截图；无代码改动。
+
+### 2026-11-08 11:18:56 +08:00 — 「快应用与系统广告组件」右侧「关闭 >」改为开关，并补齐行内状态文案
+
+- 目的：每行右侧原来是「关闭 >」文字动作，用户要「开＝净屏正在停用它、关＝它恢复原样」的开关语义，且一眼能看出该组件的真实状态。
+- 现状核对：上一个窗口整页重写时已把动作换成 `Toggle`（`value={item.state === 'blocked'}`、`unknown={item.state === 'unknown'}`、`onChange={() => changeTarget(item)}`），不再有箭头。本窗口只补齐差的部分，未重写、未覆盖其它区域。
+- 本次改动（仅右侧动作这一块）：行文字改成两行容器 `rowText`（组件名 + 状态说明），状态说明按开关语义直说结果——已停用「开：已停用，不会再自启或推广告」；正常运行「关：正常运行，会自启、推广告」；读不到「状态读不到，暂时不能改」。同步去掉 `rowTitle` 的自适应宽度（改由 `rowText` 占位），新增样式 `rowText` / `rowHint`，右侧仍是 `toggleBusy` 包装，`busy` 时整行开关不可点。
+- 状态映射：原生 `inspectCleanupTargets` 读 `dumpsys package … User N: … suspended=true/false`；`blocked` → 开关开，`active` → 开关关，`unknown` → `Toggle` 的未知态（不画成假开假关），且 `changeTarget` 遇到 `unknown` 直接提示「无法确认状态」不改动。
+- 操作路径：点开关仍走 `changeTarget` → 原确认弹窗（「关闭/恢复 XXX？」）→ `changeCleanupTarget` → `ClearScreenShellOps.changeTarget` → `pm suspend` / `pm unsuspend`（写完后回读状态确认，失败回「原状态备份已保留」）；没有退化成进二级页。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` BUILD SUCCESSFUL；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.81，未 pm clear、未卸载，安装前确认无并行 `adb install`）。
+- 真机（小米 22101317C，11:15–11:18，本机 2 项组件）逐项对照 `dumpsys`：
+  - 检查后两行均显示「关：正常运行，会自启、推广告」、开关关闭；同时 `com.miui.hybrid` 与 `com.miui.systemAdSolution` 均 `suspended=false`，一致。截图 `screenshots/2026-11-08-快应用子页-开关关-组件正常运行.png`。
+  - 点第一行开关：弹「关闭快应用服务框架？」→「关闭」→ 弹「处理结果：已关闭，原状态已保存。」；`suspended=false→true`，该行开关变开、文案变「开：已停用，不会再自启或推广告」，另一行保持关。截图 `screenshots/2026-11-08-快应用子页-开关开-组件已停用.png`。
+  - 再点该开关：弹「恢复快应用服务框架？」→「恢复」→ 弹「已恢复原状态。」；`suspended=true→false`，开关回到关，组件恢复原状。截图 `screenshots/2026-11-08-快应用子页-恢复后开关回到关.png`。
+  - 未执行：`unknown` 未知态真机复现（该机两项都能读到 `suspended`），仅核对代码路径。
+- 已知遗留（不在本窗口范围、未改）：检查结果那行「其中 0 项已被净屏关掉」是检查当时的结果，改完开关后不会自动刷新（需再点一次「检查本机组件」）。
+- 涉及文件：`src/screens/QuickComponentsScreen.tsx`、本修改记录、上述三张截图。
+
+### 2026-11-08 11:18:00 +08:00 — 「快应用与系统广告组件」删掉列表下方整段说明，改为一次性弹窗
+
+- 目的：列表下面那段「右侧文字表示每项的状态或可做的动作：『关闭』表示正在运行…停用不会卸载应用。」常驻占位，改成用户第一次真正用到时弹一次。
+- 删除：该整段说明连同其样式 `resultHint` 一并移除，列表末尾直接接背景，不留空行、不留分割线空档。
+- 弹窗（沿用 `useAppAlert` / `src/components/AppDialog.tsx`，不新造样式）：标题「开关怎么用」，正文「开关打开：净屏正在帮你关掉这个组件的广告。开关关闭：这个组件恢复原样、正常启用。停用不会卸载应用，随时打开开关就能恢复。」，单个按钮「知道了」，`tone: 'info'`。
+- 触发与次数：检查成功且真的拿到非空列表时弹一次；若用户还没看过就先点了开关，也先弹这一次说明、不执行改动（`changeTarget` 开头拦截）。标记通过已有 `isQuickComponentsGuideSeen` / `setQuickComponentsGuideSeen`（SharedPreferences 键 `quickComponentsGuideSeen`）持久化，弹窗展示时立即写入，所以之后进页面、再检查都不再弹。补齐上一版留下的两处缺口：列表出现时先 `await` 读取存储结果再判断（消除异步竞态），首次点开关的兜底路径。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` BUILD SUCCESSFUL；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.81 / 87，`lastUpdateTime=2026-11-08 11:09:07`，未 pm clear、未卸载；安装前确认无并行 `adb install` 与并行 Gradle 构建）。
+- 真机（小米 22101317C，11:11–11:15，先经「授权通道 → 自动查找无线调试」连上，本机 2 项组件）：
+  - 第一次点「检查本机组件」出列表，同时弹出「开关怎么用」说明弹窗，截图 `screenshots/2026-11-08-快应用子页-首次检查弹出开关说明.png`。
+  - 关掉弹窗后再点一次「检查本机组件」：不再弹，列表正常；页面底部已无那段说明、也无多余空档，截图 `screenshots/2026-11-08-快应用子页-再次检查不再弹窗-列表底部无说明.png`。
+  - 再点第一项开关：走原来的「关闭 XXX？」确认弹窗，没有被说明弹窗挡住（按「取消」未改动系统状态）。
+  - 未复现「首次点开关也弹说明」这一路径：该标记在本次已置为已看，且包不可调试（`package not debuggable`）、按约束不 `pm clear`，无法把标记重置回未看；该路径只有代码实现，未在真机跑出。
+- 设备说明：验证期间另一窗口的应用反复抢占前台，多步导航被切成系统页；本次按控件坐标逐回合截图确认落在净屏上。为跑通检查，临时开启过无障碍服务（用于本机自动配对），验证后已恢复 `accessibility_enabled=0`、`enabled_accessibility_services=null`。
+- 涉及文件：`src/screens/QuickComponentsScreen.tsx`、本修改记录。
+
+### 2026-11-08 11:07:06 +08:00 — 补「检查本机组件」点击反馈链路的剩余漏洞
+
+- 背景：上一版已给该按钮加了进行中状态、30 秒超时和未连接/Shizuku/无障碍/隐私分类提示；本窗口只补仍可能让用户觉得“点了没反应”的部分，未重写页面。
+- `QuickComponentsScreen.tsx`（仅检查链路，未动说明文字、开关行和底部说明）：
+  - 未连接判定不再静默降级：原来 `getCleanupAccessStatus()` 失败会被 `.catch(() => access)` 换成缓存值继续走，连接状态读不出来时可能误判为已连接/未连接。现在读失败直接显示「检查没完成：<可读原因>」并刷新连接状态，不再吞异常。
+  - `refreshAccess` 也套上 8 秒超时：原生状态读取若卡住，不再让页面永远停在「检查中」且按钮不恢复。
+  - 检查失败后主动刷新连接状态，确保页内「现在连上」按钮与实际断连一致，不会出现“提示去连但页面上没有按钮”。
+  - `explainError` 识别 `授权通道未连接 / 请先启动 / 请先授予` 等原生错误，统一成一句「还没连上这台手机，所以查不了。点「现在连上」，用无线调试配对一次再试。」；超时类提示排在 Shizuku 判断之前，避免把断连超时说成“没连上”。
+- 真实原因：点击本身有绑定、异常也非被空 catch 吞掉；旧版在未连授权通道时把用户送去别的页面、本页不留任何进行中/结果占位，返回后仍是原样；且前置校验用 `skipRunning` 会把已开启服务误判成未开。上一版已改掉死路与误判，本轮补上状态读取失败无反馈、断连后按钮不出现两个漏洞。
+- 验证：`npx tsc --noEmit` 通过。设备当前安装 1.0.81 / 87（并行窗口 11:03 覆盖安装，构建于 11:01，源文件本次改动 10:59 已包含），未再重复装包，未 pm clear、未卸载。
+- 真机（小米 22101317C，11:04–11:06）：
+  - 未连接时点「检查本机组件」：按钮进入检查流程后本页立刻出现「还没连上这台手机，所以没法检查。点「现在连上」…」，同时弹出「先让净屏连上这台手机」弹窗（取消 / 现在连上），不再毫无变化。截图 `screenshots/2026-11-08-检查本机组件-未连接有反馈.png`、`screenshots/2026-11-08-检查本机组件-连接引导弹窗.png`。
+  - 在弹窗里点「现在连上」：本页直接发起本机自动配对，出现「去系统里点两下」引导和「等你在系统里完成配对，连上后会自动开始检查。」状态行。截图 `screenshots/2026-11-08-检查本机组件-页内发起配对.png`。
+  - 未执行：从配对成功到返回自动出结果的完整链路（需在系统无线调试里点「使用配对码配对设备」，本轮设备被并行窗口反复切前台，未完成）；未连接路径检查在一秒内完成，进行中状态瞬时，未截到加载态。
+- 涉及文件：`src/screens/QuickComponentsScreen.tsx`、本修改记录。
+
+### 2026-11-08 10:53:22 +08:00 — Wiki 新增长期界面规范：解释信息一律放弹窗
+
+- 按用户要求，在 `docs/wiki/README.md` 的「界面文案约束」小节新增「解释信息一律放弹窗（长期规范）」：需要解释/提示/告知的内容统一用 `src/components/AppDialog.tsx` 弹窗呈现，在用户真正用到时弹出；功能区块下不常驻大段说明；页面只留必要的一行结果说明；弹窗文案不写实现细节和技术术语，只说能得到什么、要注意什么；同一提示不每次进页都弹，只在首次进入、首次操作、出错或条件不满足时出现。同时注明原有各页“例外”只描述现状，新增或改动界面按该规范收敛。
+- 验证：仅文档改动，未改代码，未执行构建或真机验证。
+- 涉及文件：`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 10:47:00 +08:00 — 「检查本机组件」改为手机内自己配对，删除电脑 adb 说法
+
+- 原因：用户在该页点「检查本机组件」时被「需要先连接授权通道 / 无线调试配对或电脑 adb 连上后就能使用，也可以连接 Shizuku」挡住，误以为必须配合电脑。核查结论：配对、连接、停用组件全部由应用内的本机 ADB 客户端完成，从来没有必须用电脑的步骤；「电脑 adb」只是「授权通道 → 高级」里的一条可选兜底命令，文案把它写成了前置条件，且未连接时只把人送到别的页面，形成死路。
+- 入口弹窗（`QuickComponentsScreen.tsx`，实际承载「检查本机组件」；`SystemCleanupScreen.tsx` 内旧内联卡片已由并行窗口拆出，同步了同样逻辑）：标题改「先让净屏连上这台手机」，正文「不用电脑，也不用数据线：打开「无线调试」，用配对码连一次，之后就能在这里检查、停用这些组件。」，按钮改为「现在连上」；点后直接调用本机自动配对，不再只做页面跳转。连上返回后自动开始检查（`pendingInspect`）。
+- 分档如实处理：Android 10 及以下 `supported=false` 时明确「这一档需要你自己关」，给「去系统设置」；自动跳过服务（无障碍）未开启时先提示「还差一步：开启自动跳过服务」并给「去开启」，不再静默等待；配对已启动后给「去系统里点两下」的引导（打开开发者选项 → 无线调试 → 使用配对码配对设备，配对码由净屏自己读）。
+- 授权通道页（`AdbAccessScreen.tsx`）：删除「电脑 adb 兜底」标题、说明和 `adb tcpip 5555` / `adb connect` 两条命令及对应样式；开头写明「全程在这台手机上完成」；自动配对卡片写清系统里要点哪两下、配对码自动读取；补两条如实说明：无障碍未开时读不到配对码、部分厂商系统没有「使用配对码配对设备」时净屏连不上、只能到系统设置手动关。Android 10 及以下隐藏自动配对与端口入口，改给「去系统设置手动关」。
+- 前置校验从 `skipRunning` 改为 `skip`（系统设置里服务已启用）：真机上服务已绑定、系统开关已开时 `skipRunning` 仍会短暂为 false，会把可用状态误判成「服务没开」，这是上一轮把用户挡在门外的直接原因之一。
+- 文档：`docs/wiki/README.md` 授权链路段落同步为手机内自连，并登记两档确实做不到的情况；删掉「电脑侧 adb tcpip 作为兜底，命令写在应用内」的旧说明。
+- 版本：`app.json` / `android/app/build.gradle` 升至 1.0.81 / 87（并行窗口刚装 1.0.80 / 86）。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` BUILD SUCCESSFUL；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.81，`lastUpdateTime=2026-11-08 10:44:33`，未卸载、未清数据、未跨签名）。安装前确认设备上次更新为 10:36:12（并行窗口的 1.0.80），无并行安装。
+- 真机截图（小米 22101317C）：`screenshots/2026-11-08-检查本机组件-手机内自己连.png`（新入口弹窗，已无「电脑 adb」）；`screenshots/2026-11-08-检查本机组件-自动跳过未开.png`（无障碍未开时的如实提示）。
+- 未执行验证：从「现在连上」到配对成功、返回后自动检查的完整链路本轮未跑通。设备同时被并行窗口占用（前台多次切到 SpotCue、系统设置；并行窗口在 10:43 记录中说明其测试后把 `accessibility_enabled` 恢复为 0），无法保证点击落在净屏。自动配对的原生实现沿用此前已验证的 `startAdbAutoPair`，本次只改了入口与前置校验，需设备空闲时补一次全链路复验。
+- 涉及文件：`src/screens/QuickComponentsScreen.tsx`、`src/screens/SystemCleanupScreen.tsx`、`src/screens/AdbAccessScreen.tsx`、`docs/wiki/README.md`、`app.json`、`android/app/build.gradle`、本修改记录。
+
+### 2026-11-08 10:45:00 +08:00 — 「系统推荐开关」八项改为真实开关形态，补小米对照项与品牌兜底
+
+- 原因：上一版把搜索提示词、应用推荐、搜索历史、宫格位推送、资讯推荐、服务推荐、内容精选、热点资讯八项做成「需手动」标签或纯跳转，操作仍落在用户身上；且部分项下方带技术性小字。按要求八项与上方「个性化广告推荐 / 个性化服务 / 智能助理」统一为开关行，保留「关掉后……」结果说明，不再出现技术小字。
+- 代点级联：`ClearScreenUiCleanup.kt` 新增 `Stage(entry, page)` 与 `Session.stageIndex/stageClickedAt/stageAttempts`。`observe()` 先按页面链点击入口行（`ACTION_CLICK`，每级最多 2 次、1.6 秒防连点、12 秒找不到入口即结束），全部入口点完后再按原有「页头 30% + 行内唯一开关 + 两次采样」逻辑点真实开关；每级成功后不再重复点击。这样「首页展示模块」「主页设置」这类二级页不再需要用户自己找。
+- 小米目录（`ClearScreenRecommendCatalog.kt`）：`xiaomi.search.hint / history` 一级入口「首页展示模块」、`xiaomi.search.app` 两级「首页展示模块 → 应用推荐」（开关文案别名「展示应用推荐」）、`xiaomi.browser.grid` 一级「主页设置」，四项 `support` 由 `manual` 改为默认 `assisted`，删除旧 `reason` 技术小字，走已有无障碍代点流程。
+- 负一屏 4 项（资讯推荐、服务推荐、内容精选、热点资讯）仍为 `unreachable`：本机负一屏设置页只开放搜索框、推荐卡片、热门活动、智能置顶，且其它应用无法打开该页，所以不做假开关；行内只留一句可执行指引「系统不允许其它应用打开负一屏设置，请桌面右滑进入负一屏，在右上角设置里关闭」，右侧保留「需手动」标识，与开关行形态明确区分。
+- 小米对照补齐：新增已核实的负一屏真实项「推荐卡片」「搜索框推荐词」「热门活动」「智能置顶」（同为 `unreachable`，带同一句指引），小米侧由 11 项增至 15 项，与 vivo 对照清单（11 项）同量级；未删除任何既有项。
+- 品牌登记：`when` 增加 SAMSUNG → 自定义服务（含英文别名），其余未登记品牌落入通用兜底 `generic`（个性化广告，`manual` + 指引），不再返回空列表；小米、华为/荣耀、OPPO/一加/realme、vivo/iQOO、三星、通用均在同一张表内可扩展登记，页面不写死小米。
+- 界面（`SystemRecommendScreen.tsx`、`UI.tsx`）：开关值由「state === 'off'」纠正为「state === 'on'」（开关开=推荐开，关=推荐关）；`Toggle` 新增 `unknown` 形态（灰色轨道 + 居中滑块 + 无障碍值「未知」），未确认过的代点项并排显示「未知」小标识，不把未知画成开或关；技术小字渲染行只保留给 `unreachable` 项作为去关路径说明。确认弹窗路径补充「全局搜索设置 → 首页展示模块（→ 应用推荐）」「浏览器设置 → 主页设置」。
+- 验证：`:app:assembleRelease` BUILD SUCCESSFUL；`adb -s 2f8898c80822 install -r` 覆盖安装成功（未卸载、未清数据、未跨签名；安装前确认无并行 `adb install`）。
+- 真机截图（小米 22101317C，10:39/10:42）：`screenshots/2026-11-08-系统推荐开关-八项全开关-顶部.png`、`screenshots/2026-11-08-系统推荐开关-八项全开关-底部.png`。可见八项均为开关行 + 「未知」标识，需手动项带一句指引，底部为「常用推荐开关」。
+- 未执行验证：无障碍代点级联（含两级「应用推荐」）本轮未在真机跑通。测试前系统里无障碍服务处于关闭状态，临时开启后设备被并行窗口的应用（SpotCue）抢占前台，点击与截图多次落到别的应用；为避免干扰已把 `accessibility_enabled` 恢复为 0。该流程本轮只做了构建与代码校验，需在设备空闲时复验。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenUiCleanup.kt`、`ClearScreenRecommendCatalog.kt`、`src/screens/SystemRecommendScreen.tsx`、`src/components/UI.tsx`、本修改记录。
+
+### 2026-11-08 10:43:00 +08:00 — 「授权通道」入口去重，只保留「系统广告与营销通知」页的完整卡片
+
+- 原因：「授权通道」在两处重复出现。一是「系统推荐开关」页最底部一行纯入口（只有标题 + 箭头，没有状态和说明），二是「系统广告与营销通知」页一张完整卡片（「授权通道」+「未连接/已连接」状态标签 + 「连上后能做什么」「没连上会怎样」两句说明）。按要求只留一处。
+- 保留「系统广告与营销通知」页的完整卡片：用户能先看到当前是否已连接，再决定要不要点进去；而且同页的「营销通知」「快应用与系统广告组件」本来就依赖授权通道（后者现已拆成同页下的独立二级页，入口仍在同页），入口和使用场景在同一页，不用来回跳。
+- 删除「系统推荐开关」页底部那张 Card：连同其中 `Pressable`、标题文本与 `Ionicons` 箭头一起删掉，不留空白（该卡片下方即页面结尾，`paddingBottom` 沿用页面级样式）。该行没有专用样式，复用同一文件的 `s.row`/`s.rowText`/`s.card`，因此无样式可清；删除后 `Ionicons` 在本文件已无引用，一并移除导入。`onOpenAdbAccess` 仍被「需要先连接授权通道」弹窗的「去连接」按钮使用，保留未删。
+- 依赖检查：系统推荐开关页所有需要授权的动作（上方「直接改写与代点」开关、「常用推荐开关」三行开关）在未连接时走 `changeDirectTarget` 的错误分支，弹「需要先连接授权通道」并给出「去连接」直达授权通道页；无障碍代点未开启时另有「去开启」弹窗。不依赖授权通道的路径（需手动项、跳转系统设置页）照旧。不存在静默失败路径，因此未额外加提示行。
+- 路径判断：留一处后两页都走得通。设置 → 系统广告与营销通知（有卡片）→ 授权通道；系统推荐开关页是前一页的下一级，写开关失败时弹窗里的「去连接」会直接进授权通道页，回到推荐页按返回即可。没有把入口改为留在推荐页：推荐页比父页更深一层，从设置进入要多一次跳转；而父页除推荐开关外的其他区块都要用授权通道，把入口留在父页对多数操作路径更近，信息也更完整。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` BUILD SUCCESSFUL；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.79 / 85，`lastUpdateTime` 2026-11-08 10:21:59，`firstInstallTime` 仍为 2026-11-06 18:47:52，未卸载、未清数据）。本次沿用 versionCode 85 不递增：并行窗口同一时间也在向这台设备安装，递增会让它的旧构建变成降级安装而失败。
+- 真机验证（小米 22101317C）：系统推荐开关页滑到最底，最后一张卡片是「常用推荐开关」，其后没有「授权通道」行、也没有空白，截图 `screenshots/2026-11-08-授权通道入口-仅保留一处-系统推荐开关页底部.png`；上一级「系统广告与营销通知」页的授权通道卡片保持原样（状态「未连接」+ 两句说明），截图 `screenshots/2026-11-08-授权通道入口-仅保留一处-系统广告与营销通知页.png`。10:36:12 该设备又被并行窗口覆盖安装为它自己的构建，上面两张交付截图取自当前安装版本（该构建同样包含本次删除），未重复抢装。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+### 2026-11-08 10:41:00 +08:00 — 「快应用与系统广告组件」从系统广告页拆成独立子页
+
+- 原因：原区块（说明、检查本机组件按钮、快应用/系统广告组件清单）直接铺在「系统广告与营销通知」页，页面过长；改为一行子栏入口 + 独立二级页，页面更短，功能不变。
+- `src/screens/SystemCleanupScreen.tsx`：删除该区块的说明文字、检查按钮、组件清单，以及不再使用的 `targets` / `inspect` / `changeTarget` / `componentGroup` 逻辑和对应样式；原位置改为单行卡片入口「快应用与系统广告组件」+ 右侧箭头，形态与「查看应用」「授权通道」一致。
+- 新增 `src/screens/QuickComponentsScreen.tsx`：复用现有二级页 `TopBar`，标题「快应用与系统广告组件」；完整承接原说明、检查本机组件按钮、快应用/系统广告组件分组清单，以及停用/恢复确认、无线调试配对、连上后自动检查的原有逻辑。
+- `App.tsx`：新增 `quickComponents` 路由与页面渲染；把 `quickComponents` 加入硬件返回键的二级页判断，按返回键回到「系统广告与营销通知」而不是退出应用。
+- 父页剩余顺序按截图确认：系统推荐开关 → 查看应用 → 授权通道 → 营销通知（扫描渠道）→ 快应用与系统广告组件入口，卡片间距保持原 12，未调整其他窗口正在改的「系统推荐开关」列表与「授权通道」入口。
+- 版本：`versionName` 1.0.80 / `versionCode` 86，`app.json` 同步。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功；`adb -s 2f8898c80822 install -r` 覆盖安装成功（未卸载、未清数据、未跨签名）。
+- 真机截图（小米 22101317C）：父页 `screenshots/quick-components-parent.png`（10:38）、子页 `screenshots/quick-components-sub.png`（10:38）。
+- 子页「检查本机组件」点击后的授权/配对前置弹窗已在真机触发；完整检查与停用需要连上无线调试配对，本次未执行。
+- 设备争用说明：另一窗口在同一台设备上同时安装与导航（期间前台出现过 SpotCue、授权通道、系统推荐开关等页面），固定路径截图被抢多次，最终在 10:38 连续操作抢到两张有效截图；设备安装时间为 10:36:12 的 1.0.80 构建。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`src/screens/QuickComponentsScreen.tsx`（新增）、`App.tsx`、`android/app/build.gradle`、`app.json`、`docs/wiki/README.md`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+### 2026-11-08 10:03:34 +08:00 — 系统推荐开关页三条常用项改为整行跳转到品牌具体设置页
+
+- 原因：「广告与隐私 / 资讯与推荐 / 应用商店推广」原来只显示「设置 → 隐私与安全 → …」这类路径文字，用户要自己照着找。现在点击行文字直接跳转，路径文字不再作为主要内容展示，只在开关确认弹窗里作辅助说明。
+- 新增集中路由表 `android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenRecommendRoutes.kt`：按路线 `settings.adPrivacy` / `settings.news` / `store.home` 注册候选页，每个候选带 `vendor` / `system` 级别与下一步提示。覆盖小米（HyperOS/MIUI）、华为、荣耀、OPPO/一加（realme 归 OPPO）、vivo（iQOO 归 vivo）、三星，其余品牌走标准隐私设置兜底；应用商店包名映射 vivo `com.bbk.appstore`、OPPO/一加 `com.heytap.market`、荣耀 `com.hihonor.appmarket`、华为 `com.huawei.appmarket`、三星 `com.sec.android.app.samsungapps`，未安装则继续降级。
+- `ClearScreenSettingsNavigator.openRecommendRoute` 按列表逐级尝试，每级先 `canOpen`（`resolveActivityInfo` + enabled/exported/permission 预检）再启动，分别捕获 `ActivityNotFoundException` 与厂商拒收的 `RuntimeException`；全部失败落到净屏应用信息页，并返回针对该路线的 `hint`（商店：从桌面打开商店进「我的 → 设置」；资讯：在系统设置搜索「推荐」或进负一屏设置）。
+- `ClearScreenNativeModule` 新增 `openRecommendRoute(route)`，`src/native/ClearScreenNative.ts` 新增对应桥接与 `RecommendRouteResult` 类型；`src/screens/SystemRecommendScreen.tsx` 只在结果为 `appDetails` 时弹「没有直达设置页」告知下一步。
+- 防误触：行内左侧文字区为跳转热区，右侧开关独立处理点击，避免包一层整行 `Pressable` 后点开关被抢事件而误跳页面；没有可自动操作目标的项显示「需手动」并整块可点跳转。
+- 未改动开关项本身的增删与列表结构，避免与并行窗口的「开关列表补齐」冲突。
+- 验证：`npx tsc --noEmit` 通过；`android\app\build\outputs\apk\release\app-release.apk` 由 `:app:assembleRelease` 产出并 `adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.79，`lastUpdateTime` 2026-11-08 09:55:14，未卸载、未清数据）。
+- 小米 22101317C（HyperOS 2）逐行点击实测，三行均在 `vendor` 级直达：
+  - 广告与隐私 → `com.android.settings/.ad.AdServiceSettings`（「广告服务」页，含「个性化广告推荐」开关），截图 `screenshots/2026-11-08-系统推荐开关-跳转-广告与隐私.png`。
+  - 资讯与推荐 → `com.miui.home/.settings.MiuiHomeSettingActivity`（桌面设置，含「智能助理」负一屏总开关），截图 `screenshots/2026-11-08-系统推荐开关-跳转-资讯与推荐.png`。
+  - 应用商店推广 → `com.xiaomi.market/.business_ui.settings.recommend.RecommendSettingsFragmentActivity`（商店「隐私」页，含「个性化服务」开关），截图 `screenshots/2026-11-08-系统推荐开关-跳转-应用商店推广.png`。
+  - 右侧开关点击只弹确认弹窗，`topResumedActivity` 保持 `com.clearscreen.prototype/.MainActivity`，未误跳页面，截图 `screenshots/2026-11-08-系统推荐开关-开关不跳转.png`。
+  - 本次三行都直接命中厂商页，`system` 与 `appDetails` 降级分支未在真机上触发，仅完成代码实现，未执行真机验证。
+- 设备争用说明：测试期间另一窗口在同一台设备上频繁安装与导航（10:01 又生成过新的 APK），首次点击偶尔被抢后需重试一次；上表结果为在本任务 09:55:14 安装的构建上逐次截图确认所得。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenRecommendRoutes.kt`（新增）、`ClearScreenSettingsNavigator.kt`、`ClearScreenNativeModule.kt`、`src/native/ClearScreenNative.ts`、`src/screens/SystemRecommendScreen.tsx`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+### 2026-11-08 09:50:26 +08:00 — 系统推荐开关页删掉技术小字，改用「需手动」标识
+
+- 原因：列表每条开关下方原本显示「系统不开放直达搜索子设置，打开后点「首页展示模块」里的这个开关」「系统不开放直达首页子页面，打开后点「主页设置」里的这个开关」「负一屏设置受系统保护，其它应用无法打开；请在桌面右滑进入负一屏关闭」这类实现细节与操作教学，用户看着累，也没说明打开后能得到什么。
+- `src/screens/SystemRecommendScreen.tsx` 每条开关的副行只保留一句「关掉后……」的用户结果说明；不再拼接「已关闭 / 仍开着」状态前缀，也不再显示 `target.reason` 技术说明。
+- 无法自动操作的项不再输出原因文字，只在右侧显示紧凑版「需手动」标签；标签复用现有 `Badge` 组件，行结构与点击区域保持不变，避免行高忽大忽小。
+- 同时删除「常用推荐开关」分组在缺少目标项时追加的「系统把这一项锁在自己的页面里，第三方应用无法改写；请自己打开：…」兜底说明。
+- 未改动开关项本身的增删，未实现任何跳转逻辑；这两部分分别由其他会话负责。
+- 同步在 `docs/wiki/README.md` 的「界面文案约束」登记本页例外：只保留结果说明，技术说明与操作教学不显示，无法自动操作的项用「需手动」标识。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.79 / 85，`lastUpdateTime` 2026-11-08 09:47:37，`firstInstallTime` 仍为 2026-11-06 18:47:52，未清数据、未卸载）。
+- 真机验证：小米 22101317C 页首截图为 `tmp/recommend-top.png`，底部与「常用推荐开关」「授权通道」为 `tmp/recommend-bottom.png`，两张有重叠、合起来覆盖整页；截图中每条只剩结果说明，技术小字已消失，无法自动操作的项均显示「需手动」。设备同时被其他会话占用，底部截图里开关右侧的箭头属于另一会话正在做的跳转改动，不是本次文案改动。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、`docs/wiki/README.md`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+### 2026-11-08 09:48:30 +08:00 — 快应用与系统广告组件区块补上用途说明和结果含义
+
+- 原因：该区块只有「检查设备」按钮和两行「尚未检查设备」，用户看不出检查能得到什么、有什么用。
+- 标题下加一段说明：快应用和系统广告组件会在后台自启、推广告、占内存；点检查只读取本机信息，几秒后列出装了哪些、现在开着还是已关，开着的一键停用、随时能恢复。按钮文案由「检查设备」改为「检查本机组件」，与说明里的动作一致。
+- 未检查状态改为「未检查 · 查完会显示本机有哪些快应用组件 / 广告组件」；检查后没有命中时改为「本机没有检出受支持的…」，不再显示「没有匹配的受支持项目」。
+- 有检查结果时在区块底部加一行动作含义：右侧「关闭」表示正在运行、点一下停用，「恢复」表示改回净屏保存的原状态，「已关闭」表示已停用；停用不会卸载应用。
+- 文案只描述代码实际能做到的事：按机型预设清单检查已安装的目标组件及其开关状态，不承诺识别哪些组件正在推广告。
+- 改动文件：`src/screens/SystemCleanupScreen.tsx`（并行窗口已把「更多清理」页合并进「系统广告与营销通知」页），`docs/wiki/README.md`（登记该区块的文案例外）。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` BUILD SUCCESSFUL；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.79 / 85，未卸载、未清数据）。真机未检查状态截图 `screenshots/2026-11-08-系统广告与营销通知-快应用区块-未检查.png`。检查完成态截图未取得：该机授权通道为「未连接」，点检查只会弹出连接提示，需连上授权通道后才能产生结果；结果行文案随结果条件显示。设备同时有并行窗口在用，`lastUpdateTime` 可能被并行安装覆盖。
+
+### 2026-11-08 09:46:41 +08:00 — 授权通道入口卡片补上作用说明和状态标签
+
+- 原因：入口卡片当时只有「授权通道 / 未连接」两行，普通用户看不出这个功能有什么用、不连会怎样。
+- 卡片改为「标题 + 已连接/未连接标签」，标题右侧保留箭头；标签旁不再让「未连接」独占一行。卡片内加两句用户语言说明：连上后净屏不用数据线就能直接改这台手机的系统广告开关、停用快应用和广告组件、清理广告通知渠道；没连上时下面的扫描和清理都用不了，连上后手机重启需要再连一次。
+- 文案不含端口、adb、配对码等术语；同时在 `docs/wiki/README.md` 的「界面文案约束」里登记这张入口卡片的例外。
+- 改动文件：`src/screens/MoreCleanupScreen.tsx`（新增标签与两句说明、`Badge`/样式），`docs/wiki/README.md`。并行窗口随后把「更多清理」页合并进「系统广告与营销通知」页，卡片与文案被原样保留到 `src/screens/SystemCleanupScreen.tsx`，该页顶部的例外登记也同步改成了合并后的路径。
+- 验证：`npx tsc --noEmit` 通过；release 构建覆盖安装到小米 22101317C（未卸载、未清数据，`firstInstallTime` 保持 2026-11-06 18:47:52）；真机截图 `screenshots/2026-11-08-系统广告与营销通知-合并后顶部.png`，同页备份 `tmp/mm-22.png`。
+
+### 2026-11-08 09:45:01 +08:00 — 系统推荐开关页把「手动去设置」三项改成开关行
+
+- 原因：该组「广告与隐私 / 资讯与推荐 / 应用商店推广」原本是三条跳转行，其中「资讯与推荐」跳到系统「桌面」页，页内没有对应开关，用户无法关闭。
+- 三项改为与本页上方推荐行相同的开关行：按类别解析出一个可直接操作的目标，复用现有的直接改写/无障碍代点流程，右侧显示同一个 `Toggle`，行下沿用该目标的结果说明；不再跳转后把操作留给用户。
+- 小米 22101317C（HyperOS 2）对应目标：广告与隐私 → 个性化广告推荐；资讯与推荐 → 负一屏「智能助理」总开关（关掉后桌面右滑不再进入负一屏资讯页）；应用商店推广 → 应用商店「个性化服务」。
+- 分组标题由「手动去设置」改为「常用推荐开关」，与实际行为一致。
+- 某一类别在本机没有可操作目标（只剩 manual/unreachable）时，该行不显示开关，改为「需手动」标记并写明第三方应用无法改写、需要用户自己去系统哪一级关闭，避免假开关。
+- 代点确认弹窗为负一屏总开关补上「桌面设置 → 智能助理」路径，避免提示错误引导到全局搜索。
+- 移除该组原有的 `openRecommendRoute` 跳转代码与三个路由常量；页面其余分组、文案和顶部提示未改动。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` BUILD SUCCESSFUL；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.79 / 85，`firstInstallTime` 仍为 2026-11-06 18:47:52，未清数据）。
+- 真机验证：系统推荐开关页三行为开关形态、行下有结果说明，分组标题为「常用推荐开关」，截图为 `screenshots/2026-11-08-系统推荐开关-常用推荐开关三行开关.png`。测试机当前未启用净屏无障碍服务，点开关会按既有流程提示先开启服务（未做实际改写）。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+### 2026-11-08 09:44:38 +08:00 — 系统推荐开关页移除无障碍服务提示条
+
+- 原因：该页顶部的「无障碍服务未开启，暂时不能自动帮你关这些开关。」文字与「去开启无障碍服务」按钮属于多余提示，且无障碍未开启时该页开关仍可正常展示和操作（代点开关会在点击时自行提示）。
+- 删除该整块提示：文字、按钮及其条件渲染分支，标题下方直接进入「直接改写与代点」区块，不留空白占位与间距。
+- 清理只服务该提示的样式 `status`、`action`、`actionText`；`accessibilityReady`、`readAccessibility`、`openAccessibility` 仍被开关点击授权判断与错误提示使用，保留。
+- 未改动同页其他文案、跳转、开关列表与授权通道入口；未触碰其他会话改动。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` BUILD SUCCESSFUL；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.79 / 85，`firstInstallTime` 仍为 2026-11-06 18:47:52，未清数据、未卸载）。
+- 真机验证：净屏无障碍服务未启用状态下（`enabled_accessibility_services` 仅为联控服务），小米 22101317C 截图为 `tmp/shot-recommend-top.png`，页面顶部标题下直接是「直接改写与代点」，开关列表显示正常。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+### 2026-11-08 09:42:08 +08:00 — 「更多清理」三块内容并入「系统广告与营销通知」页
+
+- 原因：按用户要求取消单独的“更多清理”入口，把授权通道、营销通知、快应用与系统广告组件整体上移，与系统推荐开关、查看应用同级，避免用户多点一层。
+- 页面结构：`SystemCleanupScreen.tsx` 依次渲染系统推荐开关、查看应用（180 个）、授权通道卡片、营销通知（标题 + 候选渠道说明 + 扫描渠道）、快应用与系统广告组件（标题 + 说明 + 检查本机组件 + 快应用/系统广告组件两组状态），全部为同级卡片；滚动到底可见最后两组状态行，无遮挡与重叠。
+- 路由清理：`App.tsx` 删除 `moreCleanup` 页面类型、`MoreCleanupScreen` 导入、设置子页判定与渲染分支；`SystemCleanupScreen` 的 `onOpenMoreCleanup` 改为 `onOpenAdbAccess`，授权通道卡片直接进入「授权通道」页；删除 `src/screens/MoreCleanupScreen.tsx`，无死链残留。
+- 内容与逻辑：授权通道、扫描渠道、检查本机组件、目标停用/恢复的文案、弹窗、状态与原生调用保持原样搬运，未改写；另将帮助与反馈中“更多清理里的 Shizuku”条目改名为“系统广告与营销通知里的 Shizuku 是什么？”，路径由“设置 > 系统广告与营销通知 > 更多清理”改为“设置 > 系统广告与营销通知”。
+- 文档：同步更新 `README.md`（页面清单与已实现交互）和 `docs/wiki/README.md`（工程结构、设置页结构、界面文案约束例外条款与授权通道入口路径）。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功（发现并行窗口正在构建，等待其结束后再执行；JS bundle 于 09:33:55 重新生成，已包含本次改动）；设备上为 1.0.79 / 85（`lastUpdateTime` 2026-11-08 09:34:38，`firstInstallTime` 仍为 2026-11-06 18:47:52，未清数据、未卸载），经截图确认是新版页面。帮助与反馈里的 FAQ 标题改名发生在该次安装之后，未重新安装，仅代码层生效。
+- 真机验证：小米 22101317C 截图 `screenshots/2026-11-08-系统广告与营销通知-合并后顶部.png`（顶部到快应用区块）与 `screenshots/2026-11-08-系统广告与营销通知-合并后滚动到底.png`（滚动到底，含系统广告组件状态）。期间设备被另一会话/窗口占用，前台数次被切走，已重试取得。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`src/screens/MoreCleanupScreen.tsx`（删除）、`App.tsx`、`src/screens/SettingsDetailScreen.tsx`、`README.md`、`docs/wiki/README.md`、`screenshots/`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+### 2026-11-08 09:30:37 +08:00 — 授权通道页改成先讲能做什么，再讲怎么点
+
+- 原因：上一版虽已按按钮写了作用，但首屏仍以「打开开发者选项」「自动查找无线调试」这些技术动作开场，用户看完不知道这页开了之后到底能得到什么。
+- 页首新增一句目的说明：「连上之后，净屏就能直接改这台手机的广告推荐开关，也能关掉快应用和系统广告组件；不用 Root，也不用再装别的工具。」内容对应实际能力：系统推荐开关的直接改写，以及更多清理里的快应用/系统广告组件停用。
+- 按钮旁文案改为讲结果：打开开发者选项「在这里把「无线调试」打开，净屏才能拿到改系统开关的权限。」；自动查找无线调试「以前连过的话，点一下就能接回来，接着改系统开关，不用重新走一遍。」；开始自动配对「第一次连接点这里：跟着系统的弹窗确认一次，净屏就自动连上，之后能直接改系统开关。」
+- 状态行提示改为「还没连上。按下面的顺序点一遍就能连上。」与「已经连上，可以去改系统开关了；重启手机后需要再连一次。」
+- 「高级」保留端口与「连接」，开头写明「自动配对没连上时才用这里」，并用一句人话解释端口是「无线调试」页上显示的一串数字；输入占位改为「「无线调试」页里的数字」。电脑 adb 兜底改为「会用电脑命令的话……不熟悉可以跳过这一节。」底部隐私行改为「连接用的密钥只保存在这台手机上，不会上传。」
+- 连接成功弹窗去掉 Shizuku 术语，统一为「已连接，现在可以直接改系统开关了。」；端口校验提示改为「请填写「无线调试」页面上显示的那串数字。」
+- 同步更新 `docs/wiki/README.md` 的「界面文案约束」例外条款，登记页首目的说明与「高级」内的人话解释。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.79 / 85，`firstInstallTime` 仍为 2026-11-06 18:47:52，未清数据）。
+- 真机验证：小米 22101317C 整页截图为 `tmp/adb-copy-06.png`。期间该设备被另一会话持续占用（前台被反复切到系统设置、无障碍、系统推荐开关等页面），「高级」展开态截图多次被切走，未取得。
+- 涉及文件：`src/screens/AdbAccessScreen.tsx`、`docs/wiki/README.md`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+### 2026-11-08 09:14:52 +08:00 — 授权通道页改为按按钮说明作用，技术细节收进「高级」
+
+- 原因：该页四个按钮只写操作名，用户不知道开启后能得到什么；页面上还直接暴露 `192.168.1.23`、连接端口和 `adb tcpip 5555` / `adb connect 手机IP:5555`，不容易看懂。
+- 连接状态卡片：状态行只保留「正在读取状态」「这台手机不支持无线调试配对」「已连接」「未连接」，下方一句「先打开「无线调试」，再点下面的按钮。」或「现在可以直接改系统开关，重启手机后需要再连一次。」；移除原「本机地址」与「重启或关闭无线调试后需重新连接」两行。
+- 按钮作用说明：打开开发者选项「打开后才能打开「无线调试」，下面的按钮才用得上。」；自动查找无线调试「以前配对过的话，点一下会自动连回来，不用再填任何数字。」；开始自动配对「点一下，净屏会自己读出配对码并连上；连上后不用数据线也能改系统开关。」；连接「自动配对没连上时，把「无线调试」页显示的端口抄到这里，再点一次。」；删除「需先在开发者选项打开“无线调试”。」前置说明。
+- 新增「高级」折叠区（默认收起）：收进连接端口输入与「连接」按钮、本机地址和「电脑 adb 兜底」两行命令；一级界面不再出现 IP、端口与 adb 命令。自动配对下方的「连接」卡片整体移入该区。
+- 底部隐私行改为「配对码和密钥只保存在这台手机上，不会上传。」
+- 同步在 `docs/wiki/README.md` 的「界面文案约束」登记本页例外，避免后续按旧规则删除这些作用说明。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.78 / 84，`firstInstallTime` 仍为 2026-11-06 18:47:52，未清数据）。
+- 真机验证：小米 22101317C 整页截图为 `tmp/adb-03-page.png`，高级展开上半部为 `tmp/adb-04-advanced.png`，展开并滚动到底部（端口、本机地址、adb 命令均在高级内）为 `tmp/adb-06-advanced-bottom.png`；另确认展开后无障碍树中「高级」「收起」「连接端口」均存在。
+- 说明：真机操作期间设备同时被另一会话占用，多次截图被切到系统设置页作废；仅采用应用处于前台时拍到的三张。
+- 涉及文件：`src/screens/AdbAccessScreen.tsx`、`docs/wiki/README.md`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+### 2026-11-08 01:18:46 +08:00 — 1.0.78：收拢广告通知页与授权通道页，加固设置跳转
+
+- 系统广告与营销通知页删除「按应用查看通知」小标题、展开区整段用途说明与搜索按钮上的「输入应用名称查找」，保留「系统推荐开关」「查看应用 / 收起」「搜索应用」占位符和输入框，删除后各区块自然收拢。
+- 授权通道页把「重启或关闭无线调试会断开」「需在开发者选项打开无线调试」「配对完成后自动连接」三段长说明压缩为状态行下的一行短提示，其余卡片只保留标题、状态行和按钮。
+- `ClearScreenSettingsNavigator` 按「厂商专有 Activity → 系统标准 Intent → 本应用详情页」顺序逐级尝试并捕获 `ActivityNotFoundException`/`RuntimeException`，开发者选项与按应用通知新增品牌候选；只能打开应用信息页时弹出 Toast 说明下一步入口，避免点击无反应或崩溃。
+- 本机控制与权限页不属于本仓库：全库检索与 git 历史均无该页，该页实际位于 LinkPilot `MainActivity.kt` 的 `LOCAL_CONTROL` 分支，本轮未改动 LinkPilot，待用户确认归属后再处理。
+- 版本号：`app.json` 同步为 1.0.78 / versionCode 84，与 `android/app/build.gradle` 一致。
+- 验证：`npx tsc --noEmit` 通过；Gradle 无残留锁，`:app:assembleRelease` BUILD SUCCESSFUL；`adb install -r` 覆盖安装到小米 22101317C（2f8898c80822），包版本 1.0.78（84），`firstInstallTime` 未变化（未清数据）。
+- 真机验证：系统广告与营销通知页收拢与保留项、授权通道页短提示均有整页截图；「去开启无障碍服务」落到 `com.android.settings/.accessibility.MiuiAccessibilitySettingsActivity`；「打开开发者选项」落到 `com.miui.securitycenter/com.miui.appmanager.ApplicationsDetailsActivity`（应用信息页 + 兜底提示）。按应用通知跳转在本轮被设备并发占用打断（包一度被另一会话 `pm disable`、前台被反复切走），未完成截图取证，组件 `com.android.settings/.Settings$AppNotificationSettingsActivity` 已确认存在。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`src/screens/AdbAccessScreen.tsx`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenSettingsNavigator.kt`、`ClearScreenNativeModule.kt`、`app.json`、`android/app/build.gradle`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+## 2026-11-07
+
+### 2026-11-07 22:55:07 +08:00 — 增加 OnePlus、Motorola 与 Android 通用广告隐私适配
+
+- 系统推荐开关新增 OnePlus“限制广告跟踪”和 Motorola“停用广告个性化”目标，按已勾选即关闭个性化广告的反向语义识别；新增 Android 13 及以上、系统版 Google Play 服务可用时显示的广告主题、应用建议广告、广告衡量三个独立目标，并声明其 Google Play 服务包可见性。
+- 辅助识别支持逐项精确中英文标签与页面别名，页面和控件未匹配时仍不点击；操作确认路径补充 OnePlus、Motorola 和 Android 广告隐私入口。
+- 参考官方资料：[Android 广告隐私](https://support.google.com/android/answer/13720755?hl=zh-Hans)、[OnePlus 用户手册](https://service.oneplus.com/content/dam/support/user-manuals/common/OnePlus_Nord_2_User_Manual_EN.pdf)、[Motorola Android 14 用户手册](https://en-us.support.motorola.com/app/answers/detail/a_id/180146)。Android 三个隐私项不覆盖所有广告；适配是否出现取决于系统版本、Google 服务及设备实际页面。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain` 成功；`git diff --check` 通过（有既有 LF/CRLF 提示）。未运行自动化测试，未打包、未安装、未做真机验收。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenUiCleanup.kt`、`ClearScreenCleanupController.kt`、`ClearScreenNativeModule.kt`、`android/app/src/main/AndroidManifest.xml`、`src/screens/SystemRecommendScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+### 2026-11-07 22:15:13 +08:00 — 同步新增品牌开关到 README 与 Wiki
+
+- README 和 Wiki 更新为当前登记的 vivo/iQOO、小米/Redmi/POCO、华为、荣耀、OPPO/realme 适配范围；说明华为与 OPPO 反向开关语义、未适配品牌手动路径，以及新增项目尚未真机验收。
+- 验证：文档与当前源码及本轮官方厂商资料核对；未额外运行检查。
+- 涉及文件：`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-07 22:13:04 +08:00 — 扩展华为、荣耀和 OPPO 的广告跟踪开关
+
+- 在既有小米开关基础上新增华为、荣耀、OPPO/realme 的逐项目标；新增开关语义映射，识别“限制广告跟踪/追踪”这类勾选后表示已停用个性化广告的反向控件，确保关闭与恢复仍按“功能开启/关闭”判断，并保留原状态恢复和单次点击保护。
+- 更新品牌路径：小米同时列出 HyperOS 与 MIUI 官方路径；华为、荣耀、OPPO 显示厂商对应入口。其他尚未登记的品牌继续提供手动入口，不模拟不存在的统一开关。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain`、`git diff --check` 均通过；未打包、未安装、未做真机验收。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenUiCleanup.kt`、`src/screens/SystemRecommendScreen.tsx`、本修改记录。
+
+### 2026-11-07 22:08:47 +08:00 — 更新 README 与 Wiki 的推荐开关支持说明
+
+- README 和 Wiki 现区分 vivo/iQOO 原有项目、小米/Redmi/POCO 新增的系统个性化广告项目，以及其他品牌仍提供系统设置入口和手动路径的状态；补充小米官方路径来源和未完成真机验收的限制。
+- 验证：文档内容已与当前实现核对；未额外运行检查。
+- 涉及文件：`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-07 22:03:50 +08:00 — 增加小米/Redmi/POCO 的系统个性化广告开关入口
+
+- 原因：小米设备此前没有收录到 `ClearScreenUiCleanup.targets()`，因此“直接改写与代点”显示空状态。新增小米系统目标“个性化广告推荐”，仅在系统设置包的“广告服务”页准确识别该开关后，沿用既有的两次稳定读取、保存原状态、最多点击一次并回读确认流程；确认提示和手动路径使用小米官方路径。打开入口回到系统设置首页，避免使用未经验证的厂商私有深链。
+- 其他未适配品牌仍显示对应手动入口和厂商路径，不显示虚构的可自动操作开关；小米具体机型/系统版本的无障碍节点和实际点击仍需真机验收。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain`、`git diff --check` 均通过；未打包、未安装、未做真机验收。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenUiCleanup.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenSettingsNavigator.kt`、`src/screens/SystemRecommendScreen.tsx`、本修改记录。
+
+### 2026-11-07 21:56:59 +08:00 — 精简系统营销通知页面提示
+
+- 按截图删除“按应用查看通知”分组标题、展开后用途提醒，以及未输入搜索词时的“输入应用名称查找”空状态。保留“查看应用”折叠行、搜索框、搜索结果与无匹配提示。
+- 验证：`git diff --check` 与 `npx tsc --noEmit`；未执行打包或功能/UI验收。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、本修改记录。
+
+## 2026-11-06
+
+### 2026-11-06 19:59:35 +08:00 — 新增自建授权通道（无线调试配对 + 应用内 ADB 客户端），清理功能不再依赖 Shizuku
+
+- 目标：用户已拍板“自建类似 Shizuku 的授权通道”。实现为 Android 11 及以上的无线调试配对：净屏自己充当 ADB 客户端，拿到与 `adb shell` 同级的权限（uid 2000），仍属一次用户主动授权，不是零授权。
+- 语义层：`ClearScreenShellOps` / `ClearScreenShellRunner` 保留为唯一命令入口，Shizuku 与 ADB 各实现一个 runner；ADB 侧新增 `ClearScreenAdbOperations`、`ClearScreenAdbClient`、`ClearScreenAdbKeys`、`ClearScreenAdbPairingHelper`。只暴露语义方法（读写设置、检查/改写目标、扫描渠道），不向界面或脚本提供任意命令执行接口，参数按白名单校验。
+- 密钥与配对：RSA 2048 自签证书由 `bcprov/bcpkix-jdk15to18:1.81` 生成，私钥与证书存于私有目录 `filesDir/adb`；配对码与私钥不写日志。系统配对弹窗离开前台即被系统关闭（实测），所以配对码由净屏的无障碍服务在弹窗仍在前台时读取（60/300/900ms 三次扫描），随后应用退到后台完成配对，用户不必抄写配对码。
+- 实测修复四处缺陷：①`AbsAdbConnectionManager.connect()` 在旧 socket 仍报告已连接时直接返回 false，导致“连接失败”假象——连接前先断开旧 socket；②`close()` 会销毁缓存的私钥对象，导致断线后无法再认证——断开只关 socket，保留密钥与 manager；③adbd 命令结束后不一定发送 CLSE，等 EOF 会永久挂起——把 `__CS_EXIT:$?` 同时当作结束标记与退出码，读到即结束并主动关流；④`dumpsys package` 对同一包可能返回多条记录（前后 `suspended=true`/`false` 混杂），旧的“必须恰好一条”规则会误报“无法确认”——改为任一记录 `suspended=true` 即视为已关闭。
+- 界面：`SystemRecommendScreen` 增加「授权通道」入口；`AdbAccessScreen` 提供连接状态、自动配对、连接端口直连、电脑 adb 兜底与安全说明；`MoreCleanupScreen` 增加授权通道状态入口。按文案约束删除纯说明副标题（“系统推荐、资讯推荐、应用商店推广”“快应用服务、营销通知渠道”“仅列出当前品牌中可识别的项目。”“无线调试配对，或电脑 adb 拉起”），保留断线重连原因、危险操作后果与安全边界告知（正常字号）。
+- 验证：`:app:assembleRelease` 成功；`adb install -r` 返回 `Success`。Redmi Note 12 5G（Android 14 / HyperOS）：无线调试配对通过，连接 `192.168.1.23:42639`，`dumpsys package` 读取、`pm suspend` → `pm unsuspend` 往返均成功，PC 侧 `dumpsys` 复核全部记录 `suspended=false`（测试期改动已还原）。截图见 `tmp/p1.png`–`tmp/p9.png`。
+- **未验证**：电脑侧 `adb tcpip 5555` 兜底分支未实测，只按 USB/无线调试两条路径验证；手机重启、关闭无线调试或换网络后的恢复依赖用户手动重连；Android 11–13 与其他品牌未验证。覆盖安装会清空系统里的无障碍启用项（本次重装后读回 `null`，已用 `settings put secure` 恢复），用户升级后需重新开启无障碍。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/`（ClearScreenAdbOperations.kt、ClearScreenAdbClient.kt、ClearScreenAdbKeys.kt、ClearScreenAdbPairingHelper.kt、ClearScreenShellOps.kt、ClearScreenNativeModule.kt、ClearScreenAccessibilityService.kt）、`src/native/ClearScreenNative.ts`、`src/screens/AdbAccessScreen.tsx`、`src/screens/MoreCleanupScreen.tsx`、`src/screens/SystemCleanupScreen.tsx`、`src/screens/SystemRecommendScreen.tsx`、`android/app/build.gradle`、`docs/wiki/README.md`、`README.md`、本修改记录。
+
+### 2026-11-06 12:32:03 +08:00 — 修掉推荐开关的死路：提示改为可直接跳转开启无障碍，并修正 system 类开关的启动落点
+
+- 用户在 vivo 真机点「个性化广告」旁的开关，弹出“无法启动这个操作／请先开启净屏无障碍服务”后没有下一步，只能自己去找系统设置。核对手机状态确认根因：`enabled_accessibility_services` 里只有 `com.linkpilot.android/.RemoteAccessibilityService`，净屏的无障碍服务不在启用列表（该状态在覆盖安装前即存在，非本次改动造成）。尝试用 `adb shell settings put secure enabled_accessibility_settings` 代为开启，命令返回 0 但回读值不变，OriginOS 静默拒绝 shell 写入该键；随后手机从 Windows USB 总线整体消失，adb 与系统设置均无法再操作设备。
+- 应用侧改为可自行走出死路：`src/screens/SystemCleanupScreen.tsx` 读取无障碍运行状态（`ClearScreenNative.getAccessibilityHealth`），未开启时在“系统推荐开关”卡内显示“净屏的无障碍服务未开启，开启后才能操作这些开关”与「去开启无障碍服务」按钮（直达系统无障碍设置页）；点击开关时若服务未运行，不再只提示“请先开启”，而是弹出带「去开启」按钮的确认框；启动操作报错信息含“无障碍”时同样给出该按钮。
+- 修正 system 类开关的启动落点：`ClearScreenNativeModule.startUiCleanup` 原先对 system 分类调用 `openSystemPrivacySettings()`，在 OriginOS 16 上落到的是「隐私」页（使用无障碍功能、权限管理器等），并不含个性化广告／个性化推荐／智能推荐服务三个开关，这三项辅助操作必然匹配失败；改用新增的 `openSystemAdPrivacySettings()`（vivo 直达「广告与隐私」页，其它品牌沿用通用隐私设置页，行为不变）。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease --offline --console=plain` 成功（13 秒增量，含新增的原生入口改动）；APK 元数据为 `com.clearscreen.prototype`、`1.0.76` / `82`、应用名“净屏”，apksigner v2 验签通过，正式证书 SHA-256 保持 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`，`outputs/apk/release/app-release.apk` 与 `outputs/apk/净屏.apk` 字节一致，大小 106,544,953 字节，SHA-256 `F353A52DE80B8D3A7269B9AD761BDE5C3EF3D43FD7CAA0D0061DFE82BA4CDB09`。
+- **未安装、未做真机验收**：设备在打包期间从 USB 总线断开，无法覆盖安装，也无法逐项验证 23 个开关与手机系统开关的实际联动；无障碍服务仍需用户在系统设置里手动开启。应用名、包名与签名未变。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenNativeModule.kt`、`app.json`、`android/app/build.gradle`、`docs/wiki/README.md`、本修改记录、正式 APK。
+
+### 2026-11-06 12:22:23 +08:00 — 打包并覆盖安装净屏 1.0.75
+
+- 把当日三项界面改动（系统广告页收敛为两块加一个入口、Shizuku 文案改普通用户用语、系统推荐开关改为真开关）打成 Android 正式 Release，版本递增至 `1.0.75` / versionCode `81`；应用名“净屏”、包名 `com.clearscreen.prototype` 与正式签名保持不变。`app.json` 与 `android/app/build.gradle` 的版本号已同步。
+- 验证：`:app:assembleRelease --offline --console=plain` 成功（47 秒，JS bundle 重新生成）；`npx tsc --noEmit` 通过。APK 元数据为包名 `com.clearscreen.prototype`、`1.0.75` / `81`、应用名“净屏”；apksigner v2 验签通过，正式证书 SHA-256 保持 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`；Gradle 产物 `android/app/build/outputs/apk/release/app-release.apk` 与命名产物 `android/app/build/outputs/apk/净屏.apk` 字节一致，大小 106,543,957 字节，SHA-256 `20E8CECBE0C711549EE57E8B3717CAC1D326EAF36F04B30CA62C4BBAB95BD71B`。
+- 安装：通过 USB `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）返回 `Success`，读回 `1.0.75` / `81`，首次安装时间保持 `2026-09-20 15:33:13`，未卸载、未清除数据。Xiaomi 22101317C 本次未连接。
+- 状态提示：安装前后 vivo 上净屏的无障碍服务都不在系统启用列表（`enabled_accessibility_services` 只有 `com.linkpilot.android/.RemoteAccessibilityService`），该状态不是本次覆盖安装造成的；需要用户在系统设置里重新开启净屏无障碍服务，否则广告跳过与推荐开关辅助操作都不会工作。
+- 未做功能/UI 验收：开关与手机系统开关的实际联动、页面折叠后的观感仍待用户真机确认；未运行自动化测试。
+- 涉及文件：`app.json`、`android/app/build.gradle`、`README.md`、`docs/wiki/README.md`、本修改记录、正式 APK。
+
+### 2026-11-06 12:15:54 +08:00 — 系统推荐开关改为真开关，翻动即关闭或恢复手机上的广告开关
+
+- 用户要求把「系统推荐开关」列表里的“关掉”文字按钮改成开关形式，开关直接控制手机上的广告开关。复核原生辅助流程后确认它已具备所需能力：按目标状态判断是否需要点击（关闭期望为关、恢复期望为开），目标已是期望状态就不点击、不会把已关好的开关重新打开，最多点击一次并回读确认，关闭前先保存原值以便恢复。因此开关直接复用该流程，不新增任何系统写入手段，也不需要 Shizuku。
+- 界面：`src/screens/SystemCleanupScreen.tsx` 的系统推荐开关列表每项改为 `Toggle`（复用 `src/components/UI.tsx` 既有开关组件，非原生 Switch），副标题改为“页面名 · 状态”，状态取已关闭／仍开着／未处理；点击开关先弹确认框说明将进入的系统页面，再启动辅助关闭或按原状态恢复；没有可恢复记录时打开操作会被拒绝并提示到系统设置自行打开；操作进行中该行不再重复触发，返回应用后重新读取列表与结果再刷新一次状态。
+- 原生：新增本机存储 `system_cleanup_states` 记录净屏**已确认**的开关状态，与“保存的原值（可恢复记录）”分开存放；`ClearScreenUiCleanup` 在回读确认关闭时写入 `off`、确认恢复时写入 `on` 并同时清除恢复记录，未确认的失败路径不写入；`getUiCleanupTargets` 新增 `state` 字段（`on`/`off`/`unknown`），`src/native/ClearScreenNative.ts` 的 `UiCleanupTarget` 同步增加该字段。
+- 语义：开关打开＝净屏已确认该系统开关处于关闭状态；灰色＝未处理或仍开着。此前只记录“原值为开”的恢复记录，点击失败时无法区分是否真的关掉，这次用独立的状态字段修正了界面显示可能与系统实际不符的问题。
+- 与并行改动衔接：同期另一窗口新增了 `openSystemAdPrivacySettings`（vivo 直达“广告与隐私”页），应用内「广告与隐私」行与「打开系统设置」按钮已改用该入口；本次改动沿用同一入口，未回退或覆盖对方改动，1.0.74 已安装到 vivo V2502DA 的事实也不受本次影响。
+- 验证：`npx tsc --noEmit` 通过（exit 0）；`cd android; .\gradlew.bat :app:compileDebugKotlin --offline --console=plain` 成功（20 秒，仅既有弃用警告）；`git diff --check` 通过（仅既有换行符提示）。未打包、未安装、未做真机 UI 验收；开关与手机系统开关的实际联动需真机确认。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`src/native/ClearScreenNative.ts`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenStore.kt`、`ClearScreenUiCleanup.kt`、`ClearScreenNativeModule.kt`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-06 12:08:10 +08:00 — 修正系统广告页跳转落点，vivo 直达“广告与隐私”页，打包安装净屏 1.0.74
+
+- 用户反馈“系统广告与营销通知”页的跳转指示不对（截图标出「设置 → 安全 → 更多安全设置 → 广告与隐私」一行，并附上点击后实际到达的「隐私」页截图：使用无障碍功能、权限管理器、位置数据共享方面的更新、显示密码、锁屏通知、在锁屏状态下显示媒体）。
+- 真机核对 vivo V2502DA（Android 16 / OriginOS 16）：文案路径本身正确——设置首页确有“安全”入口，“安全”页底部确有“更多安全设置”，该页确有“广告与隐私”条目，点击后是标题为“广告与隐私”的页面，含个性化广告、个性化推荐、智能推荐服务三项开关。问题在跳转落点：原实现调用 `Settings.ACTION_PRIVACY_SETTINGS`，在 OriginOS 16 上解析到的正是截图那一页，不含个性化广告相关开关，文案与落点不一致。
+- 修正：新增原生入口 `ClearScreenSettingsNavigator.openSystemAdPrivacySettings()` 与 React 侧 `openSystemAdPrivacySettings`。vivo 优先用 `android.settings.SETTINGS.SUB_SETTINGS` + `extra=fragment:com.vivo.settings.securityandprivacy.adprivacy.AdAndPrivacyFragmentForOsTwo`（vivo 把该 action 路由到 `com.vivo.settings.VivoSubSettings`，Fragment 名需在系统 Fragment 注册表内才生效），其次回退 `com.android.settings.MORE_SECURITY_PRIVACY_SETTINGS`（该页仍列有“广告与隐私”入口），再回退通用隐私设置页；其它品牌沿用原通用入口。action、extra 与 Fragment 类名属互操作候选而非稳定 Android API，仅在 vivo V2502DA 实测通过，系统版本变化时需重新核对；候选按顺序回退，无法识别时不会落到空白页。应用内“广告与隐私”行与“打开系统设置”按钮改用新入口；文案路径经真机逐层核对无误，未改动。系统设置辅助操作的厂商开关流程不依赖跳转 Intent，仍在页面内按控件匹配操作，未改动。
+- 验证：`:app:compileDebugKotlin --offline --console=plain` 与 `:app:assembleRelease --offline --console=plain` 均成功；`npx tsc --noEmit` 通过。APK 元数据为包名 `com.clearscreen.prototype`、`1.0.74` / `80`、应用名“净屏”；`apksigner verify` 的 v2 签名通过，证书 SHA-256 仍为 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`；APK `android/app/build/outputs/apk/release/app-release.apk` SHA-256 `6D1F19994C3D353E180B170748ACF86CED5E286F0E462A9193D1A0E9E4636565`，大小 106,543,477 字节。通过 USB `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA 返回 `Success`，读回 1.0.74 / 80，首次安装时间保持 2026-09-20 15:33:13。端到端实测：应用内点「广告与隐私」后前台变为 `com.android.settings/com.vivo.settings.VivoSubSettings`，页面标题为“广告与隐私”，含个性化广告、个性化推荐、智能推荐服务三项开关，与文案一致。净屏无障碍服务状态本次未核验（vivo 覆盖安装后曾把该服务移出系统启用列表）；Xiaomi 22101317C 本次未连接。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenSettingsNavigator.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenNativeModule.kt`、`src/native/ClearScreenNative.ts`、`App.tsx`、`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录、正式 APK。
+
+### 2026-11-06 11:57:06 +08:00 — 启动加载提速：应用清单并行解析，首屏约 3.4 秒降到约 0.9 秒
+
+- 用户反馈刚打开净屏时启动页停留太久，并附启动页截图。复核源码并加临时计时埋点实测：启动页要等 `getSnapshot()` 返回才切页，其中应用清单占绝大部分——冷启动 4274ms（包查询 79ms、应用名称 1466ms、应用图标 2691ms、逐应用规则 9ms），热启动 2169ms；权限读取仅 18–48ms、处理记录仅 2–3ms；JavaScript 侧另有一次固定 500ms 延时。根因有两条：每个可启动应用的名称被取了两次（排序一次、填充一次），且 357 个应用的名称与图标资源串行读取、串行编码。
+- 修正：`ClearScreenNativeModule.installedApps()` 把每个应用的应用名称与启动图标改为在固定大小线程池（`min(6, max(2, CPU 核数))`）中并行解析，每个应用的名称只读取一次；图标仍在内存中编码为 data URI，不落盘、不新增任何本地持久化数据，排序、逐应用规则、隐私口径全部不变。模块 `invalidate()` 时关闭该线程池。`App.tsx` 去掉切页前那次固定 500ms 延时，快照返回即进入首页。
+- 验证：加临时计时埋点实测，改动后冷启动应用清单 730ms、整份快照 745ms，热启动应用清单 626ms、整份快照 641ms（`ActivityTaskManager` 显示 Activity +211ms，RN 启动后约 0.7 秒完成快照即切页，启动页停留由约 3.4–4.3 秒降到约 0.9 秒）；临时埋点已在正式包中移除。`npx tsc --noEmit` 通过；`:app:assembleRelease --offline --console=plain` 成功（32 秒）；APK `android/app/build/outputs/apk/净屏.apk` 与 `release/app-release.apk` 哈希一致，SHA-256 `34F2D469CF063F0EEA8A2945E0F28D07386ADA6F531C1AFF51EC5953ED386DED`，大小 106,542,237 字节；aapt 元数据为 `1.0.73` / `79`、包名 `com.clearscreen.prototype`、应用名“净屏”；`apksigner verify` 返回 0，正式证书 SHA-256 保持 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。通过 USB `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）返回 `Success`，读回 `1.0.73` / `79`，首次安装时间保持 `2026-09-20 15:33:13`。启动实测：约 1.2 秒已进入首页，首页最近记录与“自定义关闭窗口”的应用图标、名称渲染正常（357 个应用清单快照无异常）。未卸载、清除数据；Xiaomi 22101317C 本次未连接，未更新。
+- 版本说明：`1.0.72` / versionCode `78` 已被同期另一窗口占用并安装到 vivo，本次顺延为 `1.0.73` / `79`。
+- 遗留事项：vivo 上净屏无障碍服务当前不在系统启用列表（同期另一窗口 11:36 覆盖安装后即掉出，`settings put` 写入被系统回写覆盖），需用户在手机上手动重新开启；本次改动不涉及无障碍授权逻辑，但该状态下广告自动跳过不会执行。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenNativeModule.kt`、`App.tsx`、`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录、正式 APK。
+
+### 2026-11-06 11:56:25 +08:00 — 系统广告页收到两块加一个入口，Shizuku 能力移入“更多清理”页
+
+- 用户追问“这里有必要搞这么多设置吗”。核对源码后确认三处重复或低收益：自动辅助已覆盖广告与隐私、全局搜索与负一屏、应用商店同一批页面同一批开关，三条手动路径只是让用户自己点，只在自动匹配失败时有兜底价值；Shizuku 在 vivo 上只额外提供快应用服务开关和营销通知渠道候选列表，却要求用户安装第三方 App 并授予 shell 权限。按用户确认的方案（Shizuku 移出该页另设入口、手动路径收进“系统推荐开关”卡内作兜底）执行。
+- 主页面 `src/screens/SystemCleanupScreen.tsx` 现在只有两块加一个入口：①vivo/iQOO 的“系统推荐开关”卡（23 个厂商开关逐项辅助关闭），卡内新增“手动去设置”折叠行，展开后是广告与隐私、资讯与推荐、应用商店推广三条可跳转的手动路径；无自动辅助的品牌显示“系统广告设置”卡（当前设备、厂商路径、“打开系统设置”）加同样折叠的手动路径；②“按应用查看通知”仍默认折叠为一行标题；③底部“更多清理”入口卡进入独立页面。vivo 上原先的“当前设备”卡不再单独占位，其“广告与隐私”路径收进兜底行。
+- 新增 `src/screens/MoreCleanupScreen.tsx`，承载原 `SystemCleanupExtras.tsx` 的 Shizuku 内容：系统开关授权（状态未连接／等待授权／已连接，按钮“去连接”“重新连接”，启动与授权说明在连接弹窗）、营销通知扫描、快应用与系统广告组件检查。原 `SystemCleanupExtras.tsx` 的内容拆分后删除，厂商自动辅助逻辑与厂商路径改由 `SystemCleanupScreen.tsx` 承担，`cleanupPaths` 随之迁到该文件。`App.tsx` 新增 `moreCleanup` 页面分支、返回栈与 Android 返回键处理，主页面通过 `onOpenMoreCleanup` 进入。
+- 行为不变：授权流程、状态备份与回读、逐项人工确认、隐私口径、跳转目标、所用原生接口全部保持原样，未新增权限或后台行为；“帮助与反馈”的常见问题改为“更多清理里的 Shizuku 是什么？”并指向新入口路径。
+- 验证：`npx tsc --noEmit` 通过（exit 0）；`cd android; .\gradlew.bat :app:compileDebugKotlin --offline --console=plain` 成功（20 秒，仅 `MainApplication.kt` 既有弃用警告）；`git diff --check` 通过（仅既有换行符提示）。未打包、未安装、未做真机 UI 验收，新入口与折叠后的实际观感待用户验收。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`src/screens/MoreCleanupScreen.tsx`（新增）、`src/screens/SystemCleanupExtras.tsx`（删除）、`src/screens/SettingsDetailScreen.tsx`、`App.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-06 11:46:18 +08:00 — 系统广告与营销通知页收敛为四块，减少平铺卡片
+
+- 用户反馈该页“要搞的设置也太多了”，要求简化并减少非必要项。按用户确认的方案（折叠收敛、Shizuku 进阶能力保留但折进「更多（可选）」、按应用列表默认折叠），页面由 8 张平铺卡片收敛为四块，功能一项未删。
+- `src/screens/SystemCleanupScreen.tsx`：「系统广告设置」卡新增折叠行「更多设置位置」，展开后显示「资讯与推荐」「应用商店推广」两条手动路径，整行可直接跳转对应系统页面，取消原先两个独立分区；「按应用查看通知」默认折叠为一行标题（副标题显示可管理应用数），展开后才显示操作提醒、搜索框和结果列表；新增 `cleanupPaths` 取用品牌路径。
+- `src/screens/SystemCleanupExtras.tsx`：删除独立的 Shizuku 卡和「营销通知」「快应用与系统广告组件」两个分区，合并为「更多（可选）」一张卡——折叠时只显示「系统开关授权（Shizuku）」和连接状态（未连接／等待授权／已连接），展开后依次是「去连接」按钮、营销通知扫描、快应用与系统广告组件检查。组件不再接收 `manufacturer`，改由 `SystemCleanupScreen` 统一取用品牌路径；随之移除未再使用的 `systemAdPath` 导出与 `cardTitle` 样式。
+- 折叠只改变展示层级：授权流程、状态备份与回读、逐项人工确认、隐私口径和跳转目标全部保持原样，未新增任何权限或后台行为。界面文案仍遵守 Wiki 的界面文案约束。
+- 验证：`npx tsc --noEmit` 通过（exit 0）；`cd android; .\gradlew.bat :app:compileDebugKotlin --offline --console=plain` 成功（23 秒，仅 `MainApplication.kt` 既有弃用警告）；`git diff --check` 通过（仅既有换行符提示）。未打包、未安装、未做真机 UI 验收，折叠后的实际观感待用户验收。同期另一窗口把应用列表改为搜索后显示，本次改动保留了该搜索逻辑，两处改动合并在同一工作区。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`src/screens/SystemCleanupExtras.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-06 11:41:46 +08:00 — 按应用查看通知改为搜索后才显示应用列表
+
+- 用户在真机截图上标出「系统广告与营销通知」页的「按应用查看通知」区块：该分区把全部可启动应用（真机约 357 个）按字母序无差别罗列，与"系统广告与营销通知"这一主题无关的条目占绝大多数，同时把「营销通知」渠道扫描结果和「快应用与系统广告组件」检查结果压在长列表下方。复核源码确认该列表是唯一不依赖 Shizuku 就能跳到单个应用系统通知设置的入口（同页「营销通知」渠道扫描须先连 Shizuku 才能列出候选），因此不整块删除，经用户确认改为保留能力、默认不罗列、输入搜索后才显示结果。
+- 改动：`src/screens/SystemCleanupScreen.tsx` 中搜索词先 `trim` 再转小写（`keyword`），列表仅在有搜索词时渲染；无搜索词时显示空状态"输入应用名称查找"，有搜索词但无匹配时显示"未找到应用"；匹配结果最多显示 50 条，超过时追加"共 N 个应用，已显示前 50 个"。跳转系统通知设置的调用链（`ClearScreenNative.openAppNotificationSettings` → `ClearScreenSettingsNavigator.openAppNotificationSettings`）、"只列出可从桌面打开的应用"的筛选条件和搜索框交互均未改变。卡片说明删去"仅显示可从桌面打开的应用"这一行为说明，按 Wiki 界面文案约束只保留"关闭前请检查用途，保留订单、物流、安全和验证码提醒。"这条操作提醒。
+- 并行改动衔接：本次修改期间另一窗口正在改写同一页面（新增「查看应用」折叠入口与「更多设置位置」、把资讯与商店路径上移、把 Shizuku 与营销通知等收进「更多（可选）」）。对方在 11:43 读到的文件已含本次搜索逻辑并在其改写中予以保留，最终文件为两处改动合并后的状态，本次搜索规则未被覆盖；未回退或覆盖对方的任何改动。
+- 验证：`npx tsc --noEmit` 通过（exit 0）；`git diff --check` 通过（仅既有换行符提示）。未打包、未安装、未做真机 UI 验收，搜索与列表的实际观感待用户验收。`targets/harmony-bare-pilot` 未引用该页面，共享 UI 复用边界不变。工作区同时有其他任务的改动，本次只改该页面的列表渲染与说明文案，未清理或覆盖其他改动。
+- 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-06 11:36:25 +08:00 — 打包并覆盖安装净屏 1.0.72
+
+- 上一窗口 11:21 打包的 1.0.71 不含本次"系统推荐开关"文案改动（用户的改文案指令在 11:21:07 发出，该 APK 在 11:21:10 写出），因此版本递增至 `1.0.72` / versionCode `78`；应用名"净屏"、包名 `com.clearscreen.prototype`、minSdk 24 / targetSdk 36 与正式签名保持不变。工作区同时含其他窗口的底部导航安全区与 Shizuku 卡片文案改动，本次一并打入正式包。
+- 验证：`:app:assembleRelease --offline --console=plain` 成功（58 秒；Metro 因缓存为空重建 JS bundle，694 模块）；APK `android/app/build/outputs/apk/净屏.apk` 与 `release/app-release.apk` 哈希一致，SHA-256 `71BE2B0676941531B26FED2C9A4423E393405DDD7CDEFD356BF0260231C3D4CB`，大小 106,540,337 字节；aapt 元数据为 `1.0.72` / `78`、包名 `com.clearscreen.prototype`、应用名"净屏"；`apksigner verify` 返回 0，正式证书 SHA-256 保持 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。
+- 安装：前两次 `adb install -r --no-streaming` 返回 `INSTALL_FAILED_ABORTED: User rejected permissions`（vivo 安装确认弹窗未确认即超时自动拒绝）；监测 `dumpsys window` 确认 `com.android.packageinstaller.PackageInterceptActivity` 弹窗出现，用户在手机端确认后再次发起返回 `Success`。设备读回 `1.0.72` / `78`，`lastUpdateTime` 为 2026-11-06 11:33:25，首次安装时间保持 `2026-09-20 15:33:13`；未卸载、未清除数据。Xiaomi 22101317C 本次未连接，未更新。
+- 无障碍授权：覆盖安装后 vivo 将净屏无障碍服务移出系统启用列表（`enabled_accessibility_services` 仅剩 `com.linkpilot.android/.RemoteAccessibilityService`）。用 `settings put secure enabled_accessibility_services` 写入并切换 `accessibility_enabled` 重载管理器，均被系统回写覆盖；直接 `am start -a android.settings.ACCESSIBILITY_DETAILS_SETTINGS` 被 `OPEN_ACCESSIBILITY_DETAILS_SETTINGS` 权限拒绝。已把 `android.settings.ACCESSIBILITY_SETTINGS` 列表页推送到设备，需用户在手机上手动开启净屏无障碍服务；截至本记录该服务仍未启用。期间切换 `accessibility_enabled` 导致联控远程操作短暂解绑，随后已恢复重新绑定。
+- 真机 UI 验收：启动应用进入“系统广告与营销通知”页，展开“查看开关”列表，确认分区标题显示“系统推荐开关”、说明显示“净屏可以帮你关掉手机自带系统里的推荐开关。不同手机版本里这些开关的位置可能略有不同。”、列表项右侧显示“关掉”；点击“个性化广告”弹窗显示“关掉「个性化广告」？”，正文为“请在手机上打开设置 → 安全 → 更多安全设置 → 广告与隐私。净屏会自动把它关掉；没找到这个开关就不会改动。”。按 UTF-16 检索打包用 Hermes bundle：新文案“系统推荐开关”“查看开关”存在，旧文案“辅助关闭”“查看项目”“收起项目”已不存在；APK 的 `classes.dex` 中原生提示“这台手机没有这个开关”“没能确认是否已关成功”“已关掉并确认”“这个开关已经是现在这样了”均存在。验收用弹窗以“取消”关闭，未触发任何辅助操作，系统设置未被改动。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`ACCESSIBILITY_PERSISTENCE_REPORT.md`、`README.md`、`docs/wiki/README.md`、本修改记录、正式 APK。
+
+### 2026-11-06 11:25:55 +08:00 — 底部导航避让系统手势导航区
+
+- 用户反馈一级底部导航“这一栏有点太顶下面的边了”，并附真机截图（应用页，底部“首页/应用/设置”文字压在系统手势条上）。复核源码确认：底部导航用 `position:absolute; bottom:0` 固定在屏幕最底部，没有预留系统导航栏（手势区）高度；该机（vivo V2502DA，Android 16 / SDK 36）导航栏 inset 为 63px（约 18dp），系统手势条直接画在导航文字下方，文字与手势条重叠。
+- 修正：`ScreenInsetsContext` 增加 `bottom` 安全区值，由 Android/iOS 入口通过 `react-native-safe-area-context` 提供（共享页面仍不直接导入原生安全区域库，HarmonyOS 隔离试验的纯 UI 导入边界不变）；底部导航高度由固定 70dp 改为 70dp + 底部 inset，图标和文字整体上移，导航栏白色底板仍延伸到屏幕底部，背景图延伸到屏幕底部的规则不变，导航图标、字号和卡片内部尺寸不变。首页、应用列表、设置三个一级页面的滚动区按新导航栏高度同步预留空间，末条内容不会被导航栏遮挡。
+- 验证：`npx tsc --noEmit` 通过（主工程）；`targets/harmony-bare-pilot` 的 `npx tsc --noEmit` 通过，共享 UI 复用边界未被破坏；`:app:assembleRelease --offline --console=plain` 成功（1 分 15 秒）；APK `android/app/build/outputs/apk/净屏.apk` 与 `release/app-release.apk` 哈希一致，SHA-256 `2D6F099B86A4B911AD674026C504E98AB619D327D96751BD3DDAAEA07CC55E0E`，大小 106,539,881 字节；aapt 元数据为 `1.0.71` / `77`、包名 `com.clearscreen.prototype`、应用名“净屏”；apksigner 验签通过，正式证书 SHA-256 保持 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。通过 USB `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）返回 `Success`，读回 `1.0.71` / `77`，首次安装时间保持 `2026-09-20 15:33:13`，净屏无障碍服务仍在启用列表。启动应用实测：首页和应用页的导航图标与文字整体上移，与系统手势条之间留出明显空隙，手势条落在导航栏底部预留区内；应用列表滚动正常，未见内容被导航栏遮挡（未逐项滚到 357 个应用的末行核对）。未卸载、清除数据；Xiaomi 22101317C 本次未连接，未更新。工作区同时有其他任务的改动，本次只改底部导航安全区相关文件，未清理或覆盖其他改动。
+- 涉及文件：`src/components/ScreenInsets.ts`、`src/components/BottomNav.tsx`、`src/screens/AppsScreen.tsx`、`src/screens/HomeScreen.tsx`、`src/screens/SettingsScreen.tsx`、`App.tsx`、`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录、正式 APK。
+
+### 2026-11-06 11:24:46 +08:00 — Shizuku 卡片改为普通用户可读的表述
+
+- 用户反馈“系统广告与营销通知”页的 Shizuku 卡片只显示技术名词，看不出这是什么、能干什么。按用户确认的改法，只改标题、状态和按钮，完整说明放进弹窗和“帮助与反馈”的常见问题，设置页不新增说明小字，继续遵守 Wiki 的界面文案约束。
+- 卡片标题由“Shizuku”改为“系统开关授权（Shizuku）”；状态由“未启动 / 已启动，等待授权 / 已连接并授权”改为“未连接 / 等待授权 / 已连接”；按钮由“连接 Shizuku”改为“去连接”，已连接时仍为“重新连接”。状态判定、授权流程与可执行能力不变。
+- 弹窗改为普通用户用语：未启动时提示“Shizuku 是免 Root 的小工具，启动并授权后净屏才能获得系统开关权限。请先安装并启动：Android 11 及以上可在手机上用无线调试启动，或用数据线连接电脑启动。”并保留官方下载按钮；未获得授权时提示“请在 Shizuku 中允许净屏使用。”；缺少授权时提示“请先连接 Shizuku，并在 Shizuku 中允许净屏使用。”；扫描渠道确认弹窗改为“净屏会临时读取系统里的通知设置，找出可能是广告推送的通知渠道；读取过程中可能读到通知内容，但不会展示、保存或上传。请逐项核对候选渠道。”，隐私口径不变。
+- “帮助与反馈”的 Android 常见问题新增一条“系统广告与营销通知里的 Shizuku 是什么？”，说明它是免 Root 的小工具，通过 USB 调试或无线调试启动并授权后可直接关闭快应用服务等系统开关并列出疑似广告推送的通知渠道，不连接不影响广告自动跳过，手机重启或 Shizuku 停止后需要重新连接。
+- 验证：`npx tsc --noEmit` 通过；`cd android; .\gradlew.bat :app:compileDebugKotlin --offline --console=plain` 成功（15 秒）；`git diff --check` 通过（仅既有换行符提示）。未启动应用、未做 UI 验收，未打包或安装；卡片与弹窗的实际观感待用户验收。工作区同时有其他任务的改动，本次只改上述界面文案与说明文档，未清理或覆盖其他改动。
+- 涉及文件：`src/screens/SystemCleanupExtras.tsx`、`src/screens/SettingsDetailScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-06 11:23:36 +08:00 — 系统推荐开关区块改为普通用户可读的表述
+
+- 用户反馈设置页"系统设置辅助操作"区块偏术语、看不懂。功能与交互不变，仅改写用户可见文案：分区标题改为"系统推荐开关"；卡片说明改为"净屏可以帮你关掉手机自带系统里的推荐开关。不同手机版本里这些开关的位置可能略有不同。"；折叠按钮由"查看项目 / 收起项目"改为"查看开关 / 收起"；列表右侧由"辅助关闭"改为"关掉"。
+- 点击某项后的确认弹窗改为"关掉「xxx」？"，并直接给出手机上的进入路径：设置 → 安全 → 更多安全设置 → 广告与隐私；设置 → 系统管理与升级 → 全局搜索；桌面右滑进入的负一屏设置；vivo 浏览器 → 设置；应用商店 → 我的 → 设置。子页面名不再与上级路径重复（原先"在系统设置中进入广告与隐私，再进入"广告与隐私""），提示改为"净屏会自动把它关掉；没找到这个开关就不会改动"。
+- 原生侧用户可见提示同步改为口语：无法启动辅助操作→无法启动这个操作；当前设备没有此辅助规则→这台手机没有这个开关；上一项辅助操作尚未结束→上一个操作还没结束；没有此项目的原状态记录→没有之前保存的记录，不能恢复；未找到匹配的开关，未作修改→没找到这个开关，没有改动；页面已变化，辅助操作已停止→页面已经变了，操作已停止；服务已停止／操作超时／未能确认更改结果→没能确认是否已关成功，请到设置里查看；已关闭并确认→已关掉并确认；当前已是目标状态→这个开关已经是现在这样了；系统未接受操作，恢复记录已保留→系统没有接受这次操作，设置没有被改动；无法安全确认开关，操作已停止→没能确认这个开关，操作已停止。
+- 隐私政策正文、Android 无障碍服务说明（`android/app/src/main/res/values/strings.xml` 与 `src/screens/PermissionsScreen.tsx`）未改动：这些是与商店申报和线上公开政策页对齐的法定告知，改写需同步政策版本号与公开页，不属于本次界面文案范围。
+- 同文件内 Shizuku 卡片文案（"系统开关授权（Shizuku）""去连接"等）由其他窗口同时改动，本次未覆盖、未回退。
+- 验证：`npx tsc --noEmit` 通过（exit 0）；`:app:compileDebugKotlin --offline --console=plain` 成功，仅 `MainApplication.kt` 既有弃用警告。未打包、未安装、未做真机 UI 验收，新文案需真机确认显示效果。
+- 涉及文件：`src/screens/SystemCleanupExtras.tsx`、`src/native/ClearScreenNative.ts`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenUiCleanup.kt`、`docs/wiki/README.md`、本修改记录。
+
+## 2026-11-04
+
+### 2026-11-04 12:00:13 +08:00 — 修正点选歧义误杀与整页读取失败，打包安装净屏 1.0.70
+
+- 1.0.69 真机验收未通过（用户截图 11:39 / 11:40，彩云天气 OPPEIN 广告）：点“×”仍出现“附近有多个控件，请点准目标”，另一处“×”出现“无法读取当前页面”。dex 复核确认 1.0.69 已含 `tapPrefers` 修正（运行的确实是新代码）；当时页面节点树未能留存（日志已轮转、dump 抓到无关窗口），按代码路径定位两条故障链并修复。
+- 歧义误杀：重叠的关闭/无标签图标簇（广告 WebView 与原生树的重复“×”节点）在触点更偏另一节点中心时被判平局。`tapPrefers` 改为图标簇直接认排序首位；关闭语义目标命中自身中心半区即胜出；图标目标深命中（中心度 ≥0.75 且领先 0.2）可胜过仅擦边的带标签兄弟。尺寸与命中精度相当、角色不同的真平局仍拒绝。
+- 整页读取失败：点选/确认读取上限 1500 节点 / 600 子级 / 深度 18 不足以覆盖广告 WebView 深层 HTML 节点树，截断即整帧丢弃（“无法读取当前页面”）；聚焦输入框也会整页拒绝。选取的点选、确认与关闭核验读取预算放宽至 3000 节点 / 1000 子级 / 深度 30、超时 4.5 秒；选取期间聚焦普通输入框不再整页拒绝（密码框仍拦截，输入节点仍不参与候选与学习指纹）；已捕获窗口按 id 解析，不再因更高层级窗口拒绝读取（确认点击仍校验遮挡与安全）。选取时新增 `frame-truncated`、`selection-rejected` 固定状态日志，不记录页面内容。
+- 验证：`:app:compileDebugKotlin` 与 `:app:assembleRelease --offline --console=plain` 均成功；APK `净屏.apk` 与 `release/app-release.apk` 哈希一致，SHA-256 `512f5fdc5728245dc15dfd268398e9be235b37634c010a2041e84bd03c4cc004`，大小 106,539,469 字节；aapt 元数据为 `1.0.70` / `76`、包名 `com.clearscreen.prototype`、应用名“净屏”；apksigner v2 验签通过，正式证书 SHA-256 保持 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。通过 USB `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）与 Xiaomi 22101317C（`2f8898c80822`），均返回 `Success`；两机读回 `1.0.70` / `76`，首次安装时间分别保持 `2026-09-20 15:33:13` 与 `2026-10-09 09:22:57`，净屏无障碍服务仍启用。未启动应用、未做功能/UI 验收，该广告点选仍待用户验收；若仍失败，新增固定状态日志可区分截断/拒绝原因。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAdLearning.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAccessibilityService.kt`、`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录、正式 APK。
+
+### 2026-11-04 11:11:59 +08:00 — 打包并双机覆盖安装净屏 1.0.69
+
+- 将 11:03 的学习选取歧义按点选位置判定修正打成 Android 正式 Release，递增至 `1.0.69` / versionCode `75`；应用名“净屏”、包名 `com.clearscreen.prototype` 和正式签名保持不变。安装包 `android/app/build/outputs/apk/净屏.apk`，大小 106,539,465 字节，SHA-256 `5510323e9be8e66a735923a4dcbb687cef0eed24ef5b1bb1b73b6659e5e83f5f`；Gradle 原始 APK 与命名 APK 哈希一致。
+- 验证：`:app:assembleRelease --offline --console=plain` 成功；aapt 元数据为包名 `com.clearscreen.prototype`、版本 `1.0.69` / `75`、应用名“净屏”；apksigner v2 验签通过，正式证书 SHA-256 保持 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。命名包中文文件名在 Git Bash 下传给 aapt/adb 会乱码，元数据核验与安装均使用字节一致的 `release/app-release.apk`。通过 USB `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）和 Xiaomi 22101317C（`2f8898c80822`），安装命令均返回 `Success`；两机读回 `1.0.69` / `75`，首次安装时间分别保持 `2026-09-20 15:33:13` 与 `2026-10-09 09:22:57`，净屏无障碍服务仍在启用列表。未卸载、清除数据或启动应用；未进行控件选择功能/UI验收，点准小“×”场景仍待用户验收。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录、正式 APK。
+
+### 2026-11-04 11:03:00 +08:00 — 点准小“×”仍报多控件，歧义改为按点选位置判定
+
+- 用户反馈 1.0.68 上精确点到广告小“×”仍提示“附近有多个控件，请点准目标”。复核源码确认：点选命中多个互不嵌套的紧凑可点控件（如“×”与其后重叠的紧凑广告图、跨 WebView/原生树的重复“×”节点）时一律判为歧义，未按点选位置区分。
+- `ClearScreenAdLearning.kt` 细化歧义判定，重叠候选仅在点选位置无法区分时拒绝：同位重复节点、关闭语义且不小于对手或点得更准、面积不足对手一半且命中中心半区、命中更深（面积不更大且中心度领先 0.2 以上）、双方同属关闭/无标签图标簇、容差路径下距点击明显更近（8dp 以上）的候选按既有排序（关闭语义优先、更小优先、更深优先）选中；尺寸与命中精度相当且角色不同的重叠候选仍拒绝并保留原提示。排序、危险控件拦截、确认点击与关闭验证、规则唯一匹配、不保存坐标等约定不变。
+- 验证：`:app:compileDebugKotlin --offline --console=plain` 成功（BUILD SUCCESSFUL，仅 `MainApplication.kt` 既有弃用警告）；`git diff --check` 通过；未跟踪学习源码行尾空白与冲突标记检查通过（LF 行尾）。未运行自动化或真机功能/UI测试；按仓库约定未打包、未安装，1.0.68 不含本次修改，具体广告待用户更新后验收。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAdLearning.kt`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+## 2026-11-03
+
+### 2026-11-03 19:21:25 +08:00 — 打包并双机覆盖安装净屏 1.0.68
+
+- 将小型关闭控件选取容差和持续状态反馈修正打成 Android 正式 Release，递增至 `1.0.68` / versionCode `74`；应用名“净屏”、包名 `com.clearscreen.prototype` 和正式签名保持不变。安装包 `android/app/build/outputs/apk/净屏.apk`，大小 106,539,469 字节，SHA-256 `3E8B5856CB60C8A29AB34AA92C89FE766C3343F86008ECF4CDBF1C8AA9F8789E`；Gradle 原始 APK 与命名 APK 哈希一致。
+- 验证：`:app:assembleRelease --offline --console=plain` 成功；aapt 元数据为包名 `com.clearscreen.prototype`、版本 `1.0.68` / `74`、应用名“净屏”；apksigner v2 验签通过，正式证书 SHA-256 保持 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。通过 USB `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）和 Xiaomi 22101317C（`2f8898c80822`），安装命令均返回 `Success`。小米读回 `1.0.68` / `74`，首次安装时间仍为 `2026-10-09 09:22:57`，净屏无障碍服务仍启用；vivo 安装后从 ADB 断开，未能读回版本、首次安装时间或服务状态（安装前为 `1.0.67`，首次安装时间 `2026-09-20 15:33:13`，服务启用）。未卸载、清除数据或启动应用；未进行控件选择功能/UI验收，实际小“×”仍待用户验收。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录、正式 APK；百度同步盘 ClearScreen 项目基本信息、验证说明和广告识别复用说明同步更新。
+
+### 2026-11-03 18:54:10 +08:00 — 改进小型关闭控件选取反馈
+
+- 用户反馈小型“×”点选后没有提示和选中框，取消按钮仍可点击；该广告暂时无法重现，手机现有日志没有保留此次点选记录，不能确认其控件是否向无障碍服务暴露或断定全部原因。
+- `ClearScreenAdLearning.kt` 在精确命中为空时，对尺寸不超过 40dp 的真实可点击控件按有限范围扩大点选容差；只接受关闭语义或无标签的小型控件，多处不相关候选、危险控件、身份不唯一或当前窗口变化时拒绝。显示的边框、保存的规则和确认动作仍使用实际控件，规则不保存坐标。
+- 点选时持续显示读取、结果或失败状态；读取中再次点选不会作废正在等待的结果，取消仍可操作。日志只增加固定拒绝状态，不记录页面内容。
+- 验证：`:app:compileDebugKotlin --offline --console=plain` 成功；`git diff --check` 以及未跟踪学习源码的空白和冲突标记检查通过（Git 提示部分既有文件的换行格式）。未运行自动化或手工功能/UI测试，未打包或安装；现有1.0.67 APK及手机版本不含本次修改，具体广告仍需用户在更新后验收。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAdLearning.kt`、`README.md`、`docs/wiki/README.md`、本修改记录；百度同步盘项目基本信息、验证说明和广告识别复用说明同步更新。
+
+### 2026-11-03 18:18:12 +08:00 — 构建并双机安装净屏 1.0.67
+
+- 将 17:39 的学习控件选择入口及输入框快照修正打包为 Android 正式 Release，版本递增至 `1.0.67` / versionCode `73`；应用名“净屏”、包名 `com.clearscreen.prototype` 与正式签名保持不变。安装包 `android/app/build/outputs/apk/净屏.apk`，大小 106,539,469 字节，SHA-256 `C4F0924EEF0DBD31F8DE391B8032C92514907FD16525E29C1637D994655F5625`；Gradle 原始 APK 与命名 APK 哈希一致。
+- 验证：`:app:assembleRelease --offline --console=plain` 成功；aapt 元数据为包名 `com.clearscreen.prototype`、版本 `1.0.67` / `73`；apksigner v2 验签通过，证书 SHA-256 保持 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。通过 USB `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）和 Xiaomi 22101317C（`2f8898c80822`），均返回 `Success`。两台设备读回 `1.0.67` / `73`，首次安装时间分别保持 `2026-09-20 15:33:13` 与 `2026-10-09 09:22:57`，净屏无障碍服务仍在启用列表；未卸载、清除数据或启动应用，未运行功能/UI验收。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录、正式 APK；百度同步盘 ClearScreen 项目基本信息、验证说明和广告识别复用说明同步更新。
+
+### 2026-11-03 17:39:47 +08:00 — 修正学习控件选择入口等待
+
+- 用户确认 vivo 升级至1.0.66后点击“选择控件”仍无响应；现有日志没有记录这次按钮回调，不能确认设备上的全部成因。源码发现入口与后台扫描共用读取占位，且页面出现任意可编辑节点就拒绝整页。
+- 后台快照/手动事件与主动选择使用各自一个有界读取通道；选择时立即显示“读取中”，读取经安全校验的窗口身份后再进入选取层，取消和超时会作废迟到结果。点选和确认仍读取目标页面控件树，核验当前窗口、唯一目标和遮挡。增加不含页面信息的按钮点击和拒绝状态日志。
+- 未聚焦普通输入框不再导致整页学习或规则重放被拒绝；学习快照不读取输入框及其子节点的内容，密码框、聚焦输入、受保护界面与敏感目标仍阻止操作。
+- 验证：`:app:compileDebugKotlin --offline --console=plain`、`git diff --check` 和未跟踪学习源码的空白/冲突标记检查通过；未运行自动化或手工功能/UI测试，未打包或安装。现有1.0.66 APK与手机安装版本不含本次修正，实际触摸和识别效果待用户后续验收。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAdLearning.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAccessibilityService.kt`、`README.md`、`docs/wiki/README.md`、本修改记录；百度同步盘项目基本信息、验证说明和广告识别复用说明同步更新。
+
+### 2026-11-03 17:15:18 +08:00 — 构建并双机安装净屏 1.0.66
+
+- 将学习控件选择的后台读取及浮层目标窗口焦点修正打包为 Android 正式 Release，版本递增至 `1.0.66` / versionCode `72`；应用名“净屏”、包名 `com.clearscreen.prototype` 与正式签名保持不变。安装包 `android/app/build/outputs/apk/净屏.apk`，大小 106,539,465 字节，SHA-256 `897D6560D6193CFDF2C7463C8BAEE53A18BD098C9D95ECCA96391BD83D9BA8E0`；Gradle 原始 APK 与命名 APK 哈希一致。
+- 验证：`:app:assembleRelease --offline --console=plain` 成功；aapt 元数据为包名 `com.clearscreen.prototype`、版本 `1.0.66` / `72`；apksigner v2 验签通过，证书 SHA-256 保持 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。通过 `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）和 Xiaomi 22101317C（`2f8898c80822`），均返回 `Success`。两台设备读回 `1.0.66` / `72`，首次安装时间分别保持 `2026-09-20 15:33:13` 与 `2026-10-09 09:22:57`，净屏无障碍服务仍在启用列表；未卸载、清除数据或启动应用，未运行功能/UI验收。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录、正式 APK；百度同步盘 ClearScreen 项目基本信息与验证说明同步更新。
+
+### 2026-11-03 16:38:11 +08:00 — 修正学习选取时界面线程阻塞及浮层焦点冲突
+
+- 针对用户反馈“屏幕任何地方及取消均不能点击”，将学习快照、进入选择、手动点击事件源、点选和关闭确认的节点查询移出界面线程，复用单个后台任务占位；单次等待2.5秒超时，原始系统调用未返回时不堆积新线程。等待入口读取期间保留工具栏；取消/退出/删除/会话变化使旧任务失效，迟到结果丢弃，节点和事件副本回收。节点读取期间不持有隐私操作锁，点击仍检查授权、目标、窗口和当前会话；未改为坐标操作。补充只含固定状态的学习输入/读取日志。
+- 修正已核实本应用无障碍选取浮层后，`learningRoot` 又通过 `isEligibleForegroundPackage` 要求下方目标持有前台焦点的矛盾。只对核实过的本次目标窗口使用浮层读取路径；普通扫描仍要求前台应用，保护应用、敏感界面、目标身份及遮挡检查保留。此为源码可确认的问题，尚未真机复现并证明覆盖用户截图的全部原因。
+- 验证：最终 `:app:compileDebugKotlin --offline --console=plain` 成功（18秒）；`git diff --check` 及未跟踪学习源码的空白/冲突标记静态检查通过。只读查询时vivo仍为1.0.64 / 70（最后更新时间13:53:11），随后USB断开，仅小米在线。未运行自动化或手工功能/UI测试，未打包安装；现有1.0.65 APK不包含本次修正。
+- 涉及文件：`ClearScreenAdLearning.kt`、`ClearScreenAccessibilityService.kt`、`README.md`、`docs/wiki/README.md`、本修改记录；百度同步盘项目基本信息、广告识别算法与复用说明同步补充未发布状态。
+
+### 2026-11-03 15:06:22 +08:00 — 构建净屏 1.0.65 并尝试更新 vivo
+
+- 按用户要求将当前源码正式打包，版本递增至 `1.0.65` / versionCode `71`；包名 `com.clearscreen.prototype`、应用名“净屏”及 Release 签名保持不变。APK 为 `android/app/build/outputs/apk/净屏.apk`，大小 106,539,469 字节，SHA-256 `83A8F208B6479C0D36C2B3B4B7CA93419CAE2C74D2A24DCAA52B2014AFD9D84D`；Gradle 原始 APK 与命名 APK 哈希一致。
+- 验证：`:app:assembleRelease --offline --console=plain` 成功；APK 元数据为 `com.clearscreen.prototype`、`1.0.65` / `71`，`apksigner verify` 的 v2 签名通过，证书 SHA-256 仍为 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。通过 USB 推送至 vivo V2502DA 后，`adb install -r --no-streaming` 返回 `INSTALL_FAILED_ABORTED: User rejected permissions`，安装未完成；设备仍为 `1.0.64` / `70`，首次安装时间保持 `2026-09-20 15:33:13`，净屏无障碍服务仍启用。Xiaomi 22101317C 未更新。未卸载、清除数据、打开应用或进行功能/UI验收；待手机允许安装后重试。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录、正式 APK；百度同步盘 ClearScreen 项目基本信息与验证说明同步更新。
+
+### 2026-11-03 14:31:08 +08:00 — 修正控件选取触摸与取消
+
+- 全屏选取层改为按 Android 视图层级分发按钮触摸，页面区域由根视图消费手势；选取层“取消”返回学习工具栏，工具栏“取消”仍结束学习。所点控件树在单个后台读取任务中解析，取消不会等待读取；会话变化或重新点选后丢弃迟到结果，确认前仍重新检查目标、窗口与遮挡。停止选中后的周期性全树重读，减少界面线程阻塞；无法读取或无法区分真实控件时给出提示，不进行坐标点击。
+- 验证：`:app:compileDebugKotlin --offline --console=plain` 最终成功，`git diff --check` 通过。设备只读状态查询时截图中的选取浮层已不存在，未复现触摸分发；未运行自动化或真机功能/UI测试，未打包或安装，实际效果待用户验收。
+- 涉及文件：`ClearScreenAdLearning.kt`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-03 13:53:16 +08:00 — 完成 vivo 安装净屏 1.0.64
+
+- vivo V2502DA USB 重新连接后，通过 `adb install -r --no-streaming` 完成升级。设备读回 `com.clearscreen.prototype` 版本 `1.0.64` / versionCode `70`，首次安装时间保持 `2026-09-20 15:33:13`，无障碍启用列表仍包含净屏服务。至此两台手机均安装 1.0.64；未卸载、清除数据或启动应用，未进行功能/UI验收。
+- 涉及文件：`README.md`、`docs/wiki/README.md`、本修改记录；百度同步盘项目基本信息与验证说明同步更新。
+
+### 2026-11-03 13:19:09 +08:00 — 构建并升级安装净屏 1.0.64
+
+- 将控件选择无响应修正打包为 Android 正式 Release，版本 `1.0.64` / versionCode `70`，保持包名 `com.clearscreen.prototype` 和原 Release 证书。安装包 `android/app/build/outputs/apk/净屏.apk`，大小 106,539,469 字节，SHA-256 `1D54E1A27A2F2ABC431D7D0F4659583344AEF31CD0ED9379715EE1D0B66B257E`；Gradle 原始 APK 与净屏.apk 哈希一致。
+- 验证：`:app:assembleRelease --offline --console=plain` 成功；APK 元数据为包名 `com.clearscreen.prototype`、版本 `1.0.64` / `70`；`apksigner verify` 的 v2 签名通过，正式证书 SHA-256 为 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。已通过 `adb install -r --no-streaming` 升级安装到 Xiaomi 22101317C（`2f8898c80822`），设备读回 `1.0.64` / `70`，首次安装时间保持 `2026-10-09 09:22:57`，无障碍服务仍启用；未卸载、清除数据或启动应用。vivo V2502DA（`10AG4M2KGF00527`）在安装时已从 ADB 断开，未能升级，待重新连接后安装。未进行功能/UI验收。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录；百度同步盘项目基本信息与验证说明同步更新。
+
+### 2026-11-03 13:13:45 +08:00 — 学习点击未确认关闭时返回控件选择
+
+- 确认选取并执行控件后，若按钮仍出现或未能确认关闭，等待节点核对结束后自动重新打开控件选择层，方便重选；未确认关闭时不保存规则。选取层“取消”清除当前框选并保留选择状态。
+- 验证：`:app:compileDebugKotlin --offline --console=plain` 通过，`git diff --check -- README.md docs/wiki/README.md docs/wiki/CHANGELOG.md` 通过；未运行自动化或真机功能/UI测试，未打包/安装。
+- 涉及文件：`ClearScreenAdLearning.kt`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-03 13:12:12 +08:00 — 修正控件选择入口无响应
+
+- 显式学习时不再因当前应用处于排除/白名单状态而拒绝读取；该状态仍阻止自动重放，重新启用应用后才会执行学习规则。复杂界面的选取和确认提高控件树读取上限至最多1500个节点、单父节点最多600个子节点；后台学习快照轮询从180毫秒调为400毫秒，选取状态下重读调为700毫秒，减少控件树扫描对工具栏触摸响应的占用。读取失败时提示当前界面暂不可读取。
+- 验证：`:app:compileDebugKotlin --offline --console=plain`成功，`git diff --check`通过；未运行自动化或真机功能/UI测试，未打包或安装。设备日志没有提供可用于确认按钮点击回调的记录，设备端行为仍待真机复现确认。
+- 涉及文件：`ClearScreenAdLearning.kt`、`ClearScreenAccessibilityService.kt`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-03 13:11:41 +08:00 — 修正控件选取取消后的状态恢复
+
+- 选取层“取消”改为在当前全屏选取层中清除框选和确认按钮，继续等待点选；不再移除并重建浮层，避免焦点恢复延迟导致闪回工具栏。
+- 验证：`:app:compileDebugKotlin --offline --console=plain` 通过，`git diff --check -- docs/wiki/CHANGELOG.md` 通过；未运行自动化或真机功能/UI测试，未打包/安装。
+- 涉及文件：`ClearScreenAdLearning.kt`、本修改记录。
+
+### 2026-11-03 13:10:37 +08:00 — 修正启动页背景底部留白
+
+- 共享背景图改为绝对边界填充，避免内容区顶部安全区留白缩短背景图片高度；启动页背景延伸到底部，原有内容布局不变。README 与界面 Wiki 已同步说明。
+- 验证：`npx tsc --noEmit` 与 `git diff --check` 通过；未运行应用或执行真机 UI 验收，未构建、打包或安装。
+- 涉及文件：`src/components/UI.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-03 13:06:08 +08:00 — 学习关闭入口直接启动
+
+- 首页点击“学习关闭”时立即调用学习启动，不再展示介绍弹窗或等待用户二次点击“开始学习”；学习状态已开启时继续使用该入口结束学习。无障碍服务未启用或总开关关闭时，仍走原有权限引导/提示。
+- 验证：`npx tsc --noEmit` 与 `git diff --check` 通过；未运行自动化或真机功能/UI测试，未打包或安装。
+- 涉及文件：`App.tsx`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-03 13:01:37 +08:00 — 构建并双机升级安装 1.0.63
+
+- 按用户要求将最新选取触摸修正打包为 Android 正式 Release，版本递增至 `1.0.63` / versionCode `69`；保持应用名“净屏”、包名 `com.clearscreen.prototype` 和原 Release 签名。正式安装文件 `android/app/build/outputs/apk/净屏.apk`，大小 106,523,861 字节，SHA-256 `C169B897C268B2ABF0E8500449A6D63373E6E70D6F804E6A61443D0E9AFC3061`，与 Gradle 原始产物一致。
+- 验证：`:app:assembleRelease --offline --console=plain`、`npx tsc --noEmit`、`git diff --check`、APK 包名/版本核对及 `apksigner verify --verbose --print-certs` 通过；证书 SHA-256 仍为 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。通过 USB `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）和 Xiaomi 22101317C（`2f8898c80822`），均成功；系统读回版本 `1.0.63` / `69`。首次安装时间分别保持 `2026-09-20 15:33:13`、`2026-10-09 09:22:57`，无障碍启用列表仍包含净屏服务。未卸载或清除数据，未打开应用；触摸拦截和控件识别尚待用户真机验收。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录、Release APK；百度同步盘 ClearScreen 项目基本信息和验证说明同步更新。
+
+### 2026-11-03 12:52:44 +08:00 — 修正学习控件选择的触摸拦截与浮层焦点读取
+
+- 针对用户反馈“选取时点击跳过直接关闭广告、无法检测控件”，将原非聚焦选择窗及透明子视图接收触摸的路径改为全屏触摸模态窗口，根容器消费完整手势；只有底部按钮栏交给子控件，点目标仅解析/框选，拖动、多指和取消不选择，确认才调用 ACTION_CLICK。设置整屏布局及输入法排除；返回键收起选择层并恢复持续学习工具栏。选取层取消重选、工具栏取消结束的行为保留。
+- 选择期间记录目标应用窗口标识；只有确认为本应用无障碍浮层时，才读取该标识对应且没有其他应用窗口覆盖的目标，适配浮层接管焦点后的节点读取。普通工具栏继续使用唯一聚焦应用；保护应用、敏感输入、业务按钮、确认前遮挡/当前窗口及唯一控件核对继续生效。
+- 可用跳过控件及其内部数字倒计时使用稳定身份，优先选择有关闭/跳过语义的点击节点；等待可跳过、禁用和业务保护不放宽。既有带计时文字的规则可能需重新学习，不删除原规则。
+- 验证：`:app:compileDebugKotlin --offline --console=plain`通过（最终构建16秒）；`git diff --check`与未跟踪学习源码的空白/冲突标记静态检查通过。只读检查时仅小米在线，未获得截图状态下的选取输入窗口，不能据此将设备上的具体输入分发原因视为已复现。未运行自动化/真机功能或UI测试，未打包/安装；现有1.0.62不包含本次修正。
+- 涉及文件：`ClearScreenAdLearning.kt`、`ClearScreenAccessibilityService.kt`、`README.md`、`docs/wiki/README.md`、本修改记录；百度同步盘 ClearScreen 广告识别算法与复用说明同步补充。
+
+### 2026-11-03 12:10:25 +08:00 — 构建并双机升级安装 1.0.62
+
+- 按用户要求将当前源码构建为正式 Android Release，版本递增至 `1.0.62` / versionCode `68`；保持包名 `com.clearscreen.prototype`、净屏应用名及原 Release 签名。安装文件为 `android/app/build/outputs/apk/净屏.apk`，大小 106,523,861 字节，SHA-256 `C36B0A098FB7E99A2D27D87FA2335B9A979701171E1DAFCFED6CDF6F87BAF6A7`；Gradle 原始 APK 与命名 APK 哈希一致。
+- 验证：`:app:assembleRelease --offline --console=plain`、`npx tsc --noEmit`、`git diff --check`、APK 包名/版本核对和 `apksigner verify --verbose --print-certs` 通过；签名证书 SHA-256 仍为 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。通过 USB `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）与 Xiaomi 22101317C（`2f8898c80822`），均返回 `Success`，系统读回 `1.0.62` / `68`；首次安装时间分别保持 `2026-09-20 15:33:13` 与 `2026-10-09 09:22:57`，无障碍启用列表仍包含净屏服务。未卸载或清除应用数据，未启动应用或进行功能/UI验收；控件学习和滚动查找效果仍待用户实机验收。隐私政策版本为 `2026-11-03-v3`，首次启动需重新同意，应用数据保留。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录、`android/app/build/outputs/apk/净屏.apk`、`android/app/build/outputs/apk/release/app-release.apk`；百度同步盘 ClearScreen 项目基本信息与验证说明同步更新。
+
+### 2026-11-03 11:58:28 +08:00 — 学习关闭改为识别真实控件并跟随滚动后的节点
+
+- 悬浮入口改为“选择控件”。点选后立即读取真实可点击节点，按实际边界框选并持续刷新；只有唯一、安全且可区分的控件才显示确认。确认后重新核对控件和遮挡，通过 ACTION_CLICK 操作，不再画固定圆圈或向所选坐标发送触摸；无节点的自绘区域提示无法学习。读取本应用选取浮层下方的节点时，只选择唯一聚焦应用，保留原有系统确认、敏感输入、排除应用及业务控件保护。保留并行修改的取消行为：选取层“取消”重选，工具栏“取消”结束学习。
+- 新规则只保存应用更新时间、按钮资源标识/类型/文字哈希及所属卡片内相对结构/上下文摘要，不持久化屏幕坐标、根边界或整页布局。重放在当前树中唯一定位按钮，滚动后按新位置查找，等待180ms并复读避免移动中点击；局部内容变化、列表复用其他内容、多个相同目标、应用更新或不可读取时跳过，不主动滚动。关闭确认跟踪实际节点，连续两次核对移除及页面变化；滚动或仅禁用控件不算关闭，完成/取消/超时回收节点。
+- 旧位置/视觉规则保留供删除、标为“需重新学习”并停止执行。存储按应用版本和控件身份去重，容量限制前先去重，保留同一应用的其他规则。隐私说明同步2026-11-03-v3，下次升级需重新同意但保留原记录；公开站点尚未同步。
+- 验证：主工程与 Harmony 隔离试验 TypeScript 类型检查、`:app:compileDebugKotlin --offline --console=plain` 均通过；`git diff --check` 通过。未运行自动化或真机功能/UI测试，未打包或安装；手机上的1.0.61不包含本次改动。截图中的按钮是否暴露节点、滚动及多卡片行为仍待用户验收。
+- 涉及文件：`ClearScreenAdLearning.kt`、`ClearScreenAccessibilityService.kt`、`ClearScreenStore.kt`、`ClearScreenNativeModule.kt`、`ClearScreenPrivacyConsentStore.kt`、`App.tsx`、`src/data.ts`、`src/native/ClearScreenNative.ts`、`src/privacy.ts`、`src/screens/LearnedCloseRecords.tsx`、`src/screens/PrivacyPolicyScreen.tsx`、`README.md`、`docs/wiki/README.md`、`docs/wiki/隐私政策.md`、`docs/wiki/应用商店合规核查.md`、本记录；百度同步盘的广告识别算法与复用说明同步补充。
+
+### 2026-11-03 11:09:22 +08:00 — 选点取消后重新选择关闭位置
+
+- 选点浮层的“取消”现在丢弃当前坐标并重新打开位置选择；只有悬浮工具栏中的“取消”会结束学习。重选期间避免工具栏抢先重现，若目标页面读取失败则恢复工具栏。
+- 同步 README 与界面 Wiki 中两种“取消”的行为说明。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain`、`git diff --check` 均通过；未运行功能测试、未打包或安装。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAdLearning.kt`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-03 10:58:03 +08:00 — 将 1.0.61 覆盖安装到两台手机
+
+- 按用户要求，通过 USB 将正式 Release 1.0.61 / versionCode 67 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）和 Xiaomi 22101317C（`2f8898c80822`）。保持包名及原 Release 签名，未卸载或清除应用数据；vivo 安装前需在系统风险提示中勾选确认并继续。
+- 安装后只读核对两台设备均为 `1.0.61` / `67`。首次安装时间保持：vivo `2026-09-20 15:33:13`，Xiaomi `2026-10-09 09:22:57`。系统无障碍启用列表仍包含净屏服务，崩溃服务列表为空。未启动应用，未执行功能/UI验收。
+- 涉及文件：`README.md`、`docs/wiki/README.md`、本记录；项目基本信息与验证记录同步更新至百度同步盘 ClearScreen 资料目录。
+
+### 2026-11-03 10:54:43 +08:00 — 构建正式 Release 1.0.61
+
+- 按用户要求将当前源码打包为 Android Release APK，版本递增至 `1.0.61` / versionCode `67`；保持包名 `com.clearscreen.prototype` 与原正式 Release 签名。安装包为 `android/app/build/outputs/apk/净屏.apk`。
+- 验证：`:app:assembleRelease --offline --console=plain` 构建成功；APK 核对为应用名“净屏”、包名 `com.clearscreen.prototype`、版本 `1.0.61` / `67`；`apksigner verify --verbose --print-certs` 通过，正式证书 SHA-256 为 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。命名 APK 和 Gradle 原始 APK 均为 106,523,713 字节、SHA-256 `73E5F5D0FB7377FBFBD30EB65E780A03C0AEF89F1B04753328315684B30E78F6`。未安装，未执行功能/UI验收。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本记录；项目基本信息与验证记录同步更新至百度同步盘 ClearScreen 资料目录。
+
+### 2026-11-03 10:38:07 +08:00 — 首页显示自定义关闭规则并支持逐条删除
+
+- 首页最近处理记录缩减为三条，“查看全部”改为“更多”并打开处理记录；保留今日处理数字的今日筛选入口。下方新增“自定义关闭窗口”卡片显示最近三条学习规则，更多页列出全部已保存规则（现有上限80条）；以应用和时间展示，应用不可用时回退包名与通用图标。
+- 新增带确认的逐条删除，通过持久化规则的唯一标识删除对应规则，保留其他规则及处理记录；共享规则存储锁，并作废尚未执行的旧规则回调。学习中与返回首页时刷新规则列表。隐私政策补充逐条删除入口，沿用待发布的 `2026-11-03-v2`。
+- 验证：主工程与 Harmony 隔离试验 `tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain`、`git diff --check` 通过；未执行自动化/真机功能及 UI 验收，未打包或安装。公开隐私政策仍待发布前同步。
+- 涉及文件：`App.tsx`、`src/data.ts`、`src/native/ClearScreenNative.ts`、`src/screens/HomeScreen.tsx`、`src/screens/LearnedCloseRecords.tsx`、`src/screens/RecordsScreen.tsx`、`src/screens/RecordDetailScreen.tsx`、`src/screens/PrivacyPolicyScreen.tsx`、`ClearScreenStore.kt`、`ClearScreenAdLearning.kt`、`ClearScreenNativeModule.kt`、`README.md`、`docs/wiki/README.md`、`docs/wiki/隐私政策.md`、本记录；复用说明追加到百度同步盘 ClearScreen 资料目录。
+
+### 2026-11-03 10:26:53 +08:00 — 支持连续选取并确认学习位置
+
+- 学习会话改为持续至用户点击“取消”；学习成功或失败后保留悬浮工具栏，可继续切换应用学习。锁屏、总开关关闭、撤回同意及无障碍服务中断等仍会结束会话。
+- “选取位置”先标记选中的点并显示“确认选取”；确认后才触发一次用户指定点按，继续沿用页面身份、遮挡和受保护控件检查。延迟操作带会话身份和单次操作超时，取消或超时后的旧回调不能用于下一次选取。视觉规则记录并屏蔽悬浮栏范围，避免将工具栏混入识别特征；旧规则继续按原方式匹配。
+- 学习监听时长发生变化，应用内及本地隐私政策更新为 `2026-11-03-v2`；下次安装并启动新版需重新同意，原有规则和记录保留。公开政策站点未同步，发布前需更新。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain`、`git diff --check` 通过；未执行功能测试或 UI 真机验收，未打包或安装。
+- 涉及文件：`ClearScreenAdLearning.kt`、`ClearScreenPrivacyConsentStore.kt`、`App.tsx`、`src/privacy.ts`、`src/native/ClearScreenNative.ts`、`src/screens/PrivacyPolicyScreen.tsx`、`README.md`、`docs/wiki/README.md`、`docs/wiki/隐私政策.md`、`docs/wiki/应用商店合规核查.md`、本记录；复用说明追加到百度同步盘 ClearScreen 资料目录。
+
+### 2026-11-03 10:21:59 +08:00 — 修复学习位置选取导致无障碍服务崩溃
+
+- 只读核对 vivo 设备 1.0.60 的系统退出记录和崩溃堆栈：10:17、10:18 两次均为 `ClearScreenAdLearning.selectPosition` 选取位置后空指针；悬浮层移除后匿名 View 的 `handler` 变为 null，主进程退出，系统因而显示服务故障，即使授权开关仍开启。此证据仅覆盖这两次崩溃，不代表所有后台故障原因相同。
+- 使用服务持有的 handler 投递延迟任务，延迟执行前核对学习会话和授权状态；位置选取期间使用 pending 防止重复选取，处理触摸取消及旧回调，避免已取消会话触发后续操作。
+- 验证：`:app:compileDebugKotlin --offline --console=plain` 通过；`git diff --check` 通过。未执行自动化或真机功能验收，未打包或安装，已安装的 1.0.60 仍包含该问题。Android 负责无障碍服务连接，不能保证自行恢复所有系统停止或断连。
+- 涉及文件：`ClearScreenAdLearning.kt`、`README.md`、`docs/wiki/README.md`、`docs/wiki/权限状态核验.md`、本修改记录；诊断和复用说明追加到百度同步盘 ClearScreen 资料目录。
+
+### 2026-11-03 10:17:24 +08:00 — 更新并安装 1.0.60 到两台手机
+
+- 按用户要求将 Android 版本递增至 `1.0.60` / versionCode `66`，保持包名 `com.clearscreen.prototype` 和 Release 签名；Release 安装包为 `android/app/build/outputs/apk/净屏.apk`。
+- `:app:assembleRelease --offline --console=plain` 构建成功。APK 元数据、v2 正式签名核验通过；证书 SHA-256 为 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。命名 APK 与 Gradle 原始产物 SHA-256 均为 `9C6D041A266CAC556009F34726E0A3D62FC3E7B78354B5D94AD79F1D2F9A9A47`。因 ADB 无法解析中文文件路径，使用与命名 APK 哈希一致的原始产物路径完成安装。
+- 通过 `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）和 Xiaomi 22101317C（`2f8898c80822`），两台均返回 `Success`，系统读回版本 `1.0.60` / `66`。vivo 首次安装时间保持 `2026-09-20 15:33:13`，小米保持 `2026-10-09 09:22:57`；未卸载或清除应用数据。安装后只读检查显示两台设备的净屏无障碍服务仍在启用列表和 Bound services 内，Crashed services 为空。
+- 验证：`git diff --check`、APK 元数据/签名/文件哈希核验及两台设备的版本与无障碍授权状态读回通过。未启动应用、未进行广告处理或锁屏恢复功能验收。
+- 涉及文件：`android/app/build.gradle`、`app.json`、`README.md`、`docs/wiki/README.md`、本修改记录；百度同步盘 ClearScreen 项目基本信息和验证说明同步更新。
+
+### 2026-11-03 10:06:02 +08:00 — 排查并修正锁屏后无障碍处理停滞风险
+
+- 用户确认“锁屏/后台一段时间后失效，关闭再开启无障碍可以恢复”。只读检查 vivo：安装版本仍为 `1.0.59 / 65`，组件在启用列表及 Bound services 内、Crashed services 为空，服务报告运行且当时没有待处理截图；历史退出记录有多次 `LOW_MEMORY`（2026-10-29、10-31、11-01，部分为 single-cleaner）。系统曾因内存压力结束应用是已确认事实，但不能据此断定本次所有失效都是这一原因。
+- 修正锁屏/服务中断后的旧状态保留：统一取消扫描、媒体重试、学习会话及旧 OCR 证据，解锁后重新读取当前页面。增加扫描入口的瞬时异常隔离，避免失效节点导致整个进程异常退出；保留广告与敏感界面安全条件。
+- OCR 改为有身份的单请求和 8 秒期限，完成路径统一释放占位与输入图像；迟到结果不能清除新请求或参与点击。已进入 ML 的任务等待完成再回收输入，不无限创建新识别；若 SDK 永久不完成则保留可诊断的堵塞状态、首页不显示健康，不伪装自动恢复。空闲约 60 秒、锁屏及内存回收时释放空闲识别器与缓存，忙碌识别器延后释放。
+- 处理图片长边限制为 1920，OCR 回调仅携带身份与几何信息，不持有实时节点；隐藏和超过遍历预算的节点及时回收。内部帧年龄、节流和媒体监测统一使用单调时钟。服务 dump 增加屏幕状态、最近事件年龄、暂停原因与 OCR 堵塞标记。缩小图像后的识别效果仍需真机检查。
+- 验证：`:app:compileDebugKotlin --offline --console=plain`、`git diff --check` 通过；只读取设备诊断，未切换无障碍/后台权限、未打开或操作应用进行功能验收，未运行自动化测试，未打包或安装。不能承诺绕过厂商收权、冻结或系统低内存回收。
+- 涉及文件：`ClearScreenAccessibilityService.kt`、`ClearScreenAccessibilityHealth.kt`、新增 `OcrRequestGate.kt`、`README.md`、`docs/wiki/README.md`、本记录；重要资料补入现有 `D:\BaiduSyncdisk\其它\系统秘钥\ClearScreen\广告识别算法与复用说明.md`，保留其他窗口所有现有修改。
+
+### 2026-11-03 09:35:48 +08:00 — 修正无障碍失效后首页仍显示工作中
+
+- 将“工作中”的条件从启用列表、进程与服务运行标记扩展为新鲜的实时可用性检查：验证净屏自身的新界面事件送达、系统读取/手势能力声明及自身当前窗口根节点刷新。检查不点击、不截图、不执行 OCR、不保存页面文字，不把近期没有广告或成功记录当作故障。
+- 前台每轮结束约 3 秒后复核；返回应用和恢复焦点重新检查。服务断开/能力缺失显示“需要修复”，超时、遮挡或无法确认显示“状态待确认”；暂停、失焦、中断、解绑、销毁或撤回同意作废旧结果。单次原生等待上限 1.8 秒、结果有效期 8 秒，阻塞探测不重复排队，过期/迟到结果不能恢复绿色状态。
+- 轻量状态读取只更新无障碍字段，保留其他权限值；完整权限读取不覆盖更新的健康结果。首页、服务权限页与权限引导使用一致的判断，并保留系统设置恢复入口。保留其他窗口新增的广告学习及既有系统清理修改。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain` 和 `git diff --check` 通过。未运行自动化/功能测试、未操作手机或应用验收，未打包或安装。本检查仅验证事件和界面读取链路，实际广告点击与本次失效场景仍待用户真机验证。
+- 涉及文件：`App.tsx`、`src/native/ClearScreenNative.ts`、`src/screens/HomeScreen.tsx`、`PermissionsScreen.tsx`、`ServicePermissionsScreen.tsx`、`ClearScreenAccessibilityHealth.kt`、`ClearScreenAccessibilityService.kt`、`ClearScreenNativeModule.kt`、`README.md`、`docs/wiki/README.md`、`docs/wiki/权限状态核验.md`、本修改记录。
+
+### 2026-11-03 09:35:01 +08:00 — 首页新增手动学习关闭广告
+
+- 在 Android 首页状态卡“今日处理”右侧加入“学习关闭”图标按钮，学习中可取消，同一入口可清除本地学习规则；按钮仅显示名称，不附功能描述小字。学习告知使用现有 AppDialog。
+- 原生服务增加90秒学习会话，期间暂停常规自动点击，监听手动关闭/跳过按钮；没有可访问节点时提供无障碍悬浮“选取位置”，转发用户所选的一次点按。只有同应用内目标消失及页面/视觉区域变化后才保存，失败、取消、切应用或未确认不保存。
+- 最多80条规则保存在现有私有存储；记录应用更新时间、按钮身份/位置、界面哈希，以及无节点路径所需的量化颜色特征/视觉指纹，不保存原始界面文字、截图或触摸轨迹，不上传。自动重放核对应用版本、根区域、页面及按钮；视觉位置另需Android 11及以上、同窗两帧及按钮/背景/周边特征匹配。保留排除应用、系统确认、敏感输入、业务控件、假叉号、遮挡和重复点击保护；手势完成不直接算关闭成功。
+- 取消、超时、服务中断/解绑/销毁及撤回同意会结束学习；清除学习可独立删除规则，恢复默认保留规则并关闭总开关。隐私政策版本更新至2026-11-03-v1，升级后需重新同意但不清除原数据；线上公开政策本轮未发布，发布前需同步。
+- 涉及文件：`src/screens/HomeScreen.tsx`、`App.tsx`、`src/native/ClearScreenNative.ts`、`ClearScreenAdLearning.kt`、`ClearScreenAccessibilityService.kt`、`ClearScreenNativeModule.kt`、`ClearScreenStore.kt`、三份无障碍服务XML配置、`ClearScreenPrivacyConsentStore.kt`、`src/privacy.ts`、`src/screens/PrivacyPolicyScreen.tsx`、`README.md`、`docs/wiki/README.md`、`docs/wiki/隐私政策.md`、`docs/wiki/应用商店合规核查.md`、本修改记录。复用说明增补到系统秘钥目录已有的`ClearScreen/广告识别算法与复用说明.md`，未重复保存密钥或用户规则。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin :app:processDebugResources --offline --console=plain`、`git diff --check`通过。未执行自动化/功能测试，未启动或操作应用，未做真机/UI验收，未打包、安装或发布。保留其他窗口现有修改。
+
+## 2026-10-29
+
+### 2026-10-29 20:38:12 +08:00 — 构建并覆盖安装 1.0.59
+
+- 按用户要求将当前源码的 Android 版本更新至 `1.0.59` / versionCode `65`，保持应用包名和正式发布签名；安装包保存为 `android/app/build/outputs/apk/净屏.apk`。
+- 在 vivo V2502DA 上覆盖安装成功，未卸载或清除数据；安装后系统显示 `1.0.59` / versionCode `65`，首次安装时间仍为 `2026-09-20 15:33:13`。
+- 验证：`:app:assembleRelease --offline --console=plain`、`git diff --check`、APK 包名/版本/标签和正式签名核验通过。安装包与手机安装后的文件 SHA-256 均为 `8382A1519B8C7EF39EA65A0AD55179BF2C5868342EFEDECF5BFA10D101786FDB`；未执行功能测试或 UI 验收。
+- 涉及文件：`app.json`、`android/app/build.gradle`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-10-29 16:03:31 +08:00 — 扩展系统广告与营销通知处理
+
+- 按用户选择接入可选 Shizuku：用户主动授权后可扫描候选营销通知渠道，逐项打开系统渠道页核对；系统诊断输出可能包含通知正文，代码仅提取候选渠道元数据，不展示、保存或上传正文，也不自动关闭渠道。未匹配诊断格式时报告失败。
+- 加入按品牌的系统、资讯与商店参考路径；vivo/iQOO 的部分系统广告、全局搜索、负一屏、浏览器和商店开关可由用户逐项启动无障碍辅助，在目标页面和开关明确匹配、连续采样且未遮挡时最多操作一次并回读。其他品牌及未匹配开关仍需手动处理，不能保证覆盖全部广告。
+- 加入当前品牌允许清单内广告组件与快应用项目的逐项检查、关闭和恢复；Shizuku 操作前同步保存原状态，操作后回读。vivo 使用可读取时的快应用服务开关；未知状态不执行，无恢复记录不自动恢复。撤回同意或卸载会删除恢复记录但不会自动恢复系统设置。
+- 隐私政策更新至 `2026-10-29-v2`，补充 Shizuku、通知渠道与系统设置辅助处理范围；公开政策页仍需发布前同步。随 Android 应用保留 Android Ad Cleaner 和 Shizuku API 的 MIT 许可文本。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin :app:processDebugResources --offline --console=plain` 和 `git diff --check` 通过；未运行应用或真机功能测试，未打包或安装。
+- 涉及文件：`App.tsx`、`src/screens/SystemCleanupScreen.tsx`、`SystemCleanupExtras.tsx`、`PermissionsScreen.tsx`、`PrivacyPolicyScreen.tsx`、`src/native/ClearScreenNative.ts`、`src/privacy.ts`、`android/app/build.gradle`、`android/app/proguard-rules.pro`、Android 清单与 `strings.xml`、`IClearScreenPrivilegedService.aidl`、`ClearScreenCleanupRules.kt`、`ClearScreenCleanupController.kt`、`ClearScreenPrivilegedService.kt`、`ClearScreenUiCleanup.kt`、`ClearScreenAccessibilityService.kt`、`ClearScreenNativeModule.kt`、`ClearScreenSettingsNavigator.kt`、`ClearScreenPrivacyConsentStore.kt`、`ClearScreenStore.kt`、`android/app/src/main/assets/licenses/`、`README.md`、`docs/wiki/README.md`、`docs/wiki/隐私政策.md`、`docs/wiki/应用商店合规核查.md`、本修改记录。
+
+### 2026-10-29 15:34:21 +08:00 — 新增系统广告设置与营销通知管理
+
+- 在 Android 设置中加入“系统广告与营销通知”页面：可打开系统隐私设置，并按可从桌面打开的应用进入 Android 通知设置；系统广告选项和通知开关由用户自行确认，不读取通知内容/状态、不自动修改或挂起系统组件。
+- 更新隐私政策至 `2026-10-29-v1`，说明用户主动跳转通知设置时所选应用包名的使用范围；保留本机规则、记录和设置，更新后需重新同意当前政策。公开隐私政策页面尚未同步，发布前需更新并核验。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin :app:processDebugResources --offline --console=plain`、`git diff --check` 通过。未运行应用/真机功能测试，未打包或安装。
+- 涉及文件：`App.tsx`、`src/screens/SystemCleanupScreen.tsx`、`src/screens/SettingsScreen.tsx`、`src/native/ClearScreenNative.ts`、`src/privacy.ts`、`src/screens/PrivacyPolicyScreen.tsx`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenNativeModule.kt`、`ClearScreenSettingsNavigator.kt`、`ClearScreenPrivacyConsentStore.kt`、`README.md`、`docs/wiki/README.md`、`docs/wiki/隐私政策.md`、`docs/wiki/应用商店合规核查.md`、本修改记录。
+
+## 2026-10-27
+
+### 2026-10-27 10:09:27 +08:00 — 更新 1.0.58 软件著作权申请材料
+
+- 按当前源码整理 Android 1.0.58 / versionCode 64 的程序鉴别材料与用户操作手册；程序 PDF 使用 `ClearScreenAccessibilityService.kt` 首尾各 30 页、每页 50 行，共 60 页，手册为 5 页、每页 30 条说明。保留原始代码内容，仅作页码、行号与排版。
+- 将 1.0.58 两份 PDF 归档到系统秘钥目录，与历史 1.0.46 材料并存；更新重要资料索引及商店合规页。负责人已确认本次著作权人、独立开发/原始取得、开发完成日期和未发表状态；内置浏览器不可用，本次未上传材料、未继续申请表或提交。
+- 验证：`app.json` 与 `android/app/build.gradle` 均核实为 1.0.58 / versionCode 64；PDF 页数分别为 60 与 5，程序材料逐页检查为 50 条并覆盖源码行 1–1500、2753–4252，手册逐页检查为 30 条并渲染目视检查通过。依据《计算机软件著作权登记办法》第十条检查程序和文档行数要求。未执行应用测试或构建。
+- 涉及文件：`docs/wiki/README.md`、`docs/wiki/应用商店合规核查.md`、本修改记录；外部归档：`D:\BaiduSyncdisk\其它\系统秘钥\ClearScreen\软件著作权申请材料\`、`验证与复用说明.md`。
+
+### 2026-10-27 09:38:29 +08:00 — 延伸启动页背景至底部手势导航区域
+
+- 将 Android 导航栏改为透明并关闭系统对比遮罩，使边缘到边缘布局下启动页背景可以延伸至底部手势区域；同步记录共享页面的底部背景规则。
+- 验证：`git diff --check`、`:app:processDebugResources --offline --console=plain` 通过；未运行功能测试、未启动应用、未做真机视觉验收、未打包或安装。
+- 涉及文件：`android/app/src/main/res/values/styles.xml`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+## 2026-10-25
+
+### 2026-10-25 14:56:12 +08:00 — 更新邓白氏案件跟进资料
+
+- 根据负责人提供的邓白氏邮件，将案件标记为“身份资料查询已受理、等待处理”；邮件中的编码栏为空，因此没有把跟踪编号或案件编号误记为已分配编码。
+- 将资料目录内的申请记录改为中文文件名 `邓白氏编码申请记录.md`，补入跟踪编号、案件编号、申请人自定义申请键及提交时间；同步更新项目基本信息与 Wiki 入口索引。
+- 验证：核对原邮件内容、中文记录文件及 Wiki 引用；`git diff --check` 通过。未执行应用测试。
+- 涉及文件：`docs/wiki/README.md`、`docs/wiki/CHANGELOG.md`；外部资料 `D:\BaiduSyncdisk\其它\系统秘钥\ClearScreen\项目基本信息.md`、`验证与复用说明.md`、`邓白氏编码申请记录.md`。
+
 ## 2026-10-22
 
 ### 2026-10-22 20:44:54 +08:00 — 统一美化应用内提示与确认弹窗

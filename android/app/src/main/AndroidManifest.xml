@@ -6,8 +6,14 @@
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
   <queries>
-    <!-- Specific OEM settings packages only, for checking optional system entrypoints. -->
+    <!-- OEM settings and Google Play services, for checking optional system settings targets. -->
+    <package android:name="com.android.settings"/>
+    <package android:name="com.google.android.gms"/>
+    <package android:name="com.bbk.appstore"/>
     <package android:name="com.vivo.permissionmanager"/>
+    <package android:name="com.vivo.globalsearch"/>
+    <package android:name="com.vivo.hiboard"/>
+    <package android:name="com.vivo.browser"/>
     <package android:name="com.iqoo.secure"/>
     <package android:name="com.miui.securitycenter"/>
     <package android:name="com.miui.powerkeeper"/>
@@ -44,6 +50,13 @@
     </intent>
   </queries>
   <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="false" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false">
+    <provider
+      android:name="rikka.shizuku.ShizukuProvider"
+      android:authorities="${applicationId}.shizuku"
+      android:multiprocess="false"
+      android:enabled="true"
+      android:exported="true"
+      android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>

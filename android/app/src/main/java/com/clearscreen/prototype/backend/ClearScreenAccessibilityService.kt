@@ -3,6 +3,8 @@ package com.clearscreen.prototype.backend
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.ComponentName
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -14,6 +16,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
@@ -24,6 +27,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import com.clearscreen.prototype.BuildConfig
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import java.util.ArrayDeque
 import java.io.FileDescriptor
@@ -55,10 +59,28 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     LinkedBlockingQueue(),
     { task -> Thread(task, "clearscreen-ocr").apply { isDaemon = true } },
   ).apply { allowCoreThreadTimeOut(true) }
-  private val textRecognizerDelegate = lazy {
-    TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+  private val recognizerLock = Any()
+  private var textRecognizer: TextRecognizer? = null
+  private var releaseRecognizerWhenIdle = false
+  private val ocrRequests = OcrRequestGate()
+  private val releaseIdleRecognizer = Runnable { releaseOcrRecognizer() }
+  private var screenReceiverRegistered = false
+  private val screenReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      when (intent?.action) {
+        Intent.ACTION_SCREEN_OFF -> suspendProcessing("screen-off")
+        Intent.ACTION_USER_PRESENT -> {
+          processingSuspended = false
+          handler.removeCallbacks(resumeForegroundScan)
+          handler.postDelayed(resumeForegroundScan, INITIAL_FOREGROUND_SCAN_DELAY_MS)
+        }
+      }
+    }
   }
-  private val textRecognizer by textRecognizerDelegate
+  private val resumeForegroundScan = Runnable { scanCurrentForegroundPackage() }
+  private var processingSuspended = false
+  private var lastResetReason = "created"
+  private var lastEventAt = 0L
   private val actionAttempts = AdActionAttemptGuard()
   private val visualAttempts = AdVisualAttemptGuard()
   private val adScans = AdScanCoordinator()
@@ -72,14 +94,16 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   private var lastScanLogAt = 0L
   private val eventScanTick = Runnable {
     eventScanPosted = false
-    eventScans.take(SystemClock.uptimeMillis())?.let { processAccessibilityEvent(it) }
+    eventScans.take(SystemClock.uptimeMillis())?.let { event ->
+      guardServiceTask("event-scan") { processAccessibilityEvent(event) }
+    }
   }
   private var mediaWatch: MediaWatch? = null
   private var observedPlayerPackage: String? = null
   private var observedPlayerVisible = false
   private var lastMediaOcrAt = 0L
   private val mediaWatchTick = object : Runnable {
-    override fun run() = pollMediaWatch()
+    override fun run() = guardServiceTask("media-watch") { pollMediaWatch() }
   }
   private var lastActionAt = 0L
   private var lastOcrRequestAt = 0L
@@ -95,13 +119,46 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   private var pendingVisualAction: PendingVisualAction? = null
   private var calendarWindowClass = ""
   private var calendarWindowId = -1
-  private var ocrScreenshotPending = false
+  private val ocrScreenshotPending: Boolean get() = ocrRequests.busy()
   private var ocrSignatureRetryPending = false
-  private var serviceDestroyed = false
+  @Volatile private var serviceDestroyed = false
+  internal var adLearning: ClearScreenAdLearning? = null
+    private set
   private var privacyPaused = false
   private val permissionProfile by lazy { ClearScreenOemProfile.current() }
   private var settingsPermissionPackage = ""
   private var settingsPermissionWindow = -1
+  private var cleanupWindow = -1
+  private val cleanupScan = Runnable {
+    synchronized(ClearScreenPrivacyConsentStore.operationLock) {
+      if (serviceDestroyed || !privacyConsentStore.hasCurrentConsent() || !::store.isInitialized) {
+        ClearScreenUiCleanup.clear()
+      } else if ((getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager)?.isKeyguardLocked == false) {
+        val root = rootInActiveWindow
+        try {
+          if (root != null && root.windowId == cleanupWindow &&
+            runCatching { windows.none { (it.isActive || it.isFocused) && it.id != root.windowId } }.getOrDefault(false)) {
+            ClearScreenUiCleanup.observe(root, store) { bounds -> visualWindowUnobstructed(root, bounds) }
+          } else ClearScreenUiCleanup.rejectSample()
+        } finally {
+          @Suppress("DEPRECATION")
+          root?.recycle()
+        }
+      } else ClearScreenUiCleanup.rejectSample()
+    }
+  }
+  private val adbPairingScan = Runnable {
+    if (serviceDestroyed || !ClearScreenAdbPairingHelper.isActive()) return@Runnable
+    val root = rootInActiveWindow
+    try {
+      if (root != null && root.packageName?.toString() == "com.android.settings") {
+        ClearScreenAdbPairingHelper.onSettingsWindow(root)
+      }
+    } finally {
+      @Suppress("DEPRECATION")
+      root?.recycle()
+    }
+  }
   private val settingsPermissionScan = Runnable {
     if (serviceDestroyed || !privacyConsentStore.hasCurrentConsent()) {
       ClearScreenSettingsObserver.clear()
@@ -122,26 +179,66 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   override fun onServiceConnected() {
     super.onServiceConnected()
     serviceDestroyed = false
+    processingSuspended = false
+    ocrRequests.cancel()
     running = true
+    learningService = this
+    ClearScreenAccessibilityHealth.connected(this)
+    if (!screenReceiverRegistered) {
+      val filter = IntentFilter().apply {
+        addAction(Intent.ACTION_SCREEN_OFF)
+        addAction(Intent.ACTION_USER_PRESENT)
+      }
+      if (Build.VERSION.SDK_INT >= 33) registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+      else { @Suppress("DEPRECATION") registerReceiver(screenReceiver, filter) }
+      screenReceiverRegistered = true
+    }
     Log.i(
       TAG,
       "onServiceConnected component=${ComponentName(this, ClearScreenAccessibilityService::class.java).flattenToString()} " +
         "pid=${Process.myPid()}",
     )
     if (ensureConsentAndStore()) {
-      handler.postDelayed({ scanCurrentForegroundPackage() }, INITIAL_FOREGROUND_SCAN_DELAY_MS)
+      handler.postDelayed(resumeForegroundScan, INITIAL_FOREGROUND_SCAN_DELAY_MS)
     }
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
     if (event == null || !ensureConsentAndStore()) return
+    lastEventAt = SystemClock.uptimeMillis()
+    if (!isScreenReady()) { suspendProcessing("screen-not-ready"); return }
+    processingSuspended = false
+    adLearning?.onEvent(event)
+    ClearScreenAccessibilityHealth.onEvent(this, event)
     val packageName = event.packageName?.toString()?.takeIf { it.isNotBlank() } ?: return
-    if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-      ClearScreenSettingsObserver.onForegroundWindow(packageName)
+    if (packageName == "com.android.settings" && ClearScreenAdbPairingHelper.isActive()) {
+      // The pairing dialog keeps its server alive only while visible, so read
+      // the code and port here instead of asking the user to switch apps.
+      handler.removeCallbacks(adbPairingScan)
+      handler.postDelayed(adbPairingScan, 60L)
+      handler.postDelayed(adbPairingScan, 300L)
+      handler.postDelayed(adbPairingScan, 900L)
+    }
+    val windowChanged = event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+    if (windowChanged) ClearScreenSettingsObserver.onForegroundWindow(packageName)
+    if (ClearScreenUiCleanup.onForeground(packageName, windowChanged)) {
+      adScans.cancel()
+      stopMediaWatch()
+      clearVisualState()
+      handler.removeCallbacks(eventScanTick)
+      eventScans.clear()
+      eventScanPosted = false
+      cleanupWindow = event.windowId
+      handler.removeCallbacks(cleanupScan)
+      handler.postDelayed(cleanupScan, 80L)
+      handler.postDelayed(cleanupScan, 260L)
+      handler.postDelayed(cleanupScan, 650L)
+      handler.postDelayed(cleanupScan, 1200L)
+      return
     }
     if (packageName in permissionProfile.readableSettingsPackages) {
-      // Settings remain protected from ALL ad actions. The separate opt-in
-      // path reads only our own, unambiguously labelled checkable controls.
+      // Normal ad actions never run in settings. The separately armed cleanup
+      // path above handles only one explicitly selected, exact switch.
       if (ClearScreenSettingsObserver.isWatching(packageName) && event.eventType in setOf(
           AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
           AccessibilityEvent.TYPE_VIEW_CLICKED, AccessibilityEvent.TYPE_VIEW_SCROLLED,
@@ -178,6 +275,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   private fun processAccessibilityEvent(event: AdEventCoalescer.Event) {
     if (!ensureConsentAndStore()) return
+    if (adLearning?.active == true) { adScans.cancel(); stopMediaWatch(); return }
+    if (ClearScreenUiCleanup.isActive()) { adScans.cancel(); return }
     if (!store.isMasterEnabled()) {
       adScans.cancel()
       stopMediaWatch()
@@ -217,10 +316,20 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     }
   }
 
-  override fun onInterrupt() = Unit
+  override fun onInterrupt() {
+    adLearning?.stop()
+    ClearScreenAccessibilityHealth.invalidate()
+    suspendProcessing("interrupted")
+  }
 
   override fun onUnbind(intent: Intent?): Boolean {
+    suspendProcessing("unbound")
+    adLearning?.stop()
+    if (learningService === this) learningService = null
+    ClearScreenAccessibilityHealth.disconnected(this)
     handler.removeCallbacks(settingsPermissionScan)
+    handler.removeCallbacks(cleanupScan)
+    ClearScreenUiCleanup.stop()
     ClearScreenSettingsObserver.clear()
     handler.removeCallbacks(eventScanTick)
     eventScans.clear()
@@ -244,6 +353,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     writer.flush()
     if (!privacyConsentStore.hasCurrentConsent() || !::store.isInitialized) return
     writer.println("master=${store.isMasterEnabled()} screenshotPending=$ocrScreenshotPending")
+    writer.println("screenReady=${isScreenReady()} suspended=$processingSuspended reset=$lastResetReason " +
+      "eventAgeMs=${if (lastEventAt == 0L) -1 else SystemClock.uptimeMillis() - lastEventAt} ocrStalled=${isOcrStalled()}")
     wifiDiagnostics.forEach { (stage, diagnostic) ->
       writer.println("$stage ageMs=${SystemClock.uptimeMillis() - diagnostic.at} ${diagnostic.summary}")
     }
@@ -259,7 +370,16 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   }
 
   override fun onDestroy() {
+    adLearning?.stop()
+    if (learningService === this) learningService = null
     serviceDestroyed = true
+    ocrRequests.cancel()
+    if (screenReceiverRegistered) {
+      runCatching { unregisterReceiver(screenReceiver) }
+      screenReceiverRegistered = false
+    }
+    ClearScreenAccessibilityHealth.disconnected(this)
+    ClearScreenUiCleanup.stop()
     ClearScreenSettingsObserver.clear()
     Log.w(TAG, "onDestroy pid=${Process.myPid()}")
     handler.removeCallbacksAndMessages(null)
@@ -273,7 +393,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     adScans.cancel()
     stopMediaWatch()
     observedPlayerVisible = false
-    if (textRecognizerDelegate.isInitialized()) runCatching { textRecognizer.close() }
+    releaseOcrRecognizer()
     // Do not shut down ocrExecutor here: pending ML Kit task listeners are
     // dispatched on it, and rejecting those callbacks can crash the service.
     running = false
@@ -281,7 +401,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   }
 
   private fun scanCurrentForegroundPackage() {
-    if (serviceDestroyed || !ensureConsentAndStore() || !store.isMasterEnabled()) return
+    guardServiceTask("foreground-scan") { scanCurrentForegroundPackageInternal() }
+  }
+
+  private fun scanCurrentForegroundPackageInternal() {
+    if (serviceDestroyed || !isScreenReady() || !ensureConsentAndStore() || !store.isMasterEnabled()) return
     val packageName = rootInActiveWindow?.packageName?.toString()
       ?.takeIf(::isEligibleForegroundPackage)
       ?: return
@@ -374,9 +498,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   private fun tryHandlePackageInternal(packageName: String, ocrFrame: OcrFrame?, followUpDepth: Int): Boolean {
     if (serviceDestroyed || !ensureConsentAndStore() || !store.isMasterEnabled()) return rejectScan("disabled")
+    if (adLearning?.active == true) return rejectScan("learning")
     if (!isEligibleForegroundPackage(packageName)) return rejectScan("foreground-changed")
     val rule = store.getAppRule(packageName)
     if (!rule.skipEnabled || rule.whitelist) return rejectScan("app-excluded")
+    if (adLearning?.tryReplay(packageName) == true) return true
     pendingVisualAction?.takeIf { it.packageName == packageName }?.let {
       if (SystemClock.uptimeMillis() - it.at <= 4_000L) return rejectScan("visual-action-pending")
       pendingVisualAction = null
@@ -601,7 +727,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         val followUpDelay = if (needsFreshSkipFrame) {
           // Do not spend another fixed delay rescanning without the OCR needed
           // for the fallback; request a fresh frame as soon as the throttle permits.
-          (OCR_MIN_INTERVAL_MS - (System.currentTimeMillis() - lastOcrRequestAt)).coerceAtLeast(0L)
+          (OCR_MIN_INTERVAL_MS - (SystemClock.uptimeMillis() - lastOcrRequestAt)).coerceAtLeast(0L)
         } else POST_ACTION_RESCAN_DELAY_MS
         handler.postDelayed(followUp@{
           if (!ensureConsentAndStore() || !isAppProcessingEnabled(packageName) ||
@@ -627,7 +753,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   private fun postNextAdScan(ticket: AdScanCoordinator.Ticket) {
     val delay = adScans.nextDelay(ticket, SystemClock.uptimeMillis()) ?: return
-    handler.postDelayed({ runDynamicAdRetry(ticket) }, delay)
+    handler.postDelayed({ guardServiceTask("retry-scan") { runDynamicAdRetry(ticket) } }, delay)
   }
 
   private fun hasPendingAdUi(snapshot: AccessibilitySnapshot): Boolean =
@@ -650,11 +776,13 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       SystemClock.uptimeMillis() - lastSnapshotAt <= 500L
     } ?: AccessibilitySnapshot.capture(root)
 
-  private fun isEligibleForegroundPackage(packageName: String): Boolean =
-    packageName.isNotBlank() && packageName != applicationContext.packageName &&
+  private fun isEligibleAdPackage(packageName: String): Boolean =
+    isScreenReady() && !ClearScreenUiCleanup.isActive() && packageName.isNotBlank() && packageName != applicationContext.packageName &&
       !AdDecisionPolicy.isProtectedPackage(packageName) &&
-      !ProtectedUiPolicy.isProtectedPackage(packageName) &&
-      isCurrentForegroundPackage(packageName)
+      !ProtectedUiPolicy.isProtectedPackage(packageName)
+
+  private fun isEligibleForegroundPackage(packageName: String): Boolean =
+    isEligibleAdPackage(packageName) && isCurrentForegroundPackage(packageName)
 
   private fun maybeStartMediaWatch(packageName: String, eventType: Int) {
     if (!ensureConsentAndStore() || !store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true) ||
@@ -673,7 +801,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         playerEntry = playerEntry,
       )
     ) return
-    val now = System.currentTimeMillis()
+    val now = SystemClock.uptimeMillis()
     mediaWatch = MediaWatch(packageName, now + MEDIA_WATCH_MAX_MS)
     lastMediaOcrAt = now
     handler.removeCallbacks(mediaWatchTick)
@@ -682,7 +810,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   private fun pollMediaWatch() {
     val watch = mediaWatch ?: return
-    val now = System.currentTimeMillis()
+    val now = SystemClock.uptimeMillis()
     if (serviceDestroyed || !ensureConsentAndStore() || !store.isMasterEnabled() ||
       !store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true) ||
       !isEligibleForegroundPackage(watch.packageName) ||
@@ -730,13 +858,13 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     }
 
   private fun isAppProcessingEnabled(packageName: String): Boolean =
-    !serviceDestroyed && ::store.isInitialized && store.isMasterEnabled() &&
+    adLearning?.active != true && !ClearScreenUiCleanup.isActive() && !serviceDestroyed && ::store.isInitialized && store.isMasterEnabled() &&
       store.getAppRule(packageName).let { it.skipEnabled && !it.whitelist }
 
   private fun isOcrWindowCurrent(frame: OcrFrame, snapshot: AccessibilitySnapshot): Boolean =
     frame.packageName == snapshot.packageName && frame.windowId == snapshot.windowId &&
       frame.rootBounds == snapshot.rootBounds &&
-      System.currentTimeMillis() - frame.capturedAt <= OCR_FRAME_MAX_AGE_MS
+      SystemClock.uptimeMillis() - frame.capturedAt <= OCR_FRAME_MAX_AGE_MS
 
   /**
    * The confirmed China Mobile countdown mutates nodes while its screenshot
@@ -746,7 +874,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
    */
   private fun isMobileTrafficSplashOcrCurrent(frame: OcrFrame, snapshot: AccessibilitySnapshot): Boolean =
     frame.packageName == MOBILE_TRAFFIC_CARD_PACKAGE && isOcrWindowCurrent(frame, snapshot) &&
-      System.currentTimeMillis() - frame.capturedAt <= MOBILE_OCR_MAX_ACTION_AGE_MS
+      SystemClock.uptimeMillis() - frame.capturedAt <= MOBILE_OCR_MAX_ACTION_AGE_MS
 
   private fun isOcrScopeCurrent(frame: OcrFrame, snapshot: AccessibilitySnapshot, path: String): Boolean {
     if (!isOcrWindowCurrent(frame, snapshot)) return false
@@ -805,6 +933,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     prioritizeTransientSplash: Boolean = false,
     confirmVisualTarget: Boolean = false,
   ) {
+    ocrRequests.expire(SystemClock.uptimeMillis())
     if (serviceDestroyed || !ensureConsentAndStore() || Build.VERSION.SDK_INT < Build.VERSION_CODES.R || ocrScreenshotPending) return
     if (!isAppProcessingEnabled(packageName)) return
     if (!isEligibleForegroundPackage(packageName)) return
@@ -814,37 +943,46 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       !store.isSettingEnabled(ClearScreenStore.KEY_CLOSE_FEED_ADS, true)
     ) return
 
-    val now = System.currentTimeMillis()
+    val now = SystemClock.uptimeMillis()
     val urgentMobileSplash = prioritizeTransientSplash && packageName == MOBILE_TRAFFIC_CARD_PACKAGE
     val minimumInterval = if (confirmVisualTarget) 650L else OCR_MIN_INTERVAL_MS
     if (!urgentMobileSplash && now - lastOcrRequestAt < minimumInterval) return
-    val root = findRootForPackage(packageName) ?: return
-    val beforeCapture = AccessibilitySnapshot.capture(root)
-    if (isProtectedTimeSensitiveSnapshot(root, beforeCapture) ||
-      AdDecisionPolicy.isProtectedConfirmation(beforeCapture.nodes.filter { it.isVisible }.map { it.compactLabel })
-    ) { recordWifiDiagnostic(packageName, "ocr-request", "reason=protected-screen"); return }
+    val beforeCapture = captureOcrEvidence(packageName) ?: return
     val rootBounds = beforeCapture.rootBounds
     val displayBounds = screenshotDisplayBounds() ?: return
     if (!hasUsableBounds(rootBounds)) return
-    if (beforeCapture.nodes.any { it.isVisible && (it.isPassword || (it.isEditable && it.isFocused)) }) return
-    val closeTargets = visualCloseTargets(beforeCapture)
+    val closeTargets = beforeCapture.closeTargets
 
     lastOcrRequestAt = now
-    ocrScreenshotPending = true
+    val request = ocrRequests.begin(SystemClock.uptimeMillis()) ?: return
+    handler.removeCallbacks(releaseIdleRecognizer)
     recordWifiDiagnostic(packageName, "ocr-request",
-      "window=${beforeCapture.windowId} nodes=${beforeCapture.nodes.size} smallTargets=${closeTargets.size}")
+      "window=${beforeCapture.windowId} nodes=${beforeCapture.nodeCount} smallTargets=${closeTargets.size}")
     val ocrRequestStartedAt = SystemClock.uptimeMillis()
+    handler.postDelayed({
+      if (ocrRequests.expire(SystemClock.uptimeMillis())) {
+        ClearScreenAccessibilityHealth.invalidate()
+        releaseOcrRecognizer()
+        recordWifiDiagnostic(packageName, "ocr-result", "reason=timeout")
+      }
+    }, 8_100L)
     try {
       takeScreenshot(
         Display.DEFAULT_DISPLAY,
         ocrExecutor,
         object : TakeScreenshotCallback {
           override fun onSuccess(screenshot: ScreenshotResult) {
-            val capturedAt = System.currentTimeMillis()
+            val capturedAt = SystemClock.uptimeMillis()
             val capturedUptime = SystemClock.uptimeMillis()
             val hardwareBuffer = screenshot.hardwareBuffer
+            if (!ocrRequests.accepts(request, SystemClock.uptimeMillis()) || !isScreenReady()) {
+              hardwareBuffer.close()
+              finishOcrRequest(request)
+              return
+            }
             if (!privacyConsentStore.hasCurrentConsent()) {
               hardwareBuffer.close()
+              finishOcrRequest(request)
               handler.post { pauseForMissingConsent() }
               return
             }
@@ -852,7 +990,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
             // Discard it before starting OCR rather than only blocking the click.
             if (!isAppProcessingEnabled(packageName)) {
               hardwareBuffer.close()
-              handler.post { ocrScreenshotPending = false }
+              finishOcrRequest(request)
               return
             }
             val hardwareBitmap = runCatching {
@@ -861,15 +999,14 @@ class ClearScreenAccessibilityService : AccessibilityService() {
             hardwareBuffer.close()
             if (serviceDestroyed) {
               hardwareBitmap?.let { runCatching { it.recycle() } }
+              finishOcrRequest(request)
               return
             }
             val bitmap = hardwareBitmap?.let { wrapped ->
-              val copy = runCatching { wrapped.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull()
-              runCatching { wrapped.recycle() }
-              copy
+              try { boundedScreenshot(wrapped) } finally { runCatching { wrapped.recycle() } }
             }
             if (bitmap == null) {
-              handler.post { ocrScreenshotPending = false }
+              finishOcrRequest(request)
               return
             }
             val visualCloseGlyphs = runCatching { findVisualCloseGlyphs(bitmap, closeTargets, displayBounds) }
@@ -890,11 +1027,16 @@ class ClearScreenAccessibilityService : AccessibilityService() {
             } else bitmap
 
             val recognitionTask = try {
-              textRecognizer.process(InputImage.fromBitmap(textBitmap, 0))
+              synchronized(recognizerLock) {
+                check(ocrRequests.recognizing(request, SystemClock.uptimeMillis())) { "OCR request expired" }
+                val recognizer = textRecognizer ?: TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+                  .also { textRecognizer = it }
+                recognizer.process(InputImage.fromBitmap(textBitmap, 0))
+              }
             } catch (error: Exception) {
               if (textBitmap !== bitmap) runCatching { textBitmap.recycle() }
               runCatching { bitmap.recycle() }
-              handler.post { ocrScreenshotPending = false }
+              finishOcrRequest(request)
               if (packageName == MOBILE_TRAFFIC_CARD_PACKAGE) {
                 Log.i(TAG, "mobile-ocr-result failed=process code=${error.javaClass.simpleName} " +
                   "elapsedMs=${SystemClock.uptimeMillis() - ocrRequestStartedAt}")
@@ -905,15 +1047,15 @@ class ClearScreenAccessibilityService : AccessibilityService() {
             }
             recognitionTask
               .addOnSuccessListener(ocrExecutor) { recognized ->
+                try {
+                if (!ocrRequests.accepts(request, SystemClock.uptimeMillis()) || !isScreenReady()) return@addOnSuccessListener
                 if (!privacyConsentStore.hasCurrentConsent()) {
                   handler.post {
-                    ocrScreenshotPending = false
                     pauseForMissingConsent()
                   }
                   return@addOnSuccessListener
                 }
                 if (!isAppProcessingEnabled(packageName)) {
-                  handler.post { ocrScreenshotPending = false }
                   return@addOnSuccessListener
                 }
                 val lines = recognized.textBlocks.flatMap { block ->
@@ -972,7 +1114,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
                   ))
                 }.getOrDefault(false)
                 handler.post {
-                  ocrScreenshotPending = false
+                  guardServiceTask("ocr-decision") {
+                  if (!ocrRequests.accepts(request, SystemClock.uptimeMillis()) || !isScreenReady()) return@post
                   if (serviceDestroyed || !ensureConsentAndStore() || !isAppProcessingEnabled(packageName)) return@post
                   recordWifiDiagnostic(packageName, "ocr-result",
                     "lines=${lines.size} elements=${elements.size} xGlyphs=${visualCloseGlyphs.size} " +
@@ -1037,36 +1180,41 @@ class ClearScreenAccessibilityService : AccessibilityService() {
                       scheduleOcrIdentityRetry(packageName, followUpDepth)
                     }
                   }
+                  }
+                }
+                } catch (error: Exception) {
+                  handler.post { recordWifiDiagnostic(packageName, "ocr-result", "reason=callback-failed") }
+                  Log.w(TAG, "OCR result discarded: ${error.javaClass.simpleName}")
                 }
               }
               .addOnFailureListener(ocrExecutor) { error ->
                 if (BuildConfig.DEBUG) Log.d(TAG, "on-device OCR failed code=${error.javaClass.simpleName}")
                 handler.post {
-                  ocrScreenshotPending = false
                   recordWifiDiagnostic(packageName, "ocr-result", "reason=recognition-failed")
                 }
               }
               .addOnCompleteListener(ocrExecutor) {
                 if (textBitmap !== bitmap) runCatching { textBitmap.recycle() }
                 runCatching { bitmap.recycle() }
+                finishOcrRequest(request)
               }
           }
 
           override fun onFailure(errorCode: Int) {
+            finishOcrRequest(request)
             if (packageName == MOBILE_TRAFFIC_CARD_PACKAGE) {
               Log.i(TAG, "mobile-ocr-result failed=screenshot code=$errorCode")
             } else if (BuildConfig.DEBUG) {
               Log.d(TAG, "screenshot capture unavailable code=$errorCode")
             }
             handler.post {
-              ocrScreenshotPending = false
               recordWifiDiagnostic(packageName, "ocr-result", "reason=screenshot-failed code=$errorCode")
             }
           }
         },
       )
     } catch (error: Exception) {
-      ocrScreenshotPending = false
+      finishOcrRequest(request)
       recordWifiDiagnostic(packageName, "ocr-result", "reason=capture-failed")
       if (packageName == MOBILE_TRAFFIC_CARD_PACKAGE) {
         Log.i(TAG, "mobile-ocr-result failed=capture code=${error.javaClass.simpleName}")
@@ -1097,7 +1245,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (visualConfirmationPending) return
     visualConfirmationPending = true
     val generation = visualGeneration
-    val delay = maxOf(250L, 650L - (System.currentTimeMillis() - lastOcrRequestAt))
+    val delay = maxOf(250L, 650L - (SystemClock.uptimeMillis() - lastOcrRequestAt))
     handler.postDelayed({
       if (generation != visualGeneration) return@postDelayed
       visualConfirmationPending = false
@@ -1255,7 +1403,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     }
     if (rejection != null) {
       Log.i(TAG, "mobile-ocr-skip rejected=$rejection window=${frame.windowId} " +
-        "ageMs=${System.currentTimeMillis() - frame.capturedAt}")
+        "ageMs=${SystemClock.uptimeMillis() - frame.capturedAt}")
       return false
     }
 
@@ -1299,7 +1447,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       }
       Log.i(TAG, "mobile-ocr-skip no-match badge=$hasAdBadge skip=${skipCandidates.size} " +
         "campaign=${campaignCandidates.size} offerMarkers=$offerMarkers redirect=$hasRedirect " +
-        "lines=${frame.lines.size} ageMs=${System.currentTimeMillis() - frame.capturedAt}")
+        "lines=${frame.lines.size} ageMs=${SystemClock.uptimeMillis() - frame.capturedAt}")
       return false
     }
     val skipLine = campaignCandidates.minByOrNull {
@@ -1319,7 +1467,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       }
     ) return false
 
-    val now = System.currentTimeMillis()
+    val now = SystemClock.uptimeMillis()
     val actionNow = SystemClock.uptimeMillis()
     if (actionNow - lastActionAt < ACTION_COOLDOWN_MS) return false
     // The same campaign's countdown text/box can shrink; it is still one skip per window.
@@ -1410,12 +1558,105 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (!::store.isInitialized) {
       store = ClearScreenStore(this).apply { prepareAfterConsent() }
     }
+    if (adLearning == null) adLearning = ClearScreenAdLearning(this, handler, store, ::learningRoot, { bounds ->
+      val root = learningRoot()
+      try { root != null && visualWindowUnobstructed(root, bounds) }
+      finally { @Suppress("DEPRECATION") root?.recycle() }
+    }, ::scanCurrentForegroundPackage)
     return true
   }
 
+  private fun learningRoot(): AccessibilityNodeInfo? {
+    if (serviceDestroyed || !privacyConsentStore.hasCurrentConsent() || !::store.isInitialized ||
+      !store.isMasterEnabled() || ClearScreenUiCleanup.isActive() ||
+      (getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager)?.isKeyguardLocked != false) return null
+    var candidateRoot = rootInActiveWindow
+    var resolvedThroughOwnOverlay = false
+    // A touch-modal selector owns focus. Resolve its captured application window, not the overlay.
+    // Never substitute a background app when the real foreground is the ClearScreen activity.
+    if (adLearning?.active == true && (candidateRoot == null || candidateRoot.packageName?.toString() == packageName)) {
+      val available = runCatching { windows }.getOrDefault(emptyList())
+      try {
+        val observed = candidateRoot
+        val expectedId = adLearning?.selectionWindowId
+        val ownOverlay = available.any { window ->
+          window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY &&
+            if (observed != null) window.id == observed.windowId
+            else expectedId != null && (window.isFocused || window.isActive) && window.root?.let {
+              try { it.packageName?.toString() == packageName }
+              finally { @Suppress("DEPRECATION") it.recycle() }
+            } == true
+        }
+        if (ownOverlay) {
+          @Suppress("DEPRECATION") candidateRoot?.recycle()
+          candidateRoot = null
+          val applications = available.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+          val target = if (expectedId == null) applications.filter { it.isFocused }.singleOrNull()
+            // The captured window is identified by id; confirm still re-checks
+            // unobstructed visuals, so a higher layer alone must not deny reads.
+            else applications.singleOrNull { it.id == expectedId }
+          candidateRoot = target?.root
+          resolvedThroughOwnOverlay = target != null && candidateRoot?.windowId == target.id
+        }
+      } finally {
+        @Suppress("DEPRECATION") available.forEach { it.recycle() }
+      }
+    }
+    val root = candidateRoot ?: return null
+    if (adLearning?.selectionWindowId?.let { root.windowId != it } == true) {
+      @Suppress("DEPRECATION") root.recycle()
+      return null
+    }
+    val pkg = root.packageName?.toString().orEmpty()
+    val bounds = Rect().also(root::getBoundsInScreen)
+    val snapshot = AccessibilitySnapshot.capture(root, redactInputs = true)
+    val rule = store.getAppRule(pkg)
+    val learningActive = adLearning?.active == true
+    // Our verified selector may own focus. Requiring rootInActiveWindow to be the app
+    // here would reject the very application window resolved above on every tap.
+    val eligibleWindow = isEligibleAdPackage(pkg) &&
+      (resolvedThroughOwnOverlay || isCurrentForegroundPackage(pkg))
+    val rejected = when {
+      !eligibleWindow -> "window"
+      !learningActive && (!rule.skipEnabled || rule.whitelist) -> "app-excluded"
+      isProtectedTimeSensitiveSnapshot(root, snapshot) -> "protected-screen"
+      AdDecisionPolicy.isProtectedConfirmation(snapshot.nodes.filter { it.isVisible }.map { it.compactLabel }) ->
+        "confirmation"
+      // Password screens stay blocked; a focused editable no longer blanks the
+      // whole page during manual selection. Inputs are never candidates (unsafe)
+      // and their text never enters learning fingerprints.
+      snapshot.nodes.any { it.isVisible && it.isPassword } ||
+        (snapshot.nodes.any { it.isVisible && it.isEditable && it.isFocused } &&
+          adLearning?.selectionWindowId == null && adLearning?.preparingSelection != true) -> "input"
+      !learningActive && !visualWindowUnobstructed(root, bounds) -> "obscured"
+      else -> null
+    }
+    @Suppress("DEPRECATION")
+    snapshot.nodes.filter { it.node !== root }.forEach { it.node.recycle() }
+    if (rejected != null) {
+      if (adLearning?.preparingSelection == true) Log.i("ClearScreenLearning", "entry-rejected=$rejected")
+      if (adLearning?.selectionWindowId != null) Log.i("ClearScreenLearning", "selection-rejected=$rejected")
+      @Suppress("DEPRECATION") root.recycle()
+      return null
+    }
+    return root
+  }
+
+  internal fun beginAdLearning() {
+    adScans.cancel()
+    stopMediaWatch()
+    clearVisualState()
+    handler.removeCallbacks(eventScanTick)
+    eventScans.clear()
+    eventScanPosted = false
+    adLearning?.start()
+  }
+
   private fun pauseForMissingConsent() {
+    adLearning?.stop()
     if (privacyPaused) return
     privacyPaused = true
+    ClearScreenAccessibilityHealth.invalidate()
     ClearScreenSettingsObserver.clear()
     handler.removeCallbacksAndMessages(null)
     eventScans.clear()
@@ -1430,8 +1671,110 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     stopMediaWatch()
     observedPlayerPackage = null
     observedPlayerVisible = false
-    ocrScreenshotPending = false
+    ocrRequests.cancel()
+    releaseOcrRecognizer()
     ocrSignatureRetryPending = false
+  }
+
+  private fun isScreenReady(): Boolean =
+    (getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isInteractive == true &&
+      (getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager)?.isKeyguardLocked == false
+
+  /** Cancel old evidence and work without changing the user's grant or rules. */
+  private fun suspendProcessing(reason: String) {
+    if (processingSuspended) return
+    processingSuspended = true
+    lastResetReason = reason
+    adLearning?.stop()
+    ClearScreenUiCleanup.stop()
+    ClearScreenSettingsObserver.clear()
+    handler.removeCallbacksAndMessages(null)
+    eventScans.clear()
+    eventScanPosted = false
+    adScans.cancel()
+    stopMediaWatch()
+    clearVisualState()
+    lastSnapshot = null
+    observedPlayerPackage = null
+    observedPlayerVisible = false
+    ocrSignatureRetryPending = false
+    ocrRequests.cancel()
+    releaseOcrRecognizer()
+    if (Build.VERSION.SDK_INT >= 33) runCatching { clearCache() }
+  }
+
+  private inline fun guardServiceTask(stage: String, action: () -> Unit) {
+    try { action() } catch (error: RuntimeException) {
+      adScans.cancel()
+      stopMediaWatch()
+      clearVisualState()
+      lastSnapshot = null
+      lastScanReason = "transient-error"
+      Log.w(TAG, "$stage discarded: ${error.javaClass.simpleName}")
+    }
+  }
+
+  override fun onTrimMemory(level: Int) {
+    super.onTrimMemory(level)
+    lastSnapshot = null
+    wifiDiagnostics.clear()
+    releaseOcrRecognizer()
+    if (Build.VERSION.SDK_INT >= 33) runCatching { clearCache() }
+  }
+
+  private fun releaseOcrRecognizer() = synchronized(recognizerLock) {
+    if (ocrRequests.busy()) releaseRecognizerWhenIdle = true
+    else {
+      textRecognizer?.let { runCatching { it.close() } }
+      textRecognizer = null
+      releaseRecognizerWhenIdle = false
+    }
+  }
+
+  private fun finishOcrRequest(request: OcrRequestGate.Request) {
+    ocrRequests.finish(request)
+    synchronized(recognizerLock) {
+      if (serviceDestroyed || releaseRecognizerWhenIdle) releaseOcrRecognizer()
+    }
+    if (!serviceDestroyed) handler.post {
+      handler.removeCallbacks(releaseIdleRecognizer)
+      handler.postDelayed(releaseIdleRecognizer, 60_000L)
+    }
+  }
+
+  internal fun isOcrStalled(): Boolean = ocrRequests.stalled(SystemClock.uptimeMillis())
+
+  private fun boundedScreenshot(source: Bitmap): Bitmap? {
+    val software = runCatching { source.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() ?: return null
+    val edge = maxOf(software.width, software.height)
+    if (edge <= 1_920) return software
+    val scale = 1_920f / edge
+    return try {
+      runCatching { Bitmap.createScaledBitmap(software, (software.width * scale).toInt().coerceAtLeast(1),
+        (software.height * scale).toInt().coerceAtLeast(1), true) }.getOrNull()
+    } finally { software.recycle() }
+  }
+
+  private data class OcrCapture(
+    val rootBounds: Rect, val windowId: Int, val signature: String,
+    val ocrNodeStates: Map<String, OcrNodeIdentity>, val nodeCount: Int, val closeTargets: List<Rect>,
+  )
+
+  private fun captureOcrEvidence(packageName: String): OcrCapture? {
+    val root = findRootForPackage(packageName) ?: return null
+    val snapshot = AccessibilitySnapshot.capture(root)
+    return try {
+      if (isProtectedTimeSensitiveSnapshot(root, snapshot) ||
+        AdDecisionPolicy.isProtectedConfirmation(snapshot.nodes.filter { it.isVisible }.map { it.compactLabel }) ||
+        snapshot.nodes.any { it.isVisible && (it.isPassword || (it.isEditable && it.isFocused)) }) {
+        recordWifiDiagnostic(packageName, "ocr-request", "reason=protected-screen")
+        null
+      } else OcrCapture(Rect(snapshot.rootBounds), snapshot.windowId, snapshot.signature,
+        snapshot.ocrNodeStates, snapshot.nodes.size, visualCloseTargets(snapshot))
+    } finally {
+      // Async OCR retains only identities and geometry, never live UI nodes.
+      snapshot.nodes.forEach { @Suppress("DEPRECATION") it.node.recycle() }
+    }
   }
 
   @Suppress("DEPRECATION")
@@ -3291,7 +3634,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val ocrNodeStates: Map<String, OcrNodeIdentity>,
   ) {
     companion object {
-      fun capture(root: AccessibilityNodeInfo): AccessibilitySnapshot {
+      fun capture(root: AccessibilityNodeInfo, redactInputs: Boolean = false): AccessibilitySnapshot {
         val nodes = mutableListOf<ScreenNode>()
         val pending = ArrayDeque<PendingNode>()
         pending.add(PendingNode(root, "0", 0, emptyList(), emptyList()))
@@ -3302,9 +3645,13 @@ class ClearScreenAccessibilityService : AccessibilityService() {
           val node = current.node
           // Offscreen forecast charts can expose hundreds of descendants. A
           // hidden subtree cannot provide a currently clickable ad control.
-          if (current.depth > 0 && !node.isVisibleToUser) continue
-          val controlLabels = readNodeLabels(node)
-          val label = readNodeLabel(node)
+          if (current.depth > 0 && !node.isVisibleToUser) {
+            @Suppress("DEPRECATION") node.recycle()
+            continue
+          }
+          val redactNode = redactInputs && (node.isPassword || node.isEditable)
+          val controlLabels = if (redactNode) emptyList() else readNodeLabels(node)
+          val label = if (redactNode) "" else readNodeLabel(node)
           val resourceId = node.viewIdResourceName.orEmpty().lowercase(Locale.ROOT)
           val className = node.className?.toString().orEmpty().lowercase(Locale.ROOT)
           val bounds = Rect().also(node::getBoundsInScreen)
@@ -3343,13 +3690,18 @@ class ClearScreenAccessibilityService : AccessibilityService() {
             bounds = bounds,
             isScrollable = node.isScrollable,
           )).takeLast(MAX_ANCESTOR_REGIONS)
-          if (current.depth >= MAX_TREE_DEPTH) continue
+          if (current.depth >= MAX_TREE_DEPTH || redactNode) continue
           for (index in 0 until node.childCount) {
+            if (nodes.size + pending.size >= MAX_NODES_PER_SNAPSHOT) break
             node.getChild(index)?.let { child ->
               pending.add(PendingNode(child, "${current.path}.$index", current.depth + 1,
                 nextAncestors, nextAncestorRegions))
             }
           }
+        }
+
+        while (pending.isNotEmpty()) {
+          @Suppress("DEPRECATION") pending.removeFirst().node.recycle()
         }
 
         val countdownSkipPaths = nodes.asSequence().filter { owner ->
@@ -3616,6 +3968,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   }
 
   companion object {
+    @Volatile internal var learningService: ClearScreenAccessibilityService? = null
+      private set
     @Volatile
     var running: Boolean = false
 

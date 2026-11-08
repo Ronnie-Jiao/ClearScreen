@@ -5,7 +5,7 @@ import { useAppAlert } from '../components/AppDialog';
 import { C, COMPACT_UI } from '../theme';
 import type { BackendPermissions } from '../native/ClearScreenNative';
 
-type PermissionState=Pick<BackendPermissions,'skipRunning'|'accessibilitySettingEnabled'|'isVivoFamily'|'vendorStartupSettingsAvailable'|'batteryOptimizationIgnored'|'backgroundRestricted'|'startupAllowed'|'backgroundAllowed'>;
+type PermissionState=Pick<BackendPermissions,'skipRunning'|'accessibilityHealth'|'accessibilitySettingEnabled'|'isVivoFamily'|'vendorStartupSettingsAvailable'|'batteryOptimizationIgnored'|'backgroundRestricted'|'startupAllowed'|'backgroundAllowed'>;
 
 export default function ServicePermissionsScreen({permissions,checking=false,verificationFailed=false,onBack,onOpenAccessibility,onStartup,onBackground,onBatteryOptimization}:{
   permissions:PermissionState;
@@ -18,7 +18,7 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
   onBatteryOptimization:()=>void;
 }){
   const showAlert=useAppAlert();
-  const skipStatus=checking?'核验中':verificationFailed?'核验失败':permissions.skipRunning?'已连接':permissions.accessibilitySettingEnabled?'需要修复':'未开启';
+  const skipStatus=checking?'核验中':verificationFailed?'核验失败':!permissions.accessibilitySettingEnabled?'未开启':permissions.accessibilityHealth==='unknown'?'状态待确认':permissions.skipRunning?'已连接':'需要修复';
   const startupStatus=checking?'核验中':verificationFailed?'核验失败':permissions.startupAllowed===null?'需手动确认':permissions.startupAllowed?'已开启':'未开启';
   const backgroundStatus=checking?'核验中':verificationFailed?'核验失败':permissions.backgroundRestricted===true?'受限制':permissions.backgroundAllowed!==null?(permissions.backgroundAllowed?'已允许':'未允许'):permissions.backgroundRestricted===false?'未受限':'需手动确认';
   const batteryStatus=checking?'核验中':verificationFailed?'核验失败':permissions.batteryOptimizationIgnored===null?'读取失败':permissions.batteryOptimizationIgnored?'已忽略':'未忽略';

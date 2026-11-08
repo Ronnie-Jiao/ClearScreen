@@ -2,20 +2,22 @@ import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Background, BrandHeader, Card, Chevron } from '../components/UI';
 import { useAppAlert } from '../components/AppDialog';
-import { BottomNav } from '../components/BottomNav';
+import { BottomNav, useBottomNavMetrics } from '../components/BottomNav';
 import { C } from '../theme';
 import type { SettingsSection } from './SettingsDetailScreen';
 
 type MainTab='home'|'apps'|'settings';
 
-export default function SettingsScreen({onTab,onServicePermissions,onOpenSection,onPrivacyPolicy,onRestoreDefaults}:{
+export default function SettingsScreen({onTab,onServicePermissions,onSystemCleanup,onOpenSection,onPrivacyPolicy,onRestoreDefaults}:{
  onTab:(tab:MainTab)=>void;
  onServicePermissions:()=>void;
+ onSystemCleanup?:()=>void;
  onOpenSection:(section:SettingsSection)=>void;
  onPrivacyPolicy:()=>void;
  onRestoreDefaults?:()=>Promise<void>;
 }){
  const showAlert=useAppAlert();
+ const {inset:navInset}=useBottomNavMetrics();
  const confirmRestoreDefaults=()=>{
   if(!onRestoreDefaults)return;
   showAlert('恢复默认设置？','总开关将关闭，自动处理选项和记录保留周期将恢复默认（7天）。应用排除规则和处理记录会保留。',[
@@ -28,9 +30,10 @@ export default function SettingsScreen({onTab,onServicePermissions,onOpenSection
  const row=(title:string,onPress:()=>void,last=false)=><Pressable accessibilityRole="button" onPress={onPress} style={[s.row,last&&s.lastRow]}><Text style={s.rowTitle}>{title}</Text><Chevron/></Pressable>;
 
  return <Background><View style={s.root}>
-  <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
+  <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[s.scroll,{paddingBottom:112+navInset}]}>
    <BrandHeader smallText/>
    <Card style={s.group}>{row('服务与权限',onServicePermissions,true)}</Card>
+   {onSystemCleanup?<Card style={s.group}>{row('系统广告与营销通知',onSystemCleanup,true)}</Card>:null}
    <Card style={s.group}>
     {row('隐私与数据',()=>onOpenSection('privacyData'))}
     {row('隐私政策',onPrivacyPolicy)}

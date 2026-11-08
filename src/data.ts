@@ -29,6 +29,7 @@ export const APPS: AppItem[] = [
 ];
 
 export type LogItem = { appId: string; time: string; type: 'skip'|'network'|'fail'; text: string; timestamp?: number; result?: string; ruleId?: string };
+export type LearnedCloseRecord = { id: string; appId: string; timestamp: number; needsRelearn?: boolean };
 export const LOGS: LogItem[] = [
   {appId:'xhs',time:'08:32',type:'skip',text:'已跳过开屏广告'},
   {appId:'taobao',time:'09:05',type:'network',text:'已拦截广告请求'},

@@ -92,6 +92,7 @@ def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 android {
     ndkVersion rootProject.ext.ndkVersion
+    buildFeatures { aidl true }
 
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
@@ -101,8 +102,8 @@ android {
         applicationId clearscreenApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion clearscreenTargetSdk
-        versionCode 64
-        versionName "1.0.58"
+        versionCode 92
+        versionName "1.0.86"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -211,6 +212,15 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+    // Local ADB client used as an alternative to Shizuku: Android 11+ wireless
+    // debugging pairing gives the app its own shell (uid 2000) channel.
+    implementation("com.github.MuntashirAkon:libadb-android:3.1.1")
+    implementation("org.conscrypt:conscrypt-android:2.5.3")
+    // Only used to build the local self-signed certificate for the ADB key.
+    implementation("org.bouncycastle:bcprov-jdk15to18:1.81")
+    implementation("org.bouncycastle:bcpkix-jdk15to18:1.81")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 

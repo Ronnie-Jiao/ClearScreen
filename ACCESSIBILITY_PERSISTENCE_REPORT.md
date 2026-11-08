@@ -1,6 +1,6 @@
 # ClearScreen 无障碍授权返回后自动关闭：统一问题报告
 
-更新时间：2026-09-22
+更新时间：2026-11-06
 
 ## 一、结论摘要
 
@@ -181,3 +181,18 @@ adb logcat -d -v threadtime
 - 诊断包正式签名 SHA-256：`93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`
 - 最近已推送提交：`52860a9`（纯探针真机证据报告）。
 - 当前结论：问题尚未修复，已完成根因范围收敛和真机证据记录。
+
+## 十、2026-11-06 补充证据：覆盖安装后授权被系统移除
+
+在 vivo V2502DA（`10AG4M2KGF00527`）上覆盖安装净屏 1.0.72（versionCode 78）时，再次观察到本报告描述的现象，但触发条件是**覆盖安装**而不是"打开后返回"：
+
+- 覆盖安装成功（`adb install -r --no-streaming` 返回 `Success`）后，系统的 `Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES` 只剩 `com.linkpilot.android/.RemoteAccessibilityService`，净屏服务 `com.clearscreen.prototype/.backend.ClearScreenAccessibilityService` 不在名单内；`dumpsys accessibility` 的 `Bound services` 中也没有净屏。
+- 安装前同一设备的名单里净屏是启用的，说明是本次覆盖安装导致授权被移除，而不是安装前就没开。
+
+三条自动化恢复尝试均无效，与本报告第八节的判断一致：
+
+1. `settings put secure enabled_accessibility_services` 写入净屏组件后，值被系统无障碍管理器回写覆盖，名单仍只剩联控远程操作；切换 `accessibility_enabled` 0→1 触发重载也不生效。
+2. `am start -a android.settings.ACCESSIBILITY_DETAILS_SETTINGS` 被系统拒绝：`SecurityException: requires android.permission.OPEN_ACCESSIBILITY_DETAILS_SETTINGS`（adb shell 的 uid 2000 无此权限）。
+3. `am start -a android.settings.ACCESSIBILITY_SETTINGS` 可以打开无障碍列表页，只能由用户在系统界面手动开启。
+
+结论补充：应用侧无法伪造或恢复该授权，正式发布与验收仍必须以系统无障碍列表实际保持开启为准；ADB 覆盖安装后应预期该授权会被清掉，并提示用户重新手动开启。切换 `accessibility_enabled` 期间，联控远程操作曾短暂解绑，随后自行恢复重新绑定，未留下副作用。

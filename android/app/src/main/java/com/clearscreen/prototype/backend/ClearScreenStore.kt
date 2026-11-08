@@ -65,6 +65,74 @@ class ClearScreenStore internal constructor(private val preferences: SharedPrefe
     preferences.edit().clear().commit()
   }
 
+  fun getLearnedAdRules(): JSONArray = synchronized(learnedRulesLock) {
+    runCatching { JSONArray(preferences.getString("learnedAdRules", "[]")) }.getOrElse { JSONArray() }
+  }
+
+  fun saveLearnedAdRule(rule: JSONObject): Boolean = synchronized(learnedRulesLock) {
+    val rules = getLearnedAdRules()
+    val retained = mutableListOf<JSONObject>()
+    for (i in 0 until rules.length()) {
+      val old = rules.optJSONObject(i) ?: continue
+      val selector = rule.optJSONObject("selector")
+      val oldSelector = old.optJSONObject("selector")
+      val sameTarget = selector != null && old.optLong("updated") == rule.optLong("updated") &&
+        oldSelector != null && listOf("version", "id", "kind", "label", "anchorId", "anchorKind", "route", "context")
+          .all { oldSelector.optString(it) == selector.optString(it) }
+      if (old.optString("pkg") != rule.optString("pkg") || !sameTarget) retained.add(old)
+    }
+    val saved = JSONArray()
+    retained.takeLast(79).forEach { saved.put(it) }
+    saved.put(rule)
+    preferences.edit().putString("learnedAdRules", saved.toString()).commit()
+  }
+
+  fun clearLearnedAdRules(): Boolean = synchronized(learnedRulesLock) {
+    preferences.edit().remove("learnedAdRules").commit()
+  }
+
+  fun deleteLearnedAdRule(key: String): Boolean = synchronized(learnedRulesLock) {
+    if (key.isBlank()) return@synchronized false
+    val rules = getLearnedAdRules()
+    val retained = JSONArray()
+    var found = false
+    for (i in 0 until rules.length()) {
+      val rule = rules.optJSONObject(i) ?: continue
+      if (rule.optString("key") == key) found = true else retained.put(rule)
+    }
+    found && preferences.edit().putString("learnedAdRules", retained.toString()).commit()
+  }
+
+  /** Write-ahead backup for user-approved system changes; never overwrite an earlier original. */
+  fun cleanupBackup(id: String): String? = synchronized(lock) {
+    JSONObject(preferences.getString("system_cleanup_backups", "{}") ?: "{}").optString(id, "").ifBlank { null }
+  }
+
+  fun saveCleanupBackup(id: String, original: String) = synchronized(lock) {
+    val backups = JSONObject(preferences.getString("system_cleanup_backups", "{}") ?: "{}")
+    if (!backups.has(id)) {
+      backups.put(id, original)
+      check(preferences.edit().putString("system_cleanup_backups", backups.toString()).commit()) { "保存恢复记录失败" }
+    }
+  }
+
+  fun removeCleanupBackup(id: String) = synchronized(lock) {
+    val backups = JSONObject(preferences.getString("system_cleanup_backups", "{}") ?: "{}")
+    backups.remove(id)
+    check(preferences.edit().putString("system_cleanup_backups", backups.toString()).commit()) { "更新恢复记录失败" }
+  }
+
+  /** Confirmed state of a user-approved system switch: "on" or "off". */
+  fun cleanupState(id: String): String? = synchronized(lock) {
+    JSONObject(preferences.getString("system_cleanup_states", "{}") ?: "{}").optString(id, "").ifBlank { null }
+  }
+
+  fun saveCleanupState(id: String, state: String) = synchronized(lock) {
+    val states = JSONObject(preferences.getString("system_cleanup_states", "{}") ?: "{}")
+    states.put(id, state)
+    check(preferences.edit().putString("system_cleanup_states", states.toString()).commit()) { "保存开关状态失败" }
+  }
+
   fun isOnboardingCompleted(): Boolean =
     preferences.getBoolean(KEY_ONBOARDING_COMPLETED, false)
 
@@ -146,6 +214,31 @@ class ClearScreenStore internal constructor(private val preferences: SharedPrefe
     require(days in LOG_RETENTION_OPTIONS) { "Unsupported log retention: $days" }
     preferences.edit().putInt(KEY_LOG_RETENTION_DAYS, days).apply()
     pruneExpiredEventsLocked(readEventsLocked())
+  }
+
+  /**
+   * One-time explanation for the component switches: shown the first time a
+   * user sees the checked list, then remembered here so it never nags again.
+   * Cleared together with the rest of the app data.
+   */
+  fun isQuickComponentsGuideSeen(): Boolean =
+    preferences.getBoolean(KEY_QUICK_COMPONENTS_GUIDE_SEEN, false)
+
+  fun setQuickComponentsGuideSeen() {
+    preferences.edit().putBoolean(KEY_QUICK_COMPONENTS_GUIDE_SEEN, true).apply()
+  }
+
+  /**
+   * One-time explanations on the ADB access page. Each key is a feature the
+   * user already reached, so the page can stay free of standing help text and
+   * only explain something the first time it is actually needed.
+   */
+  fun readAdbGuideSeen(): Set<String> =
+    preferences.getStringSet(KEY_ADB_GUIDE_SEEN, emptySet())?.toSet() ?: emptySet()
+
+  fun markAdbGuideSeen(key: String) {
+    val next = readAdbGuideSeen() + key
+    preferences.edit().putStringSet(KEY_ADB_GUIDE_SEEN, next).apply()
   }
 
   /**
@@ -254,6 +347,7 @@ class ClearScreenStore internal constructor(private val preferences: SharedPrefe
   }
 
   companion object {
+    private val learnedRulesLock = Any()
     // Preserve the existing file and compatibility with old service processes.
     @Suppress("DEPRECATION")
     private fun openPreferences(context: Context): SharedPreferences = context.getSharedPreferences(
@@ -276,6 +370,8 @@ class ClearScreenStore internal constructor(private val preferences: SharedPrefe
     const val KEY_CLOSE_FEED_ADS = "closeFeedAdsEnabled"
     private const val KEY_LOG_RETENTION_DAYS = "logRetentionDays"
     private const val KEY_VENDOR_STARTUP_GUIDE_CONFIRMED = "vendorStartupGuideConfirmed"
+    private const val KEY_QUICK_COMPONENTS_GUIDE_SEEN = "quickComponentsGuideSeen"
+    private const val KEY_ADB_GUIDE_SEEN = "adbGuideSeen"
     const val DEFAULT_LOG_RETENTION_DAYS = 7
     private const val MILLIS_PER_DAY = 24L * 60L * 60L * 1000L
     private const val MAX_EVENTS = 5000

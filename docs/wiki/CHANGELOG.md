@@ -4,6 +4,12 @@
 
 ## 2026-11-08
 
+### 2026-11-08 13:45:54 +08:00 — 重建并覆盖安装净屏 1.0.86
+
+- 按用户要求基于已推送的 `main`（`16c349d494540c9dc72b2bc5cfdd2c772a180c44`）重新构建 Release：`:app:assembleRelease --offline --console=plain` 成功。APK 包名 `com.clearscreen.prototype`、版本 `1.0.86` / versionCode `92`、应用名“净屏”；Gradle APK 与 `android/app/build/outputs/apk/净屏.apk` 均为 118,651,403 字节、SHA-256 `BF459C0B59531A059E2C2F5777A556FED0B4B766778A638A251CEE8A6466A1F8`，apksigner v2 验签通过，正式签名证书 SHA-256 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。
+- 使用 USB `adb install -r --no-streaming` 覆盖安装到 Xiaomi 22101317C，返回 `Success`。安装后读回版本 `1.0.86 / 92`，`lastUpdateTime=2026-11-08 13:45:23`，`firstInstallTime=2026-11-06 18:47:52` 未变；`enabled_accessibility_services` 仍包含净屏无障碍服务。未卸载、未清除应用数据，未启动应用或进行界面/功能验收。
+- 涉及文件：正式 Release APK、命名 APK、本修改记录。
+
 ### 2026-11-08 13:39:07 +08:00 — 清理公开记录中的临时设备地址与本机截图引用
 
 - 原因：历史项目文档中保留了设备当时的局域网地址，并链接到本机 `tmp/` 临时截图；这些临时设备信息不需要随公开仓库发布。

@@ -4,6 +4,13 @@
 
 ## 2026-11-08
 
+### 2026-11-08 13:39:07 +08:00 — 清理公开记录中的临时设备地址与本机截图引用
+
+- 原因：历史项目文档中保留了设备当时的局域网地址，并链接到本机 `tmp/` 临时截图；这些临时设备信息不需要随公开仓库发布。
+- 修改：保留功能与真机验证结论，移除具体局域网地址及临时截图链接；包含本机网络信息的界面截图不纳入版本库。其余稳定项目截图仍按原记录保留。
+- 涉及文件：`README.md`、`docs/wiki/CHANGELOG.md`。
+- 验证：`npx tsc --noEmit` 通过；未执行自动化功能测试、Release 构建或装机。
+
 ### 2026-11-08 13:31:52 +08:00 — 同步 Android Expo 配置版本号
 
 - 核对待提交工作区时发现 `android/app/build.gradle` 为 `1.0.86 / versionCode 92`，`app.json` 仍为 `1.0.86 / versionCode 91`。已将 `app.json` 同步到 versionCode 92，避免后续 Expo 原生配置生成回退版本。
@@ -54,7 +61,7 @@
 - 与另一窗口的分工：页面标题「直接改系统设置」及其下方小字由另一窗口负责，本次未改动。
 - 同步更新 `docs/wiki/README.md` 的「界面文案约束」例外条款，改为“常驻说明迁到一次性弹窗”。
 - 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功；`adb -s 2f8898c80822 install -r` 覆盖安装成功（安装后读回 1.0.83 / 89，`firstInstallTime` 仍为 2026-11-06 18:47:52，未卸载、未清数据；装前确认无并行 `adb install`）。
-- 真机验证（小米 22101317C）：折叠态整页 `screenshots/2026-11-08-直接改系统设置-精简页.png`；首次点「高级」弹出说明 `screenshots/2026-11-08-直接改系统设置-首次点高级弹窗.png`；`am force-stop` 重启应用后再点「高级」直接展开、不再弹窗 `screenshots/2026-11-08-直接改系统设置-重启后展开高级.png`。其余三个按钮的弹窗走同一套逻辑，未逐个点击（会跳转或触发配对，避免干扰并行窗口）。
+- 真机验证（小米 22101317C）：折叠态整页 `screenshots/2026-11-08-直接改系统设置-精简页.png`；首次点「高级」弹出说明 `screenshots/2026-11-08-直接改系统设置-首次点高级弹窗.png`；`am force-stop` 重启应用后再点「高级」直接展开、不再弹窗 。其余三个按钮的弹窗走同一套逻辑，未逐个点击（会跳转或触发配对，避免干扰并行窗口）。
 - 涉及文件：`src/screens/AdbAccessScreen.tsx`、`src/native/ClearScreenNative.ts`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenNativeModule.kt`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenStore.kt`、`docs/wiki/README.md`、本修改记录。
 - 参考：当前工作区修改，未提交。
 
@@ -245,7 +252,7 @@
 - 未改动开关项本身的增删，未实现任何跳转逻辑；这两部分分别由其他会话负责。
 - 同步在 `docs/wiki/README.md` 的「界面文案约束」登记本页例外：只保留结果说明，技术说明与操作教学不显示，无法自动操作的项用「需手动」标识。
 - 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.79 / 85，`lastUpdateTime` 2026-11-08 09:47:37，`firstInstallTime` 仍为 2026-11-06 18:47:52，未清数据、未卸载）。
-- 真机验证：小米 22101317C 页首截图为 `tmp/recommend-top.png`，底部与「常用推荐开关」「授权通道」为 `tmp/recommend-bottom.png`，两张有重叠、合起来覆盖整页；截图中每条只剩结果说明，技术小字已消失，无法自动操作的项均显示「需手动」。设备同时被其他会话占用，底部截图里开关右侧的箭头属于另一会话正在做的跳转改动，不是本次文案改动。
+- 真机验证：小米 22101317C 页首及底部均已检查；截图中每条只剩结果说明，技术小字已消失，无法自动操作的项均显示「需手动」。设备同时被其他会话占用，底部截图里开关右侧的箭头属于另一会话正在做的跳转改动，不是本次文案改动。
 - 涉及文件：`src/screens/SystemRecommendScreen.tsx`、`docs/wiki/README.md`、本修改记录。
 - 参考：当前工作区修改，未提交。
 
@@ -265,7 +272,7 @@
 - 卡片改为「标题 + 已连接/未连接标签」，标题右侧保留箭头；标签旁不再让「未连接」独占一行。卡片内加两句用户语言说明：连上后净屏不用数据线就能直接改这台手机的系统广告开关、停用快应用和广告组件、清理广告通知渠道；没连上时下面的扫描和清理都用不了，连上后手机重启需要再连一次。
 - 文案不含端口、adb、配对码等术语；同时在 `docs/wiki/README.md` 的「界面文案约束」里登记这张入口卡片的例外。
 - 改动文件：`src/screens/MoreCleanupScreen.tsx`（新增标签与两句说明、`Badge`/样式），`docs/wiki/README.md`。并行窗口随后把「更多清理」页合并进「系统广告与营销通知」页，卡片与文案被原样保留到 `src/screens/SystemCleanupScreen.tsx`，该页顶部的例外登记也同步改成了合并后的路径。
-- 验证：`npx tsc --noEmit` 通过；release 构建覆盖安装到小米 22101317C（未卸载、未清数据，`firstInstallTime` 保持 2026-11-06 18:47:52）；真机截图 `screenshots/2026-11-08-系统广告与营销通知-合并后顶部.png`，同页备份 `tmp/mm-22.png`。
+- 验证：`npx tsc --noEmit` 通过；release 构建覆盖安装到小米 22101317C（未卸载、未清数据，`firstInstallTime` 保持 2026-11-06 18:47:52）；真机截图 `screenshots/2026-11-08-系统广告与营销通知-合并后顶部.png`。
 
 ### 2026-11-08 09:45:01 +08:00 — 系统推荐开关页把「手动去设置」三项改成开关行
 
@@ -288,7 +295,7 @@
 - 清理只服务该提示的样式 `status`、`action`、`actionText`；`accessibilityReady`、`readAccessibility`、`openAccessibility` 仍被开关点击授权判断与错误提示使用，保留。
 - 未改动同页其他文案、跳转、开关列表与授权通道入口；未触碰其他会话改动。
 - 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` BUILD SUCCESSFUL；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.79 / 85，`firstInstallTime` 仍为 2026-11-06 18:47:52，未清数据、未卸载）。
-- 真机验证：净屏无障碍服务未启用状态下（`enabled_accessibility_services` 仅为联控服务），小米 22101317C 截图为 `tmp/shot-recommend-top.png`，页面顶部标题下直接是「直接改写与代点」，开关列表显示正常。
+- 真机验证：净屏无障碍服务未启用状态下（`enabled_accessibility_services` 仅为联控服务），小米 22101317C 页面顶部标题下直接是「直接改写与代点」，开关列表显示正常。
 - 涉及文件：`src/screens/SystemRecommendScreen.tsx`、本修改记录。
 - 参考：当前工作区修改，未提交。
 
@@ -314,20 +321,20 @@
 - 连接成功弹窗去掉 Shizuku 术语，统一为「已连接，现在可以直接改系统开关了。」；端口校验提示改为「请填写「无线调试」页面上显示的那串数字。」
 - 同步更新 `docs/wiki/README.md` 的「界面文案约束」例外条款，登记页首目的说明与「高级」内的人话解释。
 - 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.79 / 85，`firstInstallTime` 仍为 2026-11-06 18:47:52，未清数据）。
-- 真机验证：小米 22101317C 整页截图为 `tmp/adb-copy-06.png`。期间该设备被另一会话持续占用（前台被反复切到系统设置、无障碍、系统推荐开关等页面），「高级」展开态截图多次被切走，未取得。
+- 真机验证：小米 22101317C 整页状态已检查。期间该设备被另一会话持续占用（前台被反复切到系统设置、无障碍、系统推荐开关等页面），「高级」展开态截图多次被切走，未取得。
 - 涉及文件：`src/screens/AdbAccessScreen.tsx`、`docs/wiki/README.md`、本修改记录。
 - 参考：当前工作区修改，未提交。
 
 ### 2026-11-08 09:14:52 +08:00 — 授权通道页改为按按钮说明作用，技术细节收进「高级」
 
-- 原因：该页四个按钮只写操作名，用户不知道开启后能得到什么；页面上还直接暴露 `192.168.1.23`、连接端口和 `adb tcpip 5555` / `adb connect 手机IP:5555`，不容易看懂。
+- 原因：该页四个按钮只写操作名，用户不知道开启后能得到什么；页面上还直接暴露本机地址、连接端口和 `adb tcpip 5555` / `adb connect 手机IP:5555`，不容易看懂。
 - 连接状态卡片：状态行只保留「正在读取状态」「这台手机不支持无线调试配对」「已连接」「未连接」，下方一句「先打开「无线调试」，再点下面的按钮。」或「现在可以直接改系统开关，重启手机后需要再连一次。」；移除原「本机地址」与「重启或关闭无线调试后需重新连接」两行。
 - 按钮作用说明：打开开发者选项「打开后才能打开「无线调试」，下面的按钮才用得上。」；自动查找无线调试「以前配对过的话，点一下会自动连回来，不用再填任何数字。」；开始自动配对「点一下，净屏会自己读出配对码并连上；连上后不用数据线也能改系统开关。」；连接「自动配对没连上时，把「无线调试」页显示的端口抄到这里，再点一次。」；删除「需先在开发者选项打开“无线调试”。」前置说明。
 - 新增「高级」折叠区（默认收起）：收进连接端口输入与「连接」按钮、本机地址和「电脑 adb 兜底」两行命令；一级界面不再出现 IP、端口与 adb 命令。自动配对下方的「连接」卡片整体移入该区。
 - 底部隐私行改为「配对码和密钥只保存在这台手机上，不会上传。」
 - 同步在 `docs/wiki/README.md` 的「界面文案约束」登记本页例外，避免后续按旧规则删除这些作用说明。
 - 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease` 成功；`adb -s 2f8898c80822 install -r` 覆盖安装成功（1.0.78 / 84，`firstInstallTime` 仍为 2026-11-06 18:47:52，未清数据）。
-- 真机验证：小米 22101317C 整页截图为 `tmp/adb-03-page.png`，高级展开上半部为 `tmp/adb-04-advanced.png`，展开并滚动到底部（端口、本机地址、adb 命令均在高级内）为 `tmp/adb-06-advanced-bottom.png`；另确认展开后无障碍树中「高级」「收起」「连接端口」均存在。
+- 真机验证：小米 22101317C 整页及高级展开区域均已检查（包含本机网络信息的截图未纳入版本库）；另确认展开后无障碍树中「高级」「收起」「连接端口」均存在。
 - 说明：真机操作期间设备同时被另一会话占用，多次截图被切到系统设置页作废；仅采用应用处于前台时拍到的三张。
 - 涉及文件：`src/screens/AdbAccessScreen.tsx`、`docs/wiki/README.md`、本修改记录。
 - 参考：当前工作区修改，未提交。
@@ -396,7 +403,7 @@
 - 密钥与配对：RSA 2048 自签证书由 `bcprov/bcpkix-jdk15to18:1.81` 生成，私钥与证书存于私有目录 `filesDir/adb`；配对码与私钥不写日志。系统配对弹窗离开前台即被系统关闭（实测），所以配对码由净屏的无障碍服务在弹窗仍在前台时读取（60/300/900ms 三次扫描），随后应用退到后台完成配对，用户不必抄写配对码。
 - 实测修复四处缺陷：①`AbsAdbConnectionManager.connect()` 在旧 socket 仍报告已连接时直接返回 false，导致“连接失败”假象——连接前先断开旧 socket；②`close()` 会销毁缓存的私钥对象，导致断线后无法再认证——断开只关 socket，保留密钥与 manager；③adbd 命令结束后不一定发送 CLSE，等 EOF 会永久挂起——把 `__CS_EXIT:$?` 同时当作结束标记与退出码，读到即结束并主动关流；④`dumpsys package` 对同一包可能返回多条记录（前后 `suspended=true`/`false` 混杂），旧的“必须恰好一条”规则会误报“无法确认”——改为任一记录 `suspended=true` 即视为已关闭。
 - 界面：`SystemRecommendScreen` 增加「授权通道」入口；`AdbAccessScreen` 提供连接状态、自动配对、连接端口直连、电脑 adb 兜底与安全说明；`MoreCleanupScreen` 增加授权通道状态入口。按文案约束删除纯说明副标题（“系统推荐、资讯推荐、应用商店推广”“快应用服务、营销通知渠道”“仅列出当前品牌中可识别的项目。”“无线调试配对，或电脑 adb 拉起”），保留断线重连原因、危险操作后果与安全边界告知（正常字号）。
-- 验证：`:app:assembleRelease` 成功；`adb install -r` 返回 `Success`。Redmi Note 12 5G（Android 14 / HyperOS）：无线调试配对通过，连接 `192.168.1.23:42639`，`dumpsys package` 读取、`pm suspend` → `pm unsuspend` 往返均成功，PC 侧 `dumpsys` 复核全部记录 `suspended=false`（测试期改动已还原）。截图见 `tmp/p1.png`–`tmp/p9.png`。
+- 验证：`:app:assembleRelease` 成功；`adb install -r` 返回 `Success`。Redmi Note 12 5G（Android 14 / HyperOS）：无线调试配对通过，连接成功，`dumpsys package` 读取、`pm suspend` → `pm unsuspend` 往返均成功，PC 侧 `dumpsys` 复核全部记录 `suspended=false`（测试期改动已还原）。设备地址、端口及配对过程截图未纳入版本库。
 - **未验证**：电脑侧 `adb tcpip 5555` 兜底分支未实测，只按 USB/无线调试两条路径验证；手机重启、关闭无线调试或换网络后的恢复依赖用户手动重连；Android 11–13 与其他品牌未验证。覆盖安装会清空系统里的无障碍启用项（本次重装后读回 `null`，已用 `settings put secure` 恢复），用户升级后需重新开启无障碍。
 - 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/`（ClearScreenAdbOperations.kt、ClearScreenAdbClient.kt、ClearScreenAdbKeys.kt、ClearScreenAdbPairingHelper.kt、ClearScreenShellOps.kt、ClearScreenNativeModule.kt、ClearScreenAccessibilityService.kt）、`src/native/ClearScreenNative.ts`、`src/screens/AdbAccessScreen.tsx`、`src/screens/MoreCleanupScreen.tsx`、`src/screens/SystemCleanupScreen.tsx`、`src/screens/SystemRecommendScreen.tsx`、`android/app/build.gradle`、`docs/wiki/README.md`、`README.md`、本修改记录。
 

@@ -8,15 +8,6 @@ import { C, COMPACT_UI } from '../theme';
 
 type ScanMode = 'full' | 'observed';
 
-function importanceLabel(value?: number): string {
-  if (value === undefined || value < 0) return '未知';
-  if (value === 0) return '关闭';
-  if (value >= 4) return '高';
-  if (value === 3) return '中';
-  if (value === 2) return '低';
-  return '极低';
-}
-
 function hasPrivilegedRead(status: { running?: boolean; granted?: boolean; adbConnected?: boolean } | null): boolean {
   return Boolean(status && (status.adbConnected || (status.running && status.granted)));
 }
@@ -132,17 +123,16 @@ export default function MarketingChannelsScreen({ apps, onBack, onOpenServicePer
           {channels.map(channel => {
             const appName = appNames.get(channel.packageName) || '未知应用';
             const stateLabel = channel.state === 'on' ? '已开启' : channel.state === 'off' ? '已关闭' : '状态未知';
-            const title = channel.name || `${appName} · 营销渠道`;
-            const meta = mode === 'full'
-              ? `${appName}${channel.group ? ` · ${channel.group}` : ''} · 重要性 ${importanceLabel(channel.importance)}`
-              : `重要性 ${importanceLabel(channel.importance)}`;
+            const channelName = channel.name?.trim();
+            const title = channelName ? `${channelName} · ${appName}` : `${appName} · 营销渠道`;
+            const meta = mode === 'full' ? channel.group?.trim() : '';
             return <View key={`${channel.packageName}:${channel.id}`} style={s.row}>
-              <Pressable accessibilityRole="button" accessibilityLabel={`打开${appName}的${title}通知设置`}
+              <Pressable accessibilityRole="button" accessibilityLabel={`打开${title}通知设置`}
                 disabled={!!busy} onPress={() => { void openChannelSettings(channel) }} style={s.rowText}>
-                <Text style={s.rowTitle}>{title}</Text><Text numberOfLines={1} style={s.rowStatus}>{meta}</Text>
+                <Text style={s.rowTitle}>{title}</Text>{meta ? <Text numberOfLines={1} style={s.rowStatus}>{meta}</Text> : null}
               </Pressable>
               <Toggle compact value={channel.state === 'on'} unknown={channel.state === 'unknown'}
-                accessibilityLabel={`${title}，${appName}，${stateLabel}；点按打开系统通知设置`}
+                accessibilityLabel={`${title}，${stateLabel}；点按打开系统通知设置`}
                 onChange={() => { void openChannelSettings(channel) }} />
             </View>;
           })}

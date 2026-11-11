@@ -137,7 +137,7 @@ internal object ClearScreenAdbOperations {
       connectionFailure(context, "需要先完成无线调试配对", reportFailure)
     } catch (error: Exception) {
       manager?.let(::dropConnection)
-      connectionFailure(context, readable(error, "连接失败"), reportFailure)
+      connectionFailure(context, readable(error, "连接失败，请确认无线调试已开启且连接端口正确"), reportFailure)
     }
   }
 
@@ -209,7 +209,7 @@ internal object ClearScreenAdbOperations {
       result(true, "已连接")
     } catch (error: Exception) {
       manager?.let(::dropConnection)
-      connectionFailure(context, readable(error, "连接失败"), true)
+      connectionFailure(context, readable(error, "没有找到可连接的无线调试，请开启无线调试后重试"), true)
     }
   }
 
@@ -409,11 +409,15 @@ internal object ClearScreenAdbOperations {
     return result(false, text)
   }
 
+  private val CJK = Regex("[\\u4e00-\\u9fff]")
+
   private fun readable(error: Exception, fallback: String): String {
     val text = error.message?.trim().orEmpty()
+    // libadb throws English socket/IO text; only Chinese messages are readable.
     return when {
       text.isEmpty() -> fallback
       text.length > 200 -> fallback
+      !CJK.containsMatchIn(text) -> fallback
       else -> text
     }
   }

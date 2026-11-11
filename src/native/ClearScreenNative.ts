@@ -102,7 +102,7 @@ export type UiCleanupTarget = {
   needsSystemToggleOn: boolean;
   /** Plain-language outcome of closing this switch. */
   effect: string;
-  /** assisted: accessibility tap · manual: jump only · unreachable: system blocks third-party apps. */
+  /** assisted: exact-page operation · manual: manual path · unreachable: no verified matching control. */
   support: 'assisted' | 'manual' | 'unreachable';
   reason?: string | null;
   navigate?: string | null;
@@ -147,6 +147,14 @@ async function openNativeSettings(method: SettingsMethod, ...args: string[]): Pr
   if (typeof native?.[method] !== 'function' || await native[method](...args) !== true) {
     throw new Error('系统设置入口不可用');
   }
+}
+
+/** Keeps a native call from holding the UI in a pending state forever. */
+function withNativeTimeout<T>(read: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    read.then(value => { clearTimeout(timer); resolve(value) }, error => { clearTimeout(timer); reject(error) });
+  });
 }
 
 function withPermissionTimeout<T>(read: Promise<T>): Promise<T> {
@@ -419,27 +427,27 @@ export const ClearScreenNative = {
   },
   getAdbAccessStatus: async (): Promise<AdbAccessStatus> => {
     if (!native?.getAdbAccessStatus) throw new Error('此设备不支持直接改系统设置');
-    return native.getAdbAccessStatus();
+    return withNativeTimeout(native.getAdbAccessStatus(), 6000, '连接状态读取超时，请重试');
   },
   pairAdb: async (host: string, port: number, code: string): Promise<AdbActionResult> => {
     if (!native?.pairAdb) throw new Error('此设备不支持直接改系统设置');
-    return native.pairAdb(host, port, code);
+    return withNativeTimeout(native.pairAdb(host, port, code), 45000, '配对没有完成，请重试');
   },
   connectAdb: async (host: string, port: number): Promise<AdbActionResult> => {
     if (!native?.connectAdb) throw new Error('此设备不支持直接改系统设置');
-    return native.connectAdb(host, port);
+    return withNativeTimeout(native.connectAdb(host, port), 45000, '连接没有完成，请重试');
   },
   autoConnectAdb: async (): Promise<AdbActionResult> => {
     if (!native?.autoConnectAdb) throw new Error('此设备不支持直接改系统设置');
-    return native.autoConnectAdb();
+    return withNativeTimeout(native.autoConnectAdb(), 45000, '连接没有完成，请重试');
   },
   startAdbAutoPair: async (): Promise<AdbAccessStatus> => {
     if (!native?.startAdbAutoPair) throw new Error('此设备不支持直接改系统设置');
-    return native.startAdbAutoPair();
+    return withNativeTimeout(native.startAdbAutoPair(), 15000, '没有开始配对，请重试');
   },
   stopAdbAutoPair: async (): Promise<AdbAccessStatus> => {
     if (!native?.stopAdbAutoPair) throw new Error('此设备不支持直接改系统设置');
-    return native.stopAdbAutoPair();
+    return withNativeTimeout(native.stopAdbAutoPair(), 15000, '停止配对超时，请重试');
   },
   disconnectAdb: async (): Promise<void> => {
     if (!native?.disconnectAdb) throw new Error('此设备不支持直接改系统设置');

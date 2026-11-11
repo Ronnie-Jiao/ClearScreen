@@ -23,10 +23,7 @@ const GROUP_ROWS = [
   { key: 'store', title: '应用商店推广', category: 'store', route: ROUTE_STORE },
 ] as const;
 
-const ACTION_GROUPS = [
-  { key: 'on', title: '需要开启', needsSystemToggleOn: true },
-  { key: 'off', title: '需要关闭', needsSystemToggleOn: false },
-] as const;
+const ACTION_ORDER = [true, false] as const;
 
 const needsSystemToggleOn = (target: UiCleanupTarget | null) =>
   target?.needsSystemToggleOn === true;
@@ -114,7 +111,7 @@ export default function SystemRecommendScreen({
   const readAccessibility = useCallback(async () => {
     try {
       const health = await ClearScreenNative.getAccessibilityHealth();
-      setAccessibilityReady(Boolean(health.permissions.skipRunning));
+      setAccessibilityReady(Boolean(health.permissions.skip));
     } catch { /* The next explicit operation will report any error. */ }
   }, []);
   useEffect(() => {
@@ -159,73 +156,77 @@ export default function SystemRecommendScreen({
       setBusyTarget('');
     }
   };
-  const changeTarget = (target: UiCleanupTarget) => {
-    const closing = target.state !== 'off';
+  const changeTargetTo = (target: UiCleanupTarget, closing: boolean) => {
     if (target.direct) {
       void changeDirectTarget(target, closing);
       return;
     }
     if (!requireAccessibility()) return;
-    if (!closing && !target.canRestore) {
-      showAlert('无法打开', '净屏没有保存这个开关原来的状态，无法自动打开，请到系统设置里自己打开。', undefined, { tone: 'warning' });
+    const start = () => {
+      setBusyTarget(target.id);
+      void ClearScreenNative.startUiCleanup(target.id, !closing).catch(error => {
+        setBusyTarget('');
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('无障碍')) {
+          showAlert('需要开启净屏无障碍服务', '这些开关由净屏的无障碍服务代为操作，开启后才能使用。', [
+            { text: '取消', style: 'cancel' },
+            { text: '去开启', onPress: openAccessibility },
+          ], { tone: 'warning' });
+          return;
+        }
+        fail('无法启动这个操作', error);
+      });
+    };
+    if (target.id.startsWith('xiaomi.assistant.')) {
+      showAlert('打开负一屏设置', '从桌面右滑进入负一屏，再打开右上角设置。', [
+        { text: '取消', style: 'cancel' },
+        { text: '开始', onPress: start },
+      ]);
+    } else start();
+  };
+  const changeTarget = (target: UiCleanupTarget) => {
+    if (target.state === 'unknown') {
+      showAlert(target.title, '当前状态未确认，请选择要设置的状态。', [
+        { text: '取消', style: 'cancel' },
+        { text: '开启', onPress: () => changeTargetTo(target, false) },
+        { text: '关闭', onPress: () => changeTargetTo(target, true) },
+      ]);
       return;
     }
-    setBusyTarget(target.id);
-    void ClearScreenNative.startUiCleanup(target.id, !closing).catch(error => {
-      setBusyTarget('');
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes('无障碍')) {
-        showAlert('需要开启净屏无障碍服务', '这些开关由净屏的无障碍服务代为操作，开启后才能使用。', [
-          { text: '取消', style: 'cancel' },
-          { text: '去开启', onPress: openAccessibility },
-        ], { tone: 'warning' });
-        return;
-      }
-      fail('无法启动这个操作', error);
-    });
+    changeTargetTo(target, target.state !== 'off');
   };
-  /** The reachable switch behind each category shortcut; null means the system keeps it private. */
-  const groupTarget = (key: typeof GROUP_ROWS[number]['key']) => {
-    const row = GROUP_ROWS.find(item => item.key === key)!;
-    const usable = targets.filter(target =>
-      target.category === row.category && (target.direct || target.support === 'assisted'));
-    const preferred = key === 'news'
-      ? usable.find(target => target.id.includes('launcher.assistant'))
-        ?? usable.find(target => target.title.includes('总开关'))
-        ?? usable.find(target => target.title.includes('资讯'))
-      : usable.find(target => target.direct);
-    return preferred ?? usable[0] ?? null;
-  };
-  const categoryTargets = GROUP_ROWS.map(row => ({ row, target: groupTarget(row.key) }));
+  // Category rows open pages; they are not separate system switches.
+  const categoryTargets = GROUP_ROWS.map(row => ({ row, target: null }));
   const renderTarget = (target: UiCleanupTarget, plain: boolean) => {
     const toggleable = target.direct || target.support === 'assisted';
-    return <View key={target.id} style={[s.row, (!toggleable || plain) && s.rowPlain]}>
+    if (!toggleable) return <Pressable key={target.id} accessibilityRole="button"
+      onPress={() => showAlert(target.title, target.reason || '这个项目暂时无法自动操作。', undefined, { tone: 'warning' })}
+      style={[s.row, plain && s.rowPlain]}>
       <View style={s.rowText}><Text style={s.rowTitle}>{target.title}</Text></View>
-      {toggleable
-        ? <View style={s.stateWrap}>
-            <Toggle compact unknown={target.state === 'unknown'} value={target.state === 'on'}
-              onChange={() => { if (!busyTarget) changeTarget(target); }} />
-          </View>
-        : <Badge green={false} compact>需手动</Badge>}
+      <Badge green={false} compact>{target.support === 'unreachable' ? '未适配' : '需手动'}</Badge>
+    </Pressable>;
+    return <View key={target.id} style={[s.row, plain && s.rowPlain]}>
+      <View style={s.rowText}><Text style={s.rowTitle}>{target.title}</Text></View>
+      <View style={s.stateWrap}>
+        <Toggle compact unknown={target.state === 'unknown'} value={target.state === 'on'}
+          onChange={() => { if (!busyTarget) changeTarget(target); }} />
+      </View>
     </View>;
   };
-  const renderCategory = (row: typeof GROUP_ROWS[number], target: UiCleanupTarget | null, plain: boolean) =>
-    <View key={row.key} style={[s.row, plain && s.rowPlain]}>
-      <Pressable accessibilityRole="button" accessibilityHint={`打开${row.title}的系统设置页`}
-        onPress={() => openRoute(row.route)} style={s.rowText}>
-        <Text style={s.rowTitle}>{row.title}</Text>
-      </Pressable>
-      {target
-        ? <View style={s.stateWrap}>
-            <Toggle compact unknown={target.state === 'unknown'} value={target.state === 'on'}
-              onChange={() => { if (!busyTarget) changeTarget(target); }} />
-          </View>
-        : <Pressable accessibilityRole="button" accessibilityHint={`打开${row.title}的系统设置页`}
-            onPress={() => openRoute(row.route)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Badge green={false} compact>需手动</Badge>
-            <Chevron compact />
-          </Pressable>}
-    </View>;
+  const renderCategory = (row: typeof GROUP_ROWS[number], plain: boolean) =>
+    <Pressable key={row.key} accessibilityRole="button" accessibilityHint={`打开${row.title}的系统设置页`}
+      onPress={() => openRoute(row.route)} style={[s.row, plain && s.rowPlain]}>
+      <View style={s.rowText}><Text style={s.rowTitle}>{row.title}</Text></View>
+      <Chevron compact />
+    </Pressable>;
+  const actionRows = ACTION_ORDER.flatMap(needsOn => {
+    const groupTargets = targets.filter(target => needsSystemToggleOn(target) === needsOn);
+    const groupCategories = categoryTargets.filter(({ target }) => needsSystemToggleOn(target) === needsOn);
+    return [
+      ...groupTargets.map(target => (last: boolean) => renderTarget(target, last)),
+      ...groupCategories.map(({ row }) => (last: boolean) => renderCategory(row, last)),
+    ];
+  });
 
   return (
     <Background>
@@ -243,24 +244,7 @@ export default function SystemRecommendScreen({
                 <Chevron compact />
               </Pressable>
             </> : null}
-          {ACTION_GROUPS.map(group => {
-            const groupTargets = targets.filter(target => needsSystemToggleOn(target) === group.needsSystemToggleOn);
-            const groupCategories = categoryTargets.filter(({ target }) =>
-              needsSystemToggleOn(target) === group.needsSystemToggleOn);
-            return <View key={group.key}>
-              <Text style={s.sectionTitle}>{group.title}</Text>
-              {groupTargets.map((target, index) => renderTarget(
-                target,
-                index === groupTargets.length - 1 && groupCategories.length === 0,
-              ))}
-              {groupCategories.map(({ row, target }, index) => renderCategory(
-                row,
-                target,
-                index === groupCategories.length - 1,
-              ))}
-              {!groupTargets.length && !groupCategories.length ? <Text style={s.emptyGroup}>暂无项目</Text> : null}
-            </View>;
-          })}
+          {actionRows.map((renderRow, index) => renderRow(index === actionRows.length - 1))}
         </Card>
       </ScrollView>
     </Background>
@@ -270,8 +254,6 @@ export default function SystemRecommendScreen({
 const s = StyleSheet.create({
   page: { paddingHorizontal: 18, paddingBottom: 36 },
   card: { paddingHorizontal: COMPACT_UI.cardPadding, paddingTop: 4, paddingBottom: 4, marginBottom: 12 },
-  sectionTitle: { fontSize: COMPACT_UI.body, fontWeight: '800', color: C.navy, paddingHorizontal: 8, paddingTop: 14, paddingBottom: 4 },
-  emptyGroup: { fontSize: COMPACT_UI.body, color: C.text, paddingHorizontal: 8, paddingVertical: 12 },
   row: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: C.line, paddingVertical: 8 },
   rowPlain: { borderBottomWidth: 0 },
   rowText: { flex: 1 },

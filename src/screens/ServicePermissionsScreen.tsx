@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, AppState, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Background, Card, SwitchIndicator, TopBar } from '../components/UI';
 import { useAppAlert } from '../components/AppDialog';
 import { ClearScreenNative, type AdbAccessStatus, type AdbActionResult, type BackendPermissions } from '../native/ClearScreenNative';
@@ -23,9 +23,6 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
   const android=Platform.OS==='android';
   const [adbStatus,setAdbStatus]=useState<AdbAccessStatus|null>(null);
   const [adbBusy,setAdbBusy]=useState('');
-  const [adbHost,setAdbHost]=useState('');
-  const [adbPort,setAdbPort]=useState('');
-  const [manualFallback,setManualFallback]=useState(false);
   const [accessibilityReady,setAccessibilityReady]=useState<boolean|null>(null);
   const verified=!checking&&!verificationFailed;
   const skipEnabled=permissions.accessibilitySettingEnabled&&permissions.accessibilityHealth==='ready'&&permissions.skipRunning;
@@ -42,10 +39,6 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
     try{
       const next=await ClearScreenNative.getAdbAccessStatus();
       setAdbStatus(next);
-      setAdbHost(current=>next.host||next.localAddress||current);
-      if(next.port>0)setAdbPort(String(next.port));
-      if(next.connected||next.state==='connecting'||AUTO_PAIR_STAGES.has(next.autoPairStage??''))setManualFallback(false);
-      else if((next.paired&&next.state==='error')||next.autoPairStage==='failed')setManualFallback(true);
       return next;
     }catch{return null}
   },[android]);
@@ -72,12 +65,16 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
   const autoStage=adbStatus?.autoPairStage??'';
   const autoRunning=AUTO_PAIR_STAGES.has(autoStage);
   const adbConnecting=adbStatus?.state==='connecting';
-  const adbRestoring=adbStatus?.paired===true&&adbStatus.reconnectRequested===true&&adbStatus.state==='idle'&&!autoRunning;
+  // A failed attempt must show its reason and stay tappable; a background
+  // restore must never count as pending, otherwise the row spins forever.
+  const adbFailed=autoStage==='failed';
+  const adbFailText=adbFailed?(adbStatus?.autoPairMessage||adbStatus?.message||''):'';
+  const adbPending=!adbStatus||!!adbBusy||!!adbConnecting||autoRunning;
   useEffect(()=>{
     if(!android)return;
-    const timer=setInterval(()=>{void refreshAdbStatus()},autoRunning||adbConnecting||adbRestoring?1200:5000);
+    const timer=setInterval(()=>{void refreshAdbStatus()},autoRunning||adbConnecting?1200:5000);
     return()=>clearInterval(timer);
-  },[android,autoRunning,adbConnecting,adbRestoring,refreshAdbStatus]);
+  },[android,autoRunning,adbConnecting,refreshAdbStatus]);
   const fail=(title:string,error:unknown)=>showAlert(title,error instanceof Error?error.message:String(error),undefined,{tone:'error'});
   const openAccessibility=()=>{
     void ClearScreenNative.openAccessibilitySettings().catch(error=>fail('无法打开系统设置',error));
@@ -101,22 +98,21 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
     setAdbBusy('stop-pair');
     try{
       setAdbStatus(await ClearScreenNative.stopAdbAutoPair());
-      setManualFallback(false);
     }catch(error){fail('停止失败',error)}
     finally{setAdbBusy('')}
   };
-  const runConnection=async(label:string,action:()=>Promise<AdbActionResult>,showManualOnFailure=false)=>{
+  const runConnection=async(label:string,action:()=>Promise<AdbActionResult>)=>{
     setAdbBusy(label);
     try{
       const result=await action();
       await refreshAdbStatus();
-      if(result.ok)setManualFallback(false);
-      else{
-        if(showManualOnFailure)setManualFallback(true);
-        showAlert('未连接',result.message,undefined,{tone:'warning'});
+      if(!result.ok){
+        showAlert('未连接',result.message,[
+          {text:'关闭',style:'cancel'},
+          {text:'重试',onPress:()=>{void runConnection(label,action)}},
+        ],{tone:'warning'});
       }
     }catch(error){
-      if(showManualOnFailure)setManualFallback(true);
       fail('操作失败',error);
     }finally{setAdbBusy('')}
   };
@@ -124,7 +120,6 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
     setAdbBusy('disconnect');
     try{
       await ClearScreenNative.disconnectAdb();
-      setManualFallback(false);
       await refreshAdbStatus();
     }catch(error){fail('断开失败',error)}
     finally{setAdbBusy('')}
@@ -135,7 +130,7 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
       return;
     }
     if(status.paired){
-      await runConnection('auto',()=>ClearScreenNative.autoConnectAdb(),true);
+      await runConnection('auto',()=>ClearScreenNative.autoConnectAdb());
       return;
     }
     const started=await startAutoPair();
@@ -152,20 +147,32 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
     if(!status){showAlert('无法读取连接状态','请稍后再试。',undefined,{tone:'error'});return}
     if(status.connected){await disconnect();return}
     if(AUTO_PAIR_STAGES.has(status.autoPairStage??'')){await stopAutoPair();return}
-    if(status.paired){await connectAutomatically(status);return}
-    await connectAutomatically(status);
+    // A failed attempt starts over from the pairing dialog instead of retrying
+    // a connection whose pairing may never have completed.
+    await connectAutomatically(status.autoPairStage==='failed'?{...status,paired:false}:status);
   };
-  const connectManually=()=>{
-    const port=Number(adbPort.trim());
-    if(!/^\d{1,5}$/.test(adbPort.trim())||port<1||port>65535){
-      showAlert('连接端口不正确','请填写「无线调试」页面上显示的那串数字。',undefined,{tone:'warning'});
-      return;
-    }
-    const host=(adbHost||adbStatus?.host||adbStatus?.localAddress||'').trim();
-    if(!host){showAlert('无法连接','没有读取到本机地址。',undefined,{tone:'warning'});return}
-    void runConnection('connect',()=>ClearScreenNative.connectAdb(host,port));
-  };
-
+  const retryRef=useRef<()=>void>(()=>{});
+  retryRef.current=()=>{void toggleAdb()};
+  useEffect(()=>{
+    if(!adbFailText)return;
+    showAlert('连接失败',adbFailText,[
+      {text:'关闭',style:'cancel'},
+      {text:'重试连接',onPress:()=>retryRef.current()},
+    ],{tone:'error'});
+  },[adbFailText]);
+  useEffect(()=>{
+    if(!android||!adbPending)return;
+    // Last-resort exit: a stuck native call must not leave the switch spinning.
+    const timer=setTimeout(()=>{
+      setAdbBusy('');
+      void refreshAdbStatus();
+      showAlert('连接没有完成','等了很久仍没有结果，请确认无线调试已开启，再点按开关重试。',[
+        {text:'关闭',style:'cancel'},
+        {text:'重试连接',onPress:()=>retryRef.current()},
+      ],{tone:'warning'});
+    },150000);
+    return()=>clearTimeout(timer);
+  },[android,adbPending]);
   const openStartupGuide=()=>{
     if(!permissions.isVivoFamily||!permissions.vendorStartupSettingsAvailable){onStartup();return}
     showAlert('开启开机自启动','在 vivo「自启动管理」中找到「净屏」并开启“自启动”。',[
@@ -183,47 +190,35 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
   );
 
   const adbConnected=adbStatus?.connected===true;
-  const adbPending=!adbStatus||!!adbBusy||!!adbConnecting||adbRestoring||autoRunning;
-  const adbStateText=!adbStatus?'正在读取':adbBusy==='disconnect'?'正在断开':autoRunning?'正在配对':adbPending?'正在连接':adbConnected?'已连接':'未连接';
-  return <Background><ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+  const adbStateText=!adbStatus?'正在读取':adbBusy==='disconnect'?'正在断开':autoRunning?'正在配对':adbFailed?'连接失败':adbPending?'正在连接':adbConnected?'已连接':'未连接';
+  return <Background><ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
     <TopBar compact title="服务与权限" onBack={onBack}/>
     <Card compact style={s.card}>
       {switchRow('自动跳过服务',skipEnabled,onOpenAccessibility,false,false,skipPending?'正在检查':skipEnabled?'已开启':skipUnknown?'待确认':skipNeedsRepair?'需修复':'未开启',skipUnknown||skipNeedsRepair,skipPending)}
-      {switchRow('开机自启动',startupEnabled,openStartupGuide,false,false,startupUnknown?'待确认':startupEnabled?'已开启':'已关闭',startupUnknown)}
+      {switchRow('开机自启动',startupEnabled,openStartupGuide,false,false,startupUnknown?'待确认':startupEnabled?'已开启':'已关闭',false)}
       {switchRow('后台运行',backgroundEnabled,onBackground)}
       {switchRow('电池优化',batteryEnabled,onBatteryOptimization,!android)}
-      {android?switchRow('ADB Shell 操作能力',adbConnected,()=>{void toggleAdb()},true,!adbStatus||!!adbBusy||adbRestoring||(!!adbConnecting&&!autoRunning),adbStateText,false,adbPending):null}
+      {android?<>
+        {switchRow('ADB Shell 操作能力',adbConnected,()=>{void toggleAdb()},true,!adbStatus||!!adbBusy||(!!adbConnecting&&!autoRunning),adbStateText,false,adbPending)}
+        {adbFailed?<View style={s.failBox}>
+          <Text style={s.failText}>{adbFailText||'连接没有完成'}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="重试连接" onPress={()=>{void toggleAdb()}} hitSlop={8}>
+            <Text style={s.retryText}>重试连接</Text>
+          </Pressable>
+        </View>:null}
+      </>:null}
     </Card>
-    {android&&manualFallback&&adbStatus?.supported!==false&&!adbConnected?<Card compact style={s.manualCard}>
-      <View style={s.field}>
-        <Text style={s.label}>连接端口</Text>
-        <TextInput value={adbPort} onChangeText={setAdbPort} keyboardType="number-pad"
-          placeholder="「无线调试」页里的数字" placeholderTextColor={C.text2} style={s.input}/>
-      </View>
-      <Pressable accessibilityRole="button" disabled={!!adbBusy} onPress={connectManually} style={s.action}>
-        <Text style={s.actionText}>{adbBusy==='connect'?'连接中…':'连接'}</Text>
-      </Pressable>
-      {adbStatus?.localAddress?<View style={s.infoRow}>
-        <Text style={s.label}>本机地址</Text>
-        <Text style={s.infoValue}>{adbStatus.localAddress}</Text>
-      </View>:null}
-    </Card>:null}
   </ScrollView></Background>;
 }
 
 const s=StyleSheet.create({
   page:{paddingHorizontal:18,paddingBottom:36},
   card:{paddingHorizontal:COMPACT_UI.cardPadding},
-  manualCard:{paddingHorizontal:COMPACT_UI.cardPadding,paddingTop:4,paddingBottom:12,marginTop:12},
   row:{minHeight:COMPACT_UI.rowHeight,flexDirection:'row',alignItems:'center',gap:8,borderBottomWidth:1,borderBottomColor:C.line},
   rowTitle:{flex:1,fontSize:COMPACT_UI.body,fontWeight:'800',color:C.navy},
   pending:{width:42,height:26},
   pendingState:{fontSize:COMPACT_UI.caption,color:C.text2},
-  field:{minHeight:54,flexDirection:'row',alignItems:'center',gap:10,borderBottomWidth:1,borderBottomColor:C.line},
-  label:{fontSize:COMPACT_UI.body,fontWeight:'800',color:C.navy},
-  input:{flex:1,fontSize:COMPACT_UI.body,fontWeight:'600',marginLeft:8,color:C.text,paddingVertical:0,textAlign:'right'},
-  action:{minHeight:COMPACT_UI.buttonHeight,marginTop:12,paddingHorizontal:13,borderRadius:13,backgroundColor:'#E9F4FF',flexDirection:'row',alignItems:'center',justifyContent:'center'},
-  actionText:{fontSize:COMPACT_UI.body,fontWeight:'800',color:C.blue},
-  infoRow:{minHeight:54,flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:10,borderBottomWidth:1,borderBottomColor:C.line},
-  infoValue:{fontSize:COMPACT_UI.body,color:C.text},
+  failBox:{flexDirection:'row',alignItems:'center',gap:10,paddingVertical:10,borderBottomWidth:0},
+  failText:{flex:1,fontSize:COMPACT_UI.caption,color:C.text2},
+  retryText:{fontSize:COMPACT_UI.caption,fontWeight:'800',color:C.blue},
 });

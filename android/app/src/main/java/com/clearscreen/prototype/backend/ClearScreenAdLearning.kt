@@ -1,9 +1,11 @@
 package com.clearscreen.prototype.backend
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
@@ -89,7 +91,7 @@ internal class ClearScreenAdLearning(
     val bounds = Rect().also(node::getBoundsInScreen)
     // Never copy an input's contents into a learning fingerprint.
     val labels = if (node.isPassword || node.isEditable) emptyList()
-      else listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
+      else listOfNotNull(node.text?.toString(), node.contentDescription?.toString()).mapNotNull { readable(it) }
     val text = labels.joinToString(" ").take(240).replace(Regex("\\s+"), " ").trim()
     val id = node.viewIdResourceName.orEmpty()
     val clickable = node.isClickable && node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }
@@ -115,7 +117,7 @@ internal class ClearScreenAdLearning(
       unsafe, node.isScrollable, readySkip)
   }
 
-  private fun frame(nodeLimit: Int = 500, childLimit: Int = 150, depthLimit: Int = 18,
+  private fun frame(nodeLimit: Int = 500, childLimit: Int = 150, depthLimit: Int = 30,
     keepReading: () -> Boolean = { true }): Frame? {
     if (!keepReading()) return null
     val root = runCatching(safeRoot).getOrNull() ?: return null
@@ -223,9 +225,19 @@ internal class ClearScreenAdLearning(
     } finally { @Suppress("DEPRECATION") root.recycle() }
   }
 
-  private fun eligible(page: Page, target: Control) = target.visible && target.clickable && target.enabled &&
-    !target.unsafe && small(target.bounds, page.bounds) && page.bounds.contains(target.bounds) &&
-    page.controls.none { it.visible && it.unsafe && descendant(it.path, target.path) }
+  private fun eligible(page: Page, target: Control, allowUnclickable: Boolean = false) =
+    target.visible && target.enabled && !target.unsafe && small(target.bounds, page.bounds) &&
+      page.bounds.contains(target.bounds) &&
+      (target.clickable || allowUnclickable && tappable(target)) &&
+      page.controls.none { it.visible && it.unsafe && descendant(it.path, target.path) }
+
+  /**
+   * Some SDKs draw their dismiss icon without exposing ACTION_CLICK, so the
+   * node is only reachable by a coordinate tap. Limit that fallback to
+   * icon-sized close or unlabeled nodes; labelled content is never tapped.
+   */
+  private fun tappable(target: Control) = target.bounds.width() in 1..dp(72) &&
+    target.bounds.height() in 1..dp(72) && (target.close || !target.hasLabel)
 
   /** The route starts at a card/dialog, never at a RecyclerView index or screen position. */
   private fun selectorFor(page: Page, target: Control): JSONObject? {
@@ -254,7 +266,7 @@ internal class ClearScreenAdLearning(
   private fun matches(page: Page, selector: JSONObject, cache: MutableMap<String, JSONObject?> = mutableMapOf()): List<Control> {
     if (selector.optInt("version") != 2) return emptyList()
     val candidates = page.controls.filter {
-      eligible(page, it) && it.id == selector.optString("id") &&
+      eligible(page, it, allowUnclickable = true) && it.id == selector.optString("id") &&
         it.kind == selector.optString("kind") && it.label == selector.optString("label")
     }
     if (candidates.size > 20) return emptyList()
@@ -324,15 +336,15 @@ internal class ClearScreenAdLearning(
     if (!page.bounds.contains(x, y)) return PickResult(issue = PickIssue.NO_TARGET)
     if (page.controls.any { it.visible && it.unsafe && small(it.bounds, page.bounds) && it.bounds.contains(x, y) })
       return PickResult(issue = PickIssue.BLOCKED)
-    val exact = page.controls.filter { eligible(page, it) && it.bounds.contains(x, y) }
-    // An unlabeled compact image/button may be a drawn X. Never infer a control
-    // from pixels: it must still be a real, enabled ACTION_CLICK node.
+    val exact = page.controls.filter { eligible(page, it, allowUnclickable = true) && it.bounds.contains(x, y) }
+    // An unlabeled compact image/button may be a drawn X. Clickable nodes are
+    // preferred; icon-sized unclickable ones stay eligible for a coordinate tap.
     val nearby = if (exact.isEmpty()) page.controls.filter {
-      it.visible && it.clickable && it.enabled && nearCompactControl(it, x, y)
+      it.visible && it.enabled && nearCompactControl(it, x, y) && (it.clickable || tappable(it))
     } else emptyList()
     if (nearby.any { it.unsafe }) return PickResult(issue = PickIssue.BLOCKED)
     val candidates = (if (exact.isNotEmpty()) exact else nearby.filter {
-      eligible(page, it) && (it.close || !it.hasLabel)
+      eligible(page, it, allowUnclickable = true) && (it.close || !it.hasLabel)
     })
       .sortedWith(compareByDescending<Control> { it.close }
         .thenBy { it.bounds.width().toLong() * it.bounds.height() }.thenByDescending { it.path.length })
@@ -699,24 +711,39 @@ internal class ClearScreenAdLearning(
 
   private fun click(frame: Frame, target: Control, current: () -> Boolean = { true },
     track: (AccessibilityNodeInfo) -> Unit = { trackedNode = it }): Boolean = runCatching {
-    if (!current() || !allowed() || !eligible(frame.page, target) || !canTouch(target.bounds)) return@runCatching false
+    if (!current() || !allowed() || !eligible(frame.page, target, allowUnclickable = true) ||
+      !canTouch(target.bounds)) return@runCatching false
     val live = frame.nodes[target.path] ?: return@runCatching false
     if (!current() || !live.refresh() || live.packageName?.toString() != frame.page.pkg || live.windowId != frame.page.window) return@runCatching false
     val insideReadySkip = frame.page.controls.any { it.readySkip && descendant(target.path, it.path) }
     val refreshed = control(live, target.path, frame.page.pkg, insideReadySkip)
-    if (!current() || !allowed() || !eligible(frame.page, refreshed) || refreshed.id != target.id || refreshed.kind != target.kind ||
+    if (!current() || !allowed() || !eligible(frame.page, refreshed, allowUnclickable = true) ||
+      refreshed.id != target.id || refreshed.kind != target.kind ||
       refreshed.label != target.label || refreshed.bounds != target.bounds) return@runCatching false
     @Suppress("DEPRECATION")
     val tracked = AccessibilityNodeInfo.obtain(live)
     track(tracked)
     // Do not hold the consent lock during Binder reads (especially reads of our own overlay).
     synchronized(ClearScreenPrivacyConsentStore.operationLock) {
-      current() && allowed() && live.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+      if (!current() || !allowed()) false
+      else if (live.isClickable && live.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK })
+        live.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+      else touch(live, current)
     }
   }.getOrDefault(false)
 
+  /** A node the SDK hides from accessibility still responds to a real touch at its center. */
+  private fun touch(node: AccessibilityNodeInfo, current: () -> Boolean): Boolean {
+    val bounds = Rect().also(node::getBoundsInScreen)
+    if (bounds.isEmpty || !current() || !allowed() || !canTouch(bounds)) return false
+    val path = Path().apply { moveTo(bounds.exactCenterX(), bounds.exactCenterY()) }
+    val gesture = GestureDescription.Builder()
+      .addStroke(GestureDescription.StrokeDescription(path, 0L, 60L)).build()
+    return runCatching { service.dispatchGesture(gesture, null, null) }.getOrDefault(false)
+  }
+
   private fun verifyLearning(page: Page, selector: JSONObject, nodeLimit: Int = 500, childLimit: Int = 150,
-    depthLimit: Int = 18) {
+    depthLimit: Int = 30) {
     val rule = JSONObject().put("key", UUID.randomUUID().toString()).put("pkg", page.pkg)
       .put("updated", page.updated).put("selector", selector).put("created", System.currentTimeMillis())
     checkClosure(page, nodeLimit, childLimit, depthLimit) { closed ->
@@ -742,7 +769,7 @@ internal class ClearScreenAdLearning(
   }
 
   /** Require two disappearance samples; the attempt deadline also bounds slow Binder reads. */
-  private fun checkClosure(page: Page, nodeLimit: Int = 500, childLimit: Int = 150, depthLimit: Int = 18,
+  private fun checkClosure(page: Page, nodeLimit: Int = 500, childLimit: Int = 150, depthLimit: Int = 30,
     finish: (Boolean) -> Unit) {
     val token = generation
     var goneFrames = 0
@@ -847,6 +874,19 @@ internal class ClearScreenAdLearning(
   companion object {
     private fun digest(text: String) = MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
       .joinToString("") { "%02x".format(it.toInt() and 255) }
+    /**
+     * Ad SDKs expose opaque per-render tokens (for example "18d5b4") as
+     * content descriptions. They are not user-facing labels and must not
+     * become part of a learned fingerprint.
+     */
+    private fun readable(value: String): String? {
+      val text = value.trim()
+      if (text.isEmpty() || text == "virtualNode") return null
+      val opaque = text.length in 6..12 &&
+        text.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' } &&
+        text.any { it in 'a'..'f' || it in 'A'..'F' }
+      return if (opaque) null else text
+    }
     private fun parent(path: String) = path.substringBeforeLast('.', "")
     private fun descendant(path: String, ancestor: String) = path.startsWith("$ancestor.")
   }

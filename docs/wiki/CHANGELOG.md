@@ -2,7 +2,66 @@
 
 本文件按时间倒序记录项目修改，供后续 AI 和开发者开始任务前快速了解最近变化。自本记录建立起，新增条目的时间使用中国标准时间（UTC+08:00）；既有条目的时间按文件系统记录的本地最后修改时间整理。
 
+## 2026-11-09
+
+### 2026-11-09 17:45:00 +08:00 — 修复学习代点识别不到不可点击的小型关闭控件
+
+- 真机取证：彩云天气悬浮广告的关闭叉是 `ImageView`（约 41×55 像素），整棵无障碍树没有任何 `clickable="true"` 节点，该节点位于树第 21 层、只有六位十六进制内部描述（如 `18d5b4`）。它被 `ClearScreenAdLearning` 中「必须 `isClickable` 且暴露 `ACTION_CLICK`」的可点击性判定筛掉，选取时只能返回「未找到可点击控件」；同时当时的回放深度上限为 18，学到的规则也无法在后续帧里重新看到这个节点。
+- 通用修正（不含应用名、包名、资源 ID 或坐标特例）：可见、可用、不危险、位于页面内、图标尺寸（宽高均不超过 72dp）且属于关闭语义或无有效标签的不可点击节点，允许被用户显式选中并保存选择器；点击时仍优先 `ACTION_CLICK`，只有节点确实不暴露点击动作时才在其中心发送 `dispatchGesture` 坐标手势。带标签的正文、大卡片、业务控件和受保护页面仍不参与。
+- 广告 SDK 常把内部 token 填进 `content-desc`，现在把纯十六进制短 token 与 `virtualNode` 从标签中剔除，避免 `hasLabel` 误判和规则指纹随每次渲染变化。
+- 学习、回放与关闭校验的默认读取深度由 18 提到 30，覆盖这类嵌套较深的广告控件树；节点数、子级数与超时预算不变。
+- 验证：`:app:compileDebugKotlin --offline --console=plain`、`:app:assembleRelease --offline --console=plain` 通过，Release 类中已包含新增的坐标点击与标签过滤逻辑；实际安装版本为 1.0.95 / 101（本条早先按 1.0.94 / 100 记录有误，以设备读回为准），`adb install -r --no-streaming` 覆盖安装返回 `Success`（未卸载、未 `pm clear`）。
+- 真机补测（2026-11-10 09:40–09:45 +08:00，vivo V2502DA / Android 16，1.0.95 / 101）：开启学习模式后在彩云天气开屏/插屏广告上完成「选择控件 → 点选关闭叉 → 确认选取」两轮，两轮均出现「已选中，请确认」，确认后被选中的小型 × 都被关闭，画面回到 `com.nowcasting.activity/.WeatherActivity`。截图：`screenshots/2026-11-10-学习选取小型关闭叉-1-已选中.png`、`-2-确认后关闭.png`、`-3-广告全关回主页.png`。
+- 覆盖范围说明：该机广告叉实测为 `v_close` / `iv_close`，约 70×70px 且 `clickable="true"`，所以本轮真机验证走的是「可点击节点 → `ACTION_CLICK`」分支；新增的「不可点击图标 → `dispatchGesture` 坐标点击」分支和深度 30 读取在该机型上没有可复现样本，仍只有小米悬浮球取证（`tmp/cy5.xml`，整树 0 个 `clickable`）加静态确认。小米 22101317C（`2f8898c80822`）本轮全程离线，原始场景未能重现，需设备恢复后补测。
+- 复测环境说明：期间屏幕一度切到 vivo「外部来源应用安装」页，经确认是另一 AI 会话正在控制该设备所致，非广告跳转；当时学习浮层提示「无法读取当前页面」并拒绝选取，未执行安装，该页已退出。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAdLearning.kt`、`docs/wiki/README.md`、`screenshots/2026-11-10-学习选取小型关闭叉-1-已选中.png`、`screenshots/2026-11-10-学习选取小型关闭叉-2-确认后关闭.png`、`screenshots/2026-11-10-学习选取关闭叉-3-广告全关回主页.png`、本修改记录。
+
+### 2026-11-09 17:05:00 +08:00 — 修复一键连接无限转圈并补齐超时与重试
+
+- 原生配对状态机补齐阶段超时：读不到配对码 120 秒、配对 60 秒、读不到连接端口 60 秒、连接 90 秒，超时统一转为 `failed` 并给出可读原因，不再无限停留在中间态；只在阶段变化时记录 `ClearScreenAdb` 日志，不记录配对码或端口。
+- 无障碍服务在配对期间改为每 700 毫秒持续扫描并驱动超时，不再只依赖设置页的窗口事件，配对成功后的连接端口也能被读到；服务解绑时移除扫描回调。
+- 服务与权限页移除会把整行永久置灰的 `adbRestoring` 待定判断；原生 ADB 调用加 6/15/45 秒超时和 150 秒页面级看门狗；失败时在 ADB 行下显示一行原因并给出「重试连接」，重试会从配对流程重新开始。
+- 同步更新 README 与 Wiki 的 ADB 连接说明；版本升至 1.0.93 / 99。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain`、`:app:assembleRelease --offline --console=plain` 通过；已用 `adb install -r --no-streaming` 覆盖安装到小米真机 22101317C（未卸载、未 `pm clear`，安装前确认无并行安装），安装后为 `versionCode=99`、`versionName=1.0.93`。
+- 真机取证与验收：设备当时锁屏（安全锁），`screencap` 返回 0 字节，无法操作界面；已确认故障背景为净屏无障碍服务未启用（`enabled_accessibility_services` 仅含 `com.linkpilot.android`）且 `adb_wifi_enabled=0`。成功态与失败态截图、超时日志未执行，待解锁后补测。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAdbPairingHelper.kt`、`ClearScreenAccessibilityService.kt`、`src/native/ClearScreenNative.ts`、`src/screens/ServicePermissionsScreen.tsx`、`README.md`、`docs/wiki/README.md`、`app.json`、`android/app/build.gradle`、本修改记录。
+
 ## 2026-11-08
+
+### 2026-11-08 22:23:16 +08:00 — 核对并修正小米系统推荐开关绑定
+
+- 修正负一屏目标包和页面：推荐卡片、热门活动、智能置顶匹配 `com.miui.personalassistant` 的「负一屏」设置；用户先从桌面进入该页。补充小米相关系统包的定向可见性声明，并保留系统应用、页面、标签及状态核验。
+- 修复单一开关被系统暴露成内外两层节点时无法识别的问题；搜索和浏览器多级导航需核对每级页面，并持续等待回读。用户明确选择开启时不再要求开关必须先由净屏关闭；未知状态先由用户选择目标状态。
+- 资讯推荐、服务推荐、内容精选、热点资讯在现有小米负一屏资料中未发现对应独立开关；搜索框推荐词仅发现影响整个搜索功能的总开关。这五项标记未适配并可查看原因；三个分类行改为设置页面入口，避免复用无关开关。
+- 只读核查设备系统包与既有页面快照；小米全局搜索 12.10.0.07203 的静态资源包含「展示应用推荐」复选项（REA 包身份 `ev_e187d8da207b490f102c7fe03a5eb5886e51975b2fd5eea99a6a029997fb3811`），不代表实际操作已验收。同步更新 README、Wiki 和项目验证与复用说明。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin :app:processDebugMainManifest --offline --console=plain --quiet`、相关文件 `git diff --check` 通过；未进行功能测试或真机界面验收，未打包或安装。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、`src/native/ClearScreenNative.ts`、`android/app/src/main/AndroidManifest.xml`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAccessibilityService.kt`、`ClearScreenCleanupController.kt`、`ClearScreenRecommendCatalog.kt`、`ClearScreenUiCleanup.kt`、`README.md`、`docs/wiki/README.md`、本修改记录，以及系统秘钥目录中的 `ClearScreen/验证与复用说明.md`。
+
+### 2026-11-08 22:08:40 +08:00 — 移除 ADB 手动连接备用卡片
+
+- 删除服务与权限页中的手动端口输入、连接按钮和本机地址卡片；自动配对/重连及连接状态开关保留，失败时显示提示，可再次点按开关重试。
+- 同步更新 README 与 Wiki 对当前连接流程的说明。
+- 验证：`npx tsc --noEmit` 与 `git diff --check` 通过；未进行应用界面或真机验收。
+- 涉及文件：`src/screens/ServicePermissionsScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 22:08:04 +08:00 — 精简营销通知渠道条目
+
+- 移除各渠道行中的重要性文字，将应用名称合并到渠道标题；完整清单中存在分组名时仍保留分组名。同步调整无障碍标签，避免重复应用名。
+- 验证：未执行。
+- 涉及文件：`src/screens/MarketingChannelsScreen.tsx`、本修改记录。
+
+### 2026-11-08 22:06:25 +08:00 — 删除系统推荐开关页的分组标题和空组提示
+
+- 删除「需要开启」「需要关闭」分组标题及空组「暂无项目」提示；系统推荐开关列表按原顺序连续展示，目标判断和操作逻辑不变。
+- 同步更新 Wiki。
+- 验证：`npx tsc --noEmit` 与涉及文件的 `git diff --check` 通过；未进行应用界面或真机验收。
+- 涉及文件：`src/screens/SystemRecommendScreen.tsx`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-08 22:04:45 +08:00 — 移除开机自启动旁的待确认文字
+
+- 服务与权限页不再在「开机自启动」行内显示「待确认」文字，未确认状态仍保留在无障碍状态说明中；同步更正 README 与权限核验 Wiki。
+- 验证：未执行。
+- 涉及文件：`src/screens/ServicePermissionsScreen.tsx`、`README.md`、`docs/wiki/README.md`、`docs/wiki/权限状态核验.md`、本修改记录。
 
 ### 2026-11-08 21:44:43 +08:00 — 覆盖安装净屏 Release 1.0.92 到小米手机
 

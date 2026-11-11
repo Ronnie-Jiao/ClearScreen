@@ -17,6 +17,11 @@
     <package android:name="com.iqoo.secure"/>
     <package android:name="com.miui.securitycenter"/>
     <package android:name="com.miui.powerkeeper"/>
+    <package android:name="com.miui.home"/>
+    <package android:name="com.miui.personalassistant"/>
+    <package android:name="com.android.quicksearchbox"/>
+    <package android:name="com.android.browser"/>
+    <package android:name="com.xiaomi.market"/>
     <package android:name="com.huawei.systemmanager"/>
     <package android:name="com.hihonor.systemmanager"/>
     <package android:name="com.coloros.safecenter"/>

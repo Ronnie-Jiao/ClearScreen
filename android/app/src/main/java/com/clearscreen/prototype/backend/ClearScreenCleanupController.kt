@@ -249,9 +249,9 @@ internal class ClearScreenCleanupController(
         return@withOps "already"
       }
       if (desired == "on") {
-        val backup = store().cleanupBackup(backupKey)
-        check(!backup.isNullOrBlank()) { "没有保存这个开关原来的状态，无法自动打开" }
-        ops.writeSetting(spec.namespace, spec.key, backup)
+        // This is an explicit user request to enable the known switch, even if
+        // it was already off before ClearScreen first observed it.
+        ops.writeSetting(spec.namespace, spec.key, wanted)
         store().removeCleanupBackup(backupKey)
       } else {
         // The original value is stored before the first change so it can be restored.

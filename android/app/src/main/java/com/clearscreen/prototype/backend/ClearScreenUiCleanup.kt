@@ -11,7 +11,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 internal object ClearScreenUiCleanup {
   /** One extra page to open before the switch appears: the row to click and the header it should land on. */
   data class Stage(val entry: String, val page: String,
-    val entryAliases: Set<String> = emptySet(), val pageAliases: Set<String> = emptySet()) {
+    val entryAliases: Set<String> = emptySet(), val pageAliases: Set<String> = emptySet(),
+    val fromPage: String? = null) {
     fun matchesEntry(value: String): Boolean = value == entry || value in entryAliases
     fun matchesPage(value: String): Boolean = value == page || value in pageAliases
   }
@@ -24,7 +25,7 @@ internal object ClearScreenUiCleanup {
     val titleAliases: Set<String> = emptySet(), val pageAliases: Set<String> = emptySet(),
     /** What closing this switch actually gives the user, in plain language. */
     val effect: String = "",
-    /** assisted: accessibility tap · manual: jump only · unreachable: system blocks third-party apps. */
+    /** assisted: exact-page operation · manual: manual path · unreachable: no verified matching control. */
     val support: String = "assisted",
     /** Route key handled by ClearScreenRecommendRoutes; null keeps the legacy category path. */
     val navigate: String? = null,
@@ -34,13 +35,15 @@ internal object ClearScreenUiCleanup {
     fun matchesPage(value: String): Boolean = value == page || value in pageAliases
     fun matchesStageEntry(value: String): Boolean = stages.any { it.matchesEntry(value) }
     fun matchesStagePage(value: String): Boolean = stages.any { it.matchesPage(value) }
+    fun matchesStageFromPage(value: String): Boolean = stages.any { it.fromPage == value }
   }
   private data class Sample(val window: Int, val bounds: Rect, val checked: Boolean)
   private data class Session(
     val target: Target, val trustedPackages: Set<String>, val restore: Boolean, val ownPackage: String, val started: Long,
     var leftApp: Boolean = false, var seenTarget: Boolean = false, var sample: Sample? = null, var sampledAt: Long = 0,
     var clicked: Boolean = false, var stageIndex: Int = 0, var stageClickedAt: Long = 0,
-    var stageAttempts: Int = 0, var stageAttemptStage: Int = -1,
+    var stageAwaitingPage: Boolean = false,
+    var stageStartedAt: Long = 0, var stageTrackedIndex: Int = -1,
   )
   private val lock = Any()
   private var session: Session? = null
@@ -52,6 +55,7 @@ internal object ClearScreenUiCleanup {
 
   fun begin(context: Context, id: String, restore: Boolean, store: ClearScreenStore): Target = synchronized(lock) {
     val target = targets(context).singleOrNull { it.id == id } ?: error("这台手机没有这个开关")
+    check(target.support == "assisted") { target.reason ?: "这个开关暂时无法自动操作" }
     check(active() == null) { "上一个操作还没结束" }
     check(ClearScreenAccessibilityService.running) { "请先开启净屏无障碍服务" }
     val trusted = (target.alternates + target.pkg).filterTo(mutableSetOf()) { packageName ->
@@ -63,7 +67,6 @@ internal object ClearScreenUiCleanup {
     check(trusted.isNotEmpty()) {
       "无法确认系统设置页面"
     }
-    if (restore) check(store.cleanupBackup(key(target)) == "active") { "没有之前保存的记录，不能恢复" }
     session = Session(target, trusted, restore, context.packageName, SystemClock.elapsedRealtime())
     result = null
     target
@@ -128,6 +131,13 @@ internal object ClearScreenUiCleanup {
       cls.contains("SlidingButton") || cls.contains("Toggle") || id.contains("checkbox") || id.contains("switch")
   }
 
+  private fun checkedState(ref: AccessibilityNodeInfo): Boolean? =
+    if (Build.VERSION.SDK_INT >= 36) when (ref.getChecked()) {
+      AccessibilityNodeInfo.CHECKED_STATE_TRUE -> true
+      AccessibilityNodeInfo.CHECKED_STATE_FALSE -> false
+      else -> null
+    } else @Suppress("DEPRECATION") ref.isChecked
+
   /** Called on the service thread; all transient nodes are recycled before returning. */
   fun observe(root: AccessibilityNodeInfo, store: ClearScreenStore, unobstructed: (Rect) -> Boolean) = synchronized(lock) {
     val current = active() ?: return@synchronized
@@ -140,7 +150,8 @@ internal object ClearScreenUiCleanup {
       if (nodes.size >= 240 || depth > 18 || node.isPassword || (node.isEditable && node.isFocused)) { complete = false; return }
       val text = listOf(node.text, node.contentDescription).mapNotNull { it?.toString()?.trim() }
         .firstOrNull { current.target.matchesTitle(it) || current.target.matchesPage(it) ||
-          current.target.matchesStageEntry(it) || current.target.matchesStagePage(it) }.orEmpty()
+          current.target.matchesStageEntry(it) || current.target.matchesStagePage(it) ||
+          current.target.matchesStageFromPage(it) }.orEmpty()
       val index = nodes.size
       nodes += Node(node, parent, index + 1, text, Rect().also(node::getBoundsInScreen))
       for (i in 0 until node.childCount) {
@@ -157,19 +168,37 @@ internal object ClearScreenUiCleanup {
       if (!complete || nodes.isEmpty()) { current.sample = null; return@synchronized }
       val screen = nodes[0].bounds
       if (screen.width() <= 0 || screen.height() <= 0) return@synchronized
+      fun hasStageHeader(matches: (String) -> Boolean): Boolean = nodes.any {
+        matches(it.text) && it.bounds.top < screen.top + screen.height() * .3 &&
+          it.ref.viewIdResourceName.orEmpty().contains("action_bar_title")
+      }
       // Walk the page chain first: click the row that opens the next page, then look for the switch.
       val pendingStage = current.target.stages.getOrNull(current.stageIndex)
       if (pendingStage != null) {
         current.sample = null
         val stageNow = SystemClock.elapsedRealtime()
-        if (stageNow - current.stageClickedAt < 1_600) return@synchronized
-        val entryIndex = nodes.indexOfFirst { pendingStage.matchesEntry(it.text) }
-        if (entryIndex < 0) {
-          if (current.stageAttempts > 0 && stageNow - current.stageClickedAt > 12_000) {
-            finish(current, "没能打开「${pendingStage.entry}」，没有改动")
+        if (current.stageTrackedIndex != current.stageIndex) {
+          current.stageTrackedIndex = current.stageIndex
+          current.stageStartedAt = stageNow
+        }
+        if (current.stageAwaitingPage) {
+          if (stageNow - current.stageClickedAt >= 300 && hasStageHeader(pendingStage::matchesPage)) {
+            current.stageIndex++
+            current.stageAwaitingPage = false
+          } else if (stageNow - current.stageClickedAt > 12_000) {
+            finish(current, "没能打开「${pendingStage.page}」，没有改动")
           }
           return@synchronized
         }
+        if (stageNow - current.stageStartedAt > 20_000) {
+          finish(current, "没找到「${pendingStage.entry}」，没有改动")
+          return@synchronized
+        }
+        if (stageNow - current.stageClickedAt < 1_600) return@synchronized
+        if (pendingStage.fromPage != null && !hasStageHeader { it == pendingStage.fromPage }) return@synchronized
+        val entries = nodes.indices.filter { pendingStage.matchesEntry(nodes[it].text) }
+        if (entries.size != 1) return@synchronized
+        val entryIndex = entries.single()
         val entry = nodes[entryIndex]
         var pointer = entry.parent
         var row: Node? = null
@@ -181,17 +210,11 @@ internal object ClearScreenUiCleanup {
           depth++
         }
         if (row == null || !unobstructed(row.bounds)) return@synchronized
-        if (current.stageAttemptStage != current.stageIndex) {
-          current.stageAttemptStage = current.stageIndex
-          current.stageAttempts = 0
-        }
-        if (current.stageAttempts >= 2) { finish(current, "没能打开「${pendingStage.entry}」，没有改动"); return@synchronized }
-        current.stageAttempts++
-        current.stageIndex++
         current.stageClickedAt = stageNow
         val opened = row.ref.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        if (!opened) {
-          current.stageIndex--
+        if (opened) {
+          current.stageAwaitingPage = true
+        } else {
           finish(current, "系统没有接受这次操作，设置没有被改动")
         }
         return@synchronized
@@ -201,25 +224,29 @@ internal object ClearScreenUiCleanup {
         finish(current, if (current.clicked) "没能确认是否已关成功，请到设置里查看" else "没找到这个开关，没有改动")
         return@synchronized
       }
-      // Some sub-pages repeat the entry row inside the page itself, so once the chain is done
-      // the switch may be found without a top header; only allow that after the page has settled.
-      val relaxed = stagedDone && SystemClock.elapsedRealtime() - current.stageClickedAt >= 1_600
       val headers = nodes.indices.filter { current.target.matchesPage(nodes[it].text) &&
         nodes[it].bounds.top < screen.top + screen.height() * .3 }
-      if (headers.isEmpty() && !relaxed) { current.sample = null; return@synchronized }
+      if (headers.isEmpty()) { current.sample = null; return@synchronized }
       // switchIndex -> rowIndex (the clickable preference row that owns it).
       val matches = mutableMapOf<Int, Int>()
       for (labelIndex in nodes.indices.filter { current.target.matchesTitle(nodes[it].text) }) {
         val label = nodes[labelIndex]
-        if (!relaxed && headers.none { it != labelIndex && nodes[it].bounds.bottom <= label.bounds.top }) continue
+        if (headers.none { it != labelIndex && nodes[it].bounds.bottom <= label.bounds.top }) continue
         var parent = label.parent
         repeat(4) {
           if (parent < 0) return@repeat
           val row = nodes[parent]
           if (row.end - parent <= 24 && row.bounds.height() in 1..(screen.height() / 4)) {
-            val switches = (parent until row.end).filter { index -> isSwitchLike(nodes[index].ref) }
-            val labels = (parent until row.end).count { current.target.matchesTitle(nodes[it].text) }
-            if (switches.size == 1 && labels == 1) {
+            val allSwitches = (parent until row.end).filter { index -> isSwitchLike(nodes[index].ref) }
+            // Some OEM rows expose the same switch as both a parent and a child.
+            // Count deepest controls, but never collapse distinct sibling switches.
+            val switches = allSwitches.filter { index ->
+              allSwitches.none { other -> other > index && other < nodes[index].end }
+            }
+            val allLabels = (parent until row.end).filter { current.target.matchesTitle(nodes[it].text) }
+            val labels = allLabels.count { index -> allLabels.none { other -> other > index && other < nodes[index].end } }
+            val states = allSwitches.map { checkedState(nodes[it].ref) }.toSet()
+            if (switches.size == 1 && labels == 1 && states.size == 1 && null !in states) {
               val switchIndex = switches.single()
               val control = nodes[switchIndex]
               val sameControl = switchIndex == labelIndex
@@ -240,11 +267,7 @@ internal object ClearScreenUiCleanup {
       val control = nodes[switchIndex]
       if (control.bounds.isEmpty || !Rect.intersects(screen, control.bounds)) { current.sample = null; return@synchronized }
       if (!unobstructed(control.bounds)) { current.sample = null; return@synchronized }
-      val checked = if (Build.VERSION.SDK_INT >= 36) when (control.ref.getChecked()) {
-        AccessibilityNodeInfo.CHECKED_STATE_TRUE -> true
-        AccessibilityNodeInfo.CHECKED_STATE_FALSE -> false
-        else -> null
-      } else @Suppress("DEPRECATION") control.ref.isChecked
+      val checked = checkedState(control.ref)
       if (checked == null) { current.sample = null; return@synchronized }
       val sample = Sample(root.windowId, Rect(control.bounds), checked)
       val now = SystemClock.elapsedRealtime()
@@ -271,7 +294,8 @@ internal object ClearScreenUiCleanup {
       current.sample = null
       val clicked = control.ref.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
         // HyperOS CheckBox nodes report clickable=false; the preference row is the real click target.
-        nodes.getOrNull(rowIndex)?.ref?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+        (nodes.getOrNull(rowIndex)?.let { unobstructed(it.bounds) &&
+          it.ref.performAction(AccessibilityNodeInfo.ACTION_CLICK) } == true)
       if (!clicked) finish(current, "系统没有接受这次操作，设置没有被改动")
     } catch (_: Exception) {
       finish(current, "没能确认这个开关，操作已停止")

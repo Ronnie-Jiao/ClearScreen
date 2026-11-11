@@ -129,7 +129,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   private var settingsPermissionPackage = ""
   private var settingsPermissionWindow = -1
   private var cleanupWindow = -1
-  private val cleanupScan = Runnable {
+  private val cleanupScan: Runnable = Runnable {
     synchronized(ClearScreenPrivacyConsentStore.operationLock) {
       if (serviceDestroyed || !privacyConsentStore.hasCurrentConsent() || !::store.isInitialized) {
         ClearScreenUiCleanup.clear()
@@ -146,10 +146,19 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         }
       } else ClearScreenUiCleanup.rejectSample()
     }
+    // Keep observing while the user navigates multi-page settings, even when the
+    // destination emits no further accessibility events after the first sample.
+    if (!serviceDestroyed && ClearScreenUiCleanup.isActive()) {
+      handler.removeCallbacks(cleanupScan)
+      handler.postDelayed(cleanupScan, 400L)
+    }
   }
-  private val adbPairingScan = Runnable {
+  private val adbPairingScan: Runnable = Runnable {
     if (serviceDestroyed || !ClearScreenAdbPairingHelper.isActive()) return@Runnable
-    val root = rootInActiveWindow
+    // Enforce the per-stage deadline even while the settings page stays silent.
+    ClearScreenAdbPairingHelper.tick()
+    if (!ClearScreenAdbPairingHelper.isActive()) return@Runnable
+    val root = runCatching { rootInActiveWindow }.getOrNull()
     try {
       if (root != null && root.packageName?.toString() == "com.android.settings") {
         ClearScreenAdbPairingHelper.onSettingsWindow(root)
@@ -157,6 +166,12 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     } finally {
       @Suppress("DEPRECATION")
       root?.recycle()
+    }
+    // The pairing dialog and the connection endpoint can appear without any new
+    // accessibility event, so keep sampling until the attempt ends.
+    if (!serviceDestroyed && ClearScreenAdbPairingHelper.isActive()) {
+      handler.removeCallbacks(adbPairingScan)
+      handler.postDelayed(adbPairingScan, 700L)
     }
   }
   private fun isInputMethodWindow(windowId: Int): Boolean = windowId >= 0 && runCatching {
@@ -367,6 +382,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     ClearScreenAccessibilityHealth.disconnected(this)
     handler.removeCallbacks(settingsPermissionScan)
     handler.removeCallbacks(cleanupScan)
+    handler.removeCallbacks(adbPairingScan)
     ClearScreenUiCleanup.stop()
     ClearScreenSettingsObserver.clear()
     handler.removeCallbacks(eventScanTick)

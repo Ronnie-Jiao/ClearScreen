@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Badge, Background, Card, Chevron, Toggle, TopBar } from '../components/UI';
+import { Background, Card, Chevron, Toggle, TopBar } from '../components/UI';
 import { useAppAlert } from '../components/AppDialog';
 import { ClearScreenNative, type UiCleanupTarget } from '../native/ClearScreenNative';
 import { C, COMPACT_UI } from '../theme';
@@ -37,7 +37,7 @@ function guide(manufacturer: string) {
   };
   if (brand.includes('xiaomi') || brand.includes('redmi') || brand.includes('poco')) return {
     system: 'HyperOS：设置 → 隐私与安全 → 安全 → 更多安全设置 → 广告服务；MIUI：设置 → 安全 → 更多安全设置 → 广告服务',
-    news: '在全局搜索或浏览器设置中检查热搜与资讯推荐',
+    news: '全局搜索 → 搜索设置 → 首页展示模块；浏览器 → 设置 → 主页设置',
     store: '应用商店 → 我的 → 设置 → 隐私设置 / 模式切换',
   };
   if (brand.includes('oppo') || brand.includes('realme')) return {
@@ -177,12 +177,7 @@ export default function SystemRecommendScreen({
         fail('无法启动这个操作', error);
       });
     };
-    if (target.id.startsWith('xiaomi.assistant.')) {
-      showAlert('打开负一屏设置', '从桌面右滑进入负一屏，再打开右上角设置。', [
-        { text: '取消', style: 'cancel' },
-        { text: '开始', onPress: start },
-      ]);
-    } else start();
+    start();
   };
   const changeTarget = (target: UiCleanupTarget) => {
     if (target.state === 'unknown') {
@@ -197,22 +192,15 @@ export default function SystemRecommendScreen({
   };
   // Category rows open pages; they are not separate system switches.
   const categoryTargets = GROUP_ROWS.map(row => ({ row, target: null }));
-  const renderTarget = (target: UiCleanupTarget, plain: boolean) => {
-    const toggleable = target.direct || target.support === 'assisted';
-    if (!toggleable) return <Pressable key={target.id} accessibilityRole="button"
-      onPress={() => showAlert(target.title, target.reason || '这个项目暂时无法自动操作。', undefined, { tone: 'warning' })}
-      style={[s.row, plain && s.rowPlain]}>
-      <View style={s.rowText}><Text style={s.rowTitle}>{target.title}</Text></View>
-      <Badge green={false} compact>{target.support === 'unreachable' ? '未适配' : '需手动'}</Badge>
-    </Pressable>;
-    return <View key={target.id} style={[s.row, plain && s.rowPlain]}>
+  const renderTarget = (target: UiCleanupTarget, plain: boolean) => (
+    <View key={target.id} style={[s.row, plain && s.rowPlain]}>
       <View style={s.rowText}><Text style={s.rowTitle}>{target.title}</Text></View>
       <View style={s.stateWrap}>
         <Toggle compact unknown={target.state === 'unknown'} value={target.state === 'on'}
           onChange={() => { if (!busyTarget) changeTarget(target); }} />
       </View>
-    </View>;
-  };
+    </View>
+  );
   const renderCategory = (row: typeof GROUP_ROWS[number], plain: boolean) =>
     <Pressable key={row.key} accessibilityRole="button" accessibilityHint={`打开${row.title}的系统设置页`}
       onPress={() => openRoute(row.route)} style={[s.row, plain && s.rowPlain]}>

@@ -60,7 +60,7 @@ internal class ClearScreenSettingsNavigator(private val context: Context) {
     ClearScreenRecommendCatalog.ROUTE_STORE ->
       "没找到应用商店设置，只打开了净屏的应用信息页；请从桌面打开应用商店，再进「我的 → 设置」关闭推荐"
     ClearScreenRecommendCatalog.ROUTE_NEWS ->
-      "系统没有开放推荐设置页，只打开了净屏的应用信息页；请在系统设置中搜索「推荐」或进入负一屏设置"
+      "系统没有开放推荐设置页，只打开了净屏的应用信息页；请在全局搜索的「搜索设置」里关闭搜索推荐"
     else ->
       "系统没有开放这个设置页，只打开了净屏的应用信息页，请回到系统设置手动查找"
   }

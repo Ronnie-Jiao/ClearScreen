@@ -12,6 +12,7 @@ internal object WifiPromotionRules {
     MEMBERSHIP_OFFER("builtin.popup.close.wifi-membership-offer"),
     EXTERNAL_FLOATING_BANNER("builtin.popup.close.sdk-external-floating-banner"),
     FLOATING_GAME("builtin.popup.close.wifi-floating-lingzhu"),
+    FLOATING_PRIZE_GAME("builtin.popup.close.wifi-floating-prize-game"),
     VIDEO_POSTER("builtin.popup.close.wifi-video-poster"),
     CALENDAR_DOWNLOAD_CARD("builtin.feed.close.calendar-download-footer"),
   }
@@ -117,21 +118,34 @@ internal object WifiPromotionRules {
       return if (downloadFooter) Kind.CALENDAR_DOWNLOAD_CARD else null
     }
 
-    // An explicit requested title in a tight edge-mounted creative/close pair,
-    // not a normal game page, search result, list card, or unrelated page X.
-    val floatingGame = region.width <= width * 0.40 && region.height <= height * 0.30 &&
+    // These two game creatives are only accepted as small, edge-mounted
+    // overlays with their own X, never as ordinary game-page buttons.
+    val floatingGameGeometry = region.width <= width * 0.40 && region.height <= height * 0.30 &&
       creative.width <= width * 0.36 && creative.height <= height * 0.18 &&
       creative.right >= screen.right - width * 0.04 &&
       creative.centerX >= screen.left + width * 0.70 &&
       creative.centerY in (screen.top + height * 0.45).toInt()..(screen.top + height * 0.88).toInt() &&
       closeAtRight &&
       close.centerX in (creative.right - width * 0.10).toInt()..(creative.right + width * 0.04).toInt() &&
-      close.centerY in (creative.top - height * 0.06).toInt()..(creative.top + height * 0.04).toInt() &&
-      creativeTexts.any {
-        AdSemanticRules.normalize(it.value) == "玩转灵珠" &&
-          it.bounds.centerY >= creative.top + creative.height * 0.50
-      }
-    return if (floatingGame) Kind.FLOATING_GAME else null
+      close.centerY in (creative.top - height * 0.06).toInt()..(creative.top + height * 0.04).toInt()
+    val floatingGame = floatingGameGeometry && creativeTexts.any {
+      AdSemanticRules.normalize(it.value) == "玩转灵珠" &&
+        it.bounds.centerY >= creative.top + creative.height * 0.50
+    }
+    if (packageName == PACKAGE_NAME && floatingGame) return Kind.FLOATING_GAME
+
+    // The screenshot campaign renders its headline and prize copy into the
+    // artwork. Requiring both phrases inside that same compact creative keeps
+    // unrelated game controls and background promotion text out of scope.
+    val floatingPrizeGame = floatingGameGeometry && creativeTexts.any {
+      AdSemanticRules.normalize(it.value).contains("天天打企鹅") &&
+        it.bounds.centerY >= creative.top + creative.height * 0.30
+    } && creativeTexts.any {
+      AdSemanticRules.normalize(it.value).contains("好运赢大奖") &&
+        it.bounds.centerY >= creative.top + creative.height * 0.30
+    }
+    if (packageName == PACKAGE_NAME && floatingPrizeGame) return Kind.FLOATING_PRIZE_GAME
+    return null
   }
 
   private fun normalizedText(texts: List<AdCreativeRules.Text>): String = texts

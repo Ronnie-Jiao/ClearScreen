@@ -1,5 +1,6 @@
 package com.clearscreen.prototype.backend
 
+import android.app.AppOpsManager
 import android.content.Context
 import android.net.Uri
 import android.os.CancellationSignal
@@ -58,14 +59,20 @@ internal class ClearScreenPermissionReader(private val context: Context) {
   }
 
   private fun readXiaomiStartup(): Boolean? = runCatching {
-    // Interoperability selector documented by XomaDev/MIUI-Autostart. Use no
-    // HiddenApiBypass, setAccessible, default-true value, or hard-coded AppOp.
-    // A restricted/missing MIUI or HyperOS interface simply remains unknown.
-    val api = Class.forName("android.miui.AppOpsUtils")
-      .getMethod("getApplicationAutoStart", Context::class.java, String::class.java)
-    when (api.invoke(null, context, context.packageName) as? Int) {
-      0 -> true
-      1 -> false
+    // MIUI/HyperOS keeps the autostart switch in AppOps op 10008 ("MIUIOP(10008)"
+    // in `appops get`), which Security Center writes. Only the numeric overload
+    // reads it, and the public API exposes string ops only, so call the numeric
+    // overload reflectively - that is exactly what MIUI's own
+    // android.miui.AppOpsUtils.getApplicationAutoStart does; that helper class
+    // itself is hiddenapi-blocked for third-party apps.
+    val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
+      ?: return@runCatching null
+    val check = AppOpsManager::class.java.getMethod(
+      "checkOpNoThrow", Integer.TYPE, Integer.TYPE, String::class.java,
+    )
+    when (check.invoke(appOps, MIUI_AUTO_START_OP, context.applicationInfo.uid, context.packageName) as? Int) {
+      AppOpsManager.MODE_ALLOWED -> true
+      AppOpsManager.MODE_IGNORED -> false
       else -> null
     }
   }.getOrNull()
@@ -103,5 +110,10 @@ internal class ClearScreenPermissionReader(private val context: Context) {
       pending?.first?.cancel(true)
     }
     executor.shutdownNow()
+  }
+
+  private companion object {
+    /** MIUI/HyperOS autostart AppOp; the framework helper reads this same code. */
+    const val MIUI_AUTO_START_OP = 10008
   }
 }

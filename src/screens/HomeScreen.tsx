@@ -85,7 +85,10 @@ export default function HomeScreen({master,onAction,onTab,onPermissions,onRecord
    }):<Text style={s.empty}>还没有处理记录</Text>}
   </Card>
   {onLearnedRecords&&onDeleteLearned?<Card style={[s.block,s.recentBlock]}>
-   <View style={s.blockHead}><Text style={s.blockTitle}>自定义关闭窗口</Text><Pressable accessibilityRole="button" accessibilityLabel="查看更多自定义关闭记录" onPress={onLearnedRecords} style={s.viewAllButton}><Text style={s.linkText}>更多</Text><Ionicons name="chevron-forward" size={16} color={C.blue}/></Pressable></View>
+   <View style={s.blockHead}><Text style={s.blockTitle}>自定义关闭窗口</Text><View style={s.headerActions}>
+    <Pressable accessibilityRole="button" accessibilityLabel="查看全部自定义关闭规则" onPress={onLearnedRecords} style={s.viewAllButton}><Text style={s.linkText}>规则</Text></Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel="查看全部自定义关闭记录" onPress={onLearnedRecords} style={s.viewAllButton}><Text style={s.linkText}>更多</Text><Ionicons name="chevron-forward" size={16} color={C.blue}/></Pressable>
+   </View></View>
    {learnedRecords.length?learnedRecords.slice(0,3).map(record=><LearnedCloseRow key={record.id} record={record} apps={apps} onDelete={onDeleteLearned}/>):<Text style={s.empty}>暂无自定义关闭记录</Text>}
   </Card>:null}
  </ScrollView><BottomNav active="home" onChange={onTab}/></View></Background>;
@@ -96,7 +99,7 @@ const s=StyleSheet.create({
  status:{padding:18,gap:16,marginBottom:14},statusHeader:{minHeight:76,flexDirection:'row',alignItems:'center',gap:10},orb:{width:64,height:64,borderRadius:32,alignItems:'center',justifyContent:'center'},
  statusTitle:{fontSize:20,fontWeight:'900',color:C.navy,flex:1,minWidth:0},todaySummary:{minWidth:64,minHeight:76,alignItems:'flex-end',justifyContent:'center'},todayLabel:{position:'absolute',top:8,right:0,fontSize:12,fontWeight:'800',color:C.text2},todayValueRow:{flexDirection:'row',alignItems:'center'},todayNum:{fontSize:26,fontWeight:'900',color:C.navy},todayUnit:{fontSize:12,fontWeight:'800',color:C.text2,marginLeft:3},
  learnButton:{width:52,minHeight:64,alignItems:'center',justifyContent:'center',gap:4,borderRadius:12},learnActive:{backgroundColor:'#E4F4FF'},learnLabel:{fontSize:11,lineHeight:16,color:C.blue,fontWeight:'800'},
- block:{paddingHorizontal:16,marginBottom:14},recentBlock:{minHeight:RECENT_HEADER_HEIGHT+RECENT_ROW_HEIGHT*RECENT_RECORD_LIMIT+2,flexShrink:0},blockHead:{minHeight:RECENT_HEADER_HEIGHT,flexShrink:0,flexDirection:'row',alignItems:'center',borderBottomWidth:1,borderBottomColor:C.line},blockTitle:{fontSize:19,fontWeight:'900',color:C.navy,flex:1},viewAllButton:{height:44,flexDirection:'row',alignItems:'center',justifyContent:'flex-end',gap:2},linkText:{fontSize:14,lineHeight:20,fontWeight:'900',color:C.blue},
+ block:{paddingHorizontal:16,marginBottom:14},recentBlock:{minHeight:RECENT_HEADER_HEIGHT+RECENT_ROW_HEIGHT*RECENT_RECORD_LIMIT+2,flexShrink:0},blockHead:{minHeight:RECENT_HEADER_HEIGHT,flexShrink:0,flexDirection:'row',alignItems:'center',borderBottomWidth:1,borderBottomColor:C.line},blockTitle:{fontSize:19,fontWeight:'900',color:C.navy,flex:1},headerActions:{flexDirection:'row',alignItems:'center',gap:8},viewAllButton:{height:44,flexDirection:'row',alignItems:'center',justifyContent:'flex-end',gap:2},linkText:{fontSize:14,lineHeight:20,fontWeight:'900',color:C.blue},
  fallbackIcon:{width:40,height:40,borderRadius:10,alignItems:'center',justifyContent:'center',backgroundColor:'#EAF4FF'},
  logRow:{height:RECENT_ROW_HEIGHT,flexShrink:0,flexDirection:'row',alignItems:'center',gap:9,borderBottomWidth:1,borderBottomColor:C.line},time:{width:46,fontSize:13,color:C.text2,fontWeight:'700'},logName:{flex:1,minWidth:0,fontSize:15,fontWeight:'800',color:C.text},logAction:{width:94,textAlign:'right',fontSize:13,fontWeight:'800',color:C.green},empty:{paddingVertical:22,textAlign:'center',color:C.text2,fontSize:16,fontWeight:'700'},
 });

@@ -158,6 +158,16 @@ internal object AdSemanticRules {
   fun isCountdownSkip(compact: String): Boolean =
     numericSkip.any { it.matches(compact) }
 
+  /** OCR-only taps wait until a countdown reaches zero; a tree-backed enabled node is checked elsewhere. */
+  fun isZeroCountdownSkip(value: String): Boolean {
+    val compact = normalize(value)
+    val patterns = listOf(
+      Regex("""^(\d{1,3})(?:秒|s)?(?:后)?(?:跳过|skip)(?:广告|此广告|视频|ad|thisad|video)?$"""),
+      Regex("""^(?:跳过|skip)(?:广告|此广告|视频|ad|thisad|video)?(\d{1,3})(?:秒|s)?$"""),
+    )
+    return patterns.any { pattern -> pattern.matchEntire(compact)?.groupValues?.get(1)?.toIntOrNull() == 0 }
+  }
+
   fun isExplicitSkip(compact: String): Boolean =
     compact in explicitSkip
 

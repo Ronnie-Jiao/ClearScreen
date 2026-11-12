@@ -55,10 +55,10 @@ export function BrandHeader({title='净屏',tagline=false,action,compact=false,s
   </View>;
 }
 
-export function TopBar({title,onBack,compact=false}:{title:string;onBack:()=>void;compact?:boolean}){
+export function TopBar({title,onBack,compact=false,action}:{title:string;onBack:()=>void;compact?:boolean;action?:React.ReactNode}){
   return <View style={[styles.topbar,compact&&styles.topbarCompact]}>
     <Pressable accessibilityRole="button" onPress={onBack} hitSlop={16} style={styles.backButton}><Ionicons name="chevron-back" size={compact?22:27} color={C.navy}/></Pressable>
-    <Text style={[styles.topTitle,compact&&styles.topTitleCompact]}>{title}</Text><View style={{width:36}}/>
+    <Text style={[styles.topTitle,compact&&styles.topTitleCompact]}>{title}</Text><View style={{width:action?88:36,alignItems:'flex-end'}}>{action}</View>
   </View>;
 }
 

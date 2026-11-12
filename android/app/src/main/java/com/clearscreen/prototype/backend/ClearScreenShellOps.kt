@@ -86,7 +86,7 @@ internal object ClearScreenShellOps {
     val items = JSONArray()
     for (item in ClearScreenCleanupRules.targets()) {
       val current = runCatching { state(runner, item, user) }.getOrDefault("unknown")
-      if (current != "absent") items.put(JSONObject().put("id", item.id).put("title", item.title)
+      items.put(JSONObject().put("id", item.id).put("title", item.title)
         .put("category", item.category).put("packageName", item.packageName).put("state", current))
     }
     return JSONObject().put("items", items).toString()

@@ -31,6 +31,9 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
   const skipNeedsRepair=!skipEnabled&&!skipPending&&permissions.accessibilitySettingEnabled&&permissions.accessibilityHealth==='unavailable';
   const startupEnabled=verified&&permissions.startupAllowed===true;
   const startupUnknown=!verified||permissions.startupAllowed===null;
+  // The vendor exposes no readable switch on some ROMs. Keep that honest
+  // instead of painting an "off" switch the user cannot trust.
+  const startupUnreadable=verified&&permissions.startupAllowed===null;
   const backgroundEnabled=verified&&permissions.backgroundRestricted!==true&&(permissions.backgroundAllowed===true||(permissions.backgroundAllowed===null&&permissions.backgroundRestricted===false));
   const batteryEnabled=verified&&permissions.batteryOptimizationIgnored===true;
 
@@ -195,7 +198,13 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
     <TopBar compact title="服务与权限" onBack={onBack}/>
     <Card compact style={s.card}>
       {switchRow('自动跳过服务',skipEnabled,onOpenAccessibility,false,false,skipPending?'正在检查':skipEnabled?'已开启':skipUnknown?'待确认':skipNeedsRepair?'需修复':'未开启',skipUnknown||skipNeedsRepair,skipPending)}
-      {switchRow('开机自启动',startupEnabled,openStartupGuide,false,false,startupUnknown?'待确认':startupEnabled?'已开启':'已关闭',false)}
+      {startupUnreadable
+        ? <Pressable accessibilityRole="button" accessibilityLabel="开机自启动，无法读取，去设置" onPress={openStartupGuide} style={s.row}>
+            <Text style={s.rowTitle}>开机自启动</Text>
+            <Text style={s.pendingState}>无法读取</Text>
+            <Text style={s.retryText}>去设置</Text>
+          </Pressable>
+        : switchRow('开机自启动',startupEnabled,openStartupGuide,false,false,startupUnknown?'待确认':startupEnabled?'已开启':'已关闭',startupUnknown,checking)}
       {switchRow('后台运行',backgroundEnabled,onBackground)}
       {switchRow('电池优化',batteryEnabled,onBatteryOptimization,!android)}
       {android?<>

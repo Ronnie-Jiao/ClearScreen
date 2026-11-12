@@ -1,7 +1,9 @@
 package com.clearscreen.prototype.backend
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.os.Build
 
 private typealias Target = ClearScreenUiCleanup.Target
@@ -9,8 +11,8 @@ private typealias Stage = ClearScreenUiCleanup.Stage
 
 /**
  * One registration table for every "system recommendation" switch the app knows about.
- * Each vendor contributes its own entries; brands without an entry get the generic
- * manual destinations from [ClearScreenRecommendRoutes] instead of a silent empty page.
+ * The visible list is narrowed by brand, installed system packages, and a resolvable
+ * destination inside the packages the accessibility operation trusts.
  */
 internal object ClearScreenRecommendCatalog {
   const val ROUTE_AD_PRIVACY = "settings.adPrivacy"
@@ -19,11 +21,20 @@ internal object ClearScreenRecommendCatalog {
   const val ROUTE_XIAOMI_SEARCH = "xiaomi.search"
   const val ROUTE_XIAOMI_LAUNCHER = "xiaomi.launcher"
   const val ROUTE_XIAOMI_BROWSER = "xiaomi.browser"
+  const val ROUTE_XIAOMI_ASSISTANT = "xiaomi.assistant"
+  const val ROUTE_XIAOMI_CONTENT_CENTER = "xiaomi.contentCenter"
+  const val ROUTE_ANDROID_AD_PRIVACY = "android.adPrivacy"
   const val ROUTE_HOME_SCREEN = "home.screen"
 
-  fun targets(context: Context): List<Target> = vendorTargets() + googleAdPrivacy(context)
+  fun targets(context: Context): List<Target> {
+    val family = ClearScreenOemProfile.current()
+    return (vendorTargets(family) + googleAdPrivacy(context))
+      .filter { it.support == "assisted" }
+      .filter { hasRequiredSystemPackages(context, it) }
+      .filter { hasReachableDestination(context, it, family) }
+  }
 
-  private fun vendorTargets(): List<Target> = when (ClearScreenOemProfile.current()) {
+  private fun vendorTargets(family: ClearScreenOemProfile): List<Target> = when (family) {
     ClearScreenOemProfile.VIVO -> vivo
     ClearScreenOemProfile.XIAOMI -> xiaomi
     ClearScreenOemProfile.HUAWEI -> huawei
@@ -32,8 +43,57 @@ internal object ClearScreenRecommendCatalog {
     ClearScreenOemProfile.ONEPLUS -> oneplus
     ClearScreenOemProfile.SAMSUNG -> samsung
     ClearScreenOemProfile.MOTOROLA -> motorola
-    else -> generic
+    // Brands without a registered switch get no switch rows.
+    else -> emptyList()
   }
+
+  private fun hasRequiredSystemPackages(context: Context, target: Target): Boolean {
+    val packageManager = context.packageManager
+    fun isInstalledSystemPackage(packageName: String): Boolean = runCatching {
+      val info = packageManager.getApplicationInfo(packageName, 0)
+      info.enabled && info.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+    }.getOrDefault(false)
+
+    val trustedPackages = target.alternates + target.pkg
+    return trustedPackages.any(::isInstalledSystemPackage) &&
+      target.requiredPackages.all(::isInstalledSystemPackage)
+  }
+
+  private fun hasReachableDestination(
+    context: Context,
+    target: Target,
+    family: ClearScreenOemProfile,
+  ): Boolean {
+    val packageManager = context.packageManager
+    if (target.navigate == ROUTE_HOME_SCREEN || (target.navigate == null && target.entry == "home")) {
+      val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+      return isLaunchable(context, home)
+    }
+
+    val intents = when {
+      target.navigate != null -> ClearScreenRecommendRoutes.candidates(target.navigate, context, family)
+        .filter { it.level != ClearScreenRecommendRoutes.LEVEL_APP_DETAILS }
+        .map { it.intent }
+      target.entry == "browser" -> listOfNotNull(packageManager.getLaunchIntentForPackage(target.pkg))
+      target.category == "store" -> ClearScreenRecommendRoutes.candidates(ROUTE_STORE, context, family)
+        .filter { it.level != ClearScreenRecommendRoutes.LEVEL_APP_DETAILS }
+        .map { it.intent }
+      else -> ClearScreenRecommendRoutes.candidates(ROUTE_AD_PRIVACY, context, family)
+        .filter { it.level != ClearScreenRecommendRoutes.LEVEL_APP_DETAILS }
+        .map { it.intent }
+    }
+    val trustedPackages = target.alternates + target.pkg
+    return intents.any { intent ->
+      val activity = runCatching { intent.resolveActivityInfo(packageManager, 0) }.getOrNull() ?: return@any false
+      activity.packageName in trustedPackages && isLaunchable(context, intent)
+    }
+  }
+
+  private fun isLaunchable(context: Context, intent: Intent): Boolean = runCatching {
+    val activity = intent.resolveActivityInfo(context.packageManager, 0) ?: return@runCatching false
+    activity.enabled && activity.applicationInfo.enabled && activity.exported &&
+      (activity.permission.isNullOrEmpty() || context.checkSelfPermission(activity.permission) == PackageManager.PERMISSION_GRANTED)
+  }.getOrDefault(false)
 
   private val vivo = listOf(
     Target("vivo.system.ad", "system", "个性化广告", "广告与隐私", "com.android.settings",
@@ -47,15 +107,19 @@ internal object ClearScreenRecommendCatalog {
       effect = "关掉后，系统不再根据使用记录提供智能推荐"),
     Target("vivo.news.searchword", "news", "搜索框推荐词", "首页展示内容", "com.android.settings",
       setOf("com.vivo.globalsearch"), navigate = ROUTE_NEWS,
+      requiredPackages = setOf("com.vivo.globalsearch"),
       effect = "关掉后，桌面搜索框不再出现推荐词"),
     Target("vivo.news.card", "news", "推荐卡片", "首页展示内容", "com.android.settings",
       setOf("com.vivo.globalsearch"), navigate = ROUTE_NEWS,
+      requiredPackages = setOf("com.vivo.globalsearch"),
       effect = "关掉后，搜索首页不再展示推荐卡片"),
     Target("vivo.news.hot", "news", "热门搜索", "推荐热搜榜单", "com.android.settings",
       setOf("com.vivo.globalsearch"), navigate = ROUTE_NEWS,
+      requiredPackages = setOf("com.vivo.globalsearch"),
       effect = "关掉后，搜索页不再展示热搜榜单"),
     Target("vivo.news.ad", "news", "广告个性化", "个性化内容", "com.android.settings",
       setOf("com.vivo.globalsearch"), navigate = ROUTE_NEWS,
+      requiredPackages = setOf("com.vivo.globalsearch"),
       effect = "关掉后，搜索和浏览器不再按兴趣推广告"),
     Target("vivo.hiboard.services", "news", "服务推荐", "个性化推荐", "com.vivo.hiboard",
       entry = "home", navigate = ROUTE_HOME_SCREEN,
@@ -100,8 +164,8 @@ internal object ClearScreenRecommendCatalog {
 
   /**
    * HyperOS/MIUI exposes no readable ad-personalization keys, so every Xiaomi entry is either
-   * an accessibility click on a verified page or a jump. Protected pages stay registered with a
-   * reason so the list never silently shrinks.
+   * an accessibility click on a verified page or a jump. Optional system apps and routes are
+   * checked at runtime before the corresponding switch can be shown.
    */
   private val xiaomi = listOf(
     Target("xiaomi.system.personalizedAds", "system", "个性化广告推荐", "广告服务", "com.android.settings",
@@ -115,7 +179,10 @@ internal object ClearScreenRecommendCatalog {
       // The OEM page exposes this row as「智能助理」.
       titleAliases = setOf("智能助理"),
       effect = "关掉后，桌面右滑不再进入负一屏资讯页"),
-    Target("xiaomi.search.hint", "news", "搜索提示词", "首页展示模块", "com.android.quicksearchbox",
+    // On HyperOS the search box recommendation words are the "搜索提示词" control on the
+    // global search page; the negative screen has no separate control for them.
+    Target("xiaomi.search.hint", "news", "搜索框推荐词", "首页展示模块", "com.android.quicksearchbox",
+      titleAliases = setOf("搜索提示词"),
       stages = listOf(Stage("首页展示模块", "首页展示模块", fromPage = "搜索设置")),
       navigate = ROUTE_XIAOMI_SEARCH,
       effect = "关掉后，搜索框不再出现热门资讯提示词"),
@@ -134,38 +201,16 @@ internal object ClearScreenRecommendCatalog {
       stages = listOf(Stage("主页设置", "主页设置", fromPage = "设置")),
       navigate = ROUTE_XIAOMI_BROWSER,
       effect = "关掉后，浏览器主页宫格不再推送内容"),
-    // On the observed HyperOS device these four labels are not independent controls
-    // on the negative-screen settings page. Keep them visible without inventing a switch.
-    Target("xiaomi.assistant.news", "news", "资讯推荐", "负一屏", "com.miui.personalassistant",
-      entry = "home", support = "unreachable",
-      reason = "未确认这台手机的负一屏设置中有对应的独立开关，暂时无法绑定。",
-      effect = "关掉后，负一屏不再推送资讯"),
-    Target("xiaomi.assistant.services", "news", "服务推荐", "负一屏", "com.miui.personalassistant",
-      entry = "home", support = "unreachable",
-      reason = "未确认这台手机的负一屏设置中有对应的独立开关，暂时无法绑定。",
-      effect = "关掉后，负一屏不再推荐服务卡片"),
-    Target("xiaomi.assistant.content", "news", "内容精选", "负一屏", "com.miui.personalassistant",
-      entry = "home", support = "unreachable",
-      reason = "未确认这台手机的负一屏设置中有对应的独立开关，暂时无法绑定。",
-      effect = "关掉后，负一屏不再展示精选内容"),
-    Target("xiaomi.assistant.hot", "news", "热点资讯", "负一屏", "com.miui.personalassistant",
-      entry = "home", support = "unreachable",
-      reason = "未确认这台手机的负一屏设置中有对应的独立开关，暂时无法绑定。",
-      effect = "关掉后，负一屏不再推送热搜"),
-    // The observed page belongs to personalassistant, not the launcher. Other apps may
-    // have to let the user navigate there from Home before the exact-match operation.
+    // The negative-screen settings page (com.miui.personalassistant/.settings.PASettingActivity)
+    // is exported, so ClearScreen opens that page directly and then matches the exact switch.
     Target("xiaomi.assistant.card", "news", "推荐卡片", "负一屏", "com.miui.personalassistant",
-      entry = "home", support = "assisted",
+      navigate = ROUTE_XIAOMI_ASSISTANT,
       effect = "关掉后，负一屏不再展示推荐卡片"),
-    Target("xiaomi.assistant.search", "news", "搜索框推荐词", "负一屏", "com.miui.personalassistant",
-      entry = "home", support = "unreachable",
-      reason = "目前只确认了“搜索框”总开关，关闭它会影响搜索功能，不能当作推荐词开关。",
-      effect = "关掉后，负一屏搜索框不再出现推荐词"),
     Target("xiaomi.assistant.hotActivity", "news", "热门活动", "负一屏", "com.miui.personalassistant",
-      entry = "home", support = "assisted",
+      navigate = ROUTE_XIAOMI_ASSISTANT,
       effect = "关掉后，负一屏不再推送热门活动"),
     Target("xiaomi.assistant.pin", "news", "智能置顶", "负一屏", "com.miui.personalassistant",
-      entry = "home", support = "assisted",
+      navigate = ROUTE_XIAOMI_ASSISTANT,
       effect = "关掉后，负一屏不再把常看内容自动置顶"),
   )
 
@@ -205,14 +250,6 @@ internal object ClearScreenRecommendCatalog {
       navigate = ROUTE_AD_PRIVACY,
       effect = "关掉后，三星系统应用不再按你的兴趣推荐内容和广告"),
   )
-  /** Brands without a verified page still get one honest row instead of an empty screen. */
-  private val generic = listOf(
-    Target("generic.system.personalizedAds", "system", "个性化广告", "广告与隐私", "com.android.settings",
-      support = "manual", navigate = ROUTE_AD_PRIVACY,
-      reason = "这台手机没有开放的直达页，请在系统设置里找到广告与隐私手动关闭",
-      effect = "关掉后，应用不再按你的兴趣推送广告"),
-  )
-
   /** Android's documented Privacy Sandbox controls, available on Android 13+ with Google Play services. */
   private fun googleAdPrivacy(context: Context): List<Target> {
     val hasGooglePlayServices = runCatching {
@@ -223,19 +260,22 @@ internal object ClearScreenRecommendCatalog {
     return listOf(
       Target("android.adPrivacy.topics", "system", "广告主题", "广告主题", "com.android.settings",
         alternates = setOf("com.google.android.gms"),
+        requiredPackages = setOf("com.google.android.gms"),
         titleAliases = setOf("允许广告主题", "Allow ad topics"), pageAliases = setOf("Ad topics"),
-        navigate = ROUTE_AD_PRIVACY,
+        navigate = ROUTE_ANDROID_AD_PRIVACY,
         effect = "关掉后，系统不再按浏览兴趣生成广告主题"),
       Target("android.adPrivacy.appSuggestedAds", "system", "应用建议的广告", "应用建议的广告", "com.android.settings",
         alternates = setOf("com.google.android.gms"),
+        requiredPackages = setOf("com.google.android.gms"),
         titleAliases = setOf("允许应用建议的广告", "Allow app-suggested ads"),
         pageAliases = setOf("App-suggested ads"),
-        navigate = ROUTE_AD_PRIVACY,
+        navigate = ROUTE_ANDROID_AD_PRIVACY,
         effect = "关掉后，应用不能再建议跨应用广告"),
       Target("android.adPrivacy.measurement", "system", "广告衡量", "广告衡量", "com.android.settings",
         alternates = setOf("com.google.android.gms"),
+        requiredPackages = setOf("com.google.android.gms"),
         titleAliases = setOf("允许广告衡量", "Allow ad measurement"), pageAliases = setOf("Ad measurement"),
-        navigate = ROUTE_AD_PRIVACY,
+        navigate = ROUTE_ANDROID_AD_PRIVACY,
         effect = "关掉后，广告主无法衡量你是否看过广告"),
     )
   }

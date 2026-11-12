@@ -18,7 +18,7 @@ export function useBottomNavMetrics(){
 export function BottomNav({active,onChange}:{active:Tab;onChange:(t:Tab)=>void}){
   const items:{id:Tab;label:string;icon:keyof typeof Ionicons.glyphMap;activeIcon:keyof typeof Ionicons.glyphMap}[]=[
     {id:'home',label:'首页',icon:'home-outline',activeIcon:'home'},
-    {id:'apps',label:'应用',icon:'grid-outline',activeIcon:'grid'},
+    {id:'apps',label:'广告',icon:'megaphone-outline',activeIcon:'megaphone'},
     {id:'settings',label:'设置',icon:'settings-outline',activeIcon:'settings'},
   ];
   const {inset,height}=useBottomNavMetrics();

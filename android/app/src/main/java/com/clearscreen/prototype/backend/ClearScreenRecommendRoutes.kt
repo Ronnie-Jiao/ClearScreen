@@ -30,6 +30,9 @@ internal object ClearScreenRecommendRoutes {
       ClearScreenRecommendCatalog.ROUTE_XIAOMI_SEARCH -> xiaomiSearch()
       ClearScreenRecommendCatalog.ROUTE_XIAOMI_LAUNCHER -> xiaomiLauncher()
       ClearScreenRecommendCatalog.ROUTE_XIAOMI_BROWSER -> xiaomiBrowser()
+      ClearScreenRecommendCatalog.ROUTE_XIAOMI_ASSISTANT -> xiaomiAssistant()
+      ClearScreenRecommendCatalog.ROUTE_XIAOMI_CONTENT_CENTER -> xiaomiContentCenter()
+      ClearScreenRecommendCatalog.ROUTE_ANDROID_AD_PRIVACY -> androidAdPrivacy()
       ClearScreenRecommendCatalog.ROUTE_HOME_SCREEN -> homeScreen()
       else -> listOf(Entry(LEVEL_SYSTEM, Intent(Settings.ACTION_SETTINGS), null))
     }
@@ -67,6 +70,12 @@ internal object ClearScreenRecommendRoutes {
     else -> brandPrivacy(null)
   }
 
+  /** Android Privacy Sandbox controls must not open an OEM's unrelated ad-service page. */
+  private fun androidAdPrivacy() = listOf(
+    Entry(LEVEL_SYSTEM, Intent(Settings.ACTION_PRIVACY_SETTINGS), "已打开系统隐私设置"),
+    Entry(LEVEL_SYSTEM, Intent(Settings.ACTION_SETTINGS), null),
+  )
+
   /** Brands without a verified vendor page stop at the standard privacy page with a next-tap hint. */
   private fun brandPrivacy(hint: String?): List<Entry> = listOf(
     Entry(LEVEL_SYSTEM, Intent(Settings.ACTION_PRIVACY_SETTINGS), hint),
@@ -75,12 +84,14 @@ internal object ClearScreenRecommendRoutes {
 
   private fun news(family: ClearScreenOemProfile): List<Entry> = when (family) {
     ClearScreenOemProfile.XIAOMI -> listOf(
-      // Verified on HyperOS 2 (22101317C): desktop settings with the 智能助理 (negative screen) switch.
-      Entry(LEVEL_VENDOR, Intent("com.miui.home.Setting").setPackage("com.miui.home"),
-        "已打开桌面设置，关掉「智能助理」可停用负一屏资讯推荐"),
-      Entry(LEVEL_VENDOR, Intent().setComponent(ComponentName(
-        "com.android.quicksearchbox", "com.android.quicksearchbox.preferences.SearchSettingsPreferenceActivity")),
-        "已打开搜索设置"),
+      // Verified on HyperOS 2 (22101317C): the global search settings page carries「首页展示模块」,
+      // which holds 搜索提示词 / 应用推荐 / 搜索历史 — most of the switches in this category,
+      // so it leads here. The browser and launcher pages stay as ordered fallbacks.
+      xiaomiSearchEntry("点「首页展示模块」查看搜索提示词、应用推荐和搜索历史；宫格位推送在浏览器「主页设置」。"),
+      xiaomiBrowserEntry("已打开浏览器设置，点「主页设置」可关掉「宫格位推送」"),
+      xiaomiLauncherEntry("已打开桌面设置，关掉「智能助理」可停用负一屏资讯推荐"),
+      xiaomiAssistantEntry("已打开负一屏设置，点「推荐卡片」「热门活动」「智能置顶」"),
+      xiaomiContentCenterEntry("已打开内容中心，点「设置」进入个性化推荐"),
       Entry(LEVEL_SYSTEM, Intent(Settings.ACTION_SETTINGS),
         "系统没有开放推荐设置页，已打开设置首页，请搜索「推荐」"),
     )
@@ -118,25 +129,67 @@ internal object ClearScreenRecommendRoutes {
   }
 
   private fun xiaomiSearch(): List<Entry> = listOf(
-    Entry(LEVEL_VENDOR, Intent().setComponent(ComponentName(
-      "com.android.quicksearchbox", "com.android.quicksearchbox.preferences.SearchSettingsPreferenceActivity")),
-      "已打开全局搜索设置，点「首页展示模块」，再关掉对应开关"),
+    xiaomiSearchEntry("已打开全局搜索设置，点「首页展示模块」，再关掉对应开关"),
     Entry(LEVEL_SYSTEM, Intent(Settings.ACTION_SETTINGS), null),
   )
 
   private fun xiaomiLauncher(): List<Entry> = listOf(
-    Entry(LEVEL_VENDOR, Intent("com.miui.home.Setting").setPackage("com.miui.home"),
-      "已打开桌面设置"),
+    xiaomiLauncherEntry("已打开桌面设置"),
     Entry(LEVEL_VENDOR, Intent("com.mi.android.globallauncher.Setting").setPackage("com.mi.android.globallauncher"),
       "已打开桌面设置"),
     Entry(LEVEL_SYSTEM, Intent(Settings.ACTION_SETTINGS), null),
   )
 
   private fun xiaomiBrowser(): List<Entry> = listOf(
-    Entry(LEVEL_VENDOR, Intent().setComponent(ComponentName(
-      "com.android.browser", "com.android.browser.BrowserSettingsActivity")),
-      "已打开浏览器设置，点「主页设置」关闭「宫格位推送」"),
+    xiaomiBrowserEntry("已打开浏览器设置，点「主页设置」关闭「宫格位推送」"),
     Entry(LEVEL_SYSTEM, Intent(Settings.ACTION_SETTINGS), null),
+  )
+
+  /** HyperOS negative-screen settings; exported and reachable from a third-party app. */
+  private fun xiaomiAssistant(): List<Entry> = listOf(
+    xiaomiAssistantEntry("已打开负一屏设置"),
+    Entry(LEVEL_SYSTEM, Intent(Settings.ACTION_SETTINGS), null),
+  )
+
+  /** HyperOS content center; exported, but its own privacy agreement comes first. */
+  private fun xiaomiContentCenter(): List<Entry> = listOf(
+    xiaomiContentCenterEntry("已打开内容中心，点「设置」进入个性化推荐"),
+    Entry(LEVEL_SYSTEM, Intent(Settings.ACTION_SETTINGS), null),
+  )
+
+  /** HyperOS global search settings; exported and reachable from a third-party app. */
+  private fun xiaomiSearchEntry(hint: String): Entry = Entry(
+    LEVEL_VENDOR,
+    Intent().setComponent(ComponentName(XIAOMI_SEARCH_PACKAGE, XIAOMI_SEARCH_SETTINGS_ACTIVITY)),
+    hint,
+  )
+
+  /** HyperOS browser settings; exported and reachable from a third-party app. */
+  private fun xiaomiBrowserEntry(hint: String): Entry = Entry(
+    LEVEL_VENDOR,
+    Intent().setComponent(ComponentName(XIAOMI_BROWSER_PACKAGE, XIAOMI_BROWSER_SETTINGS_ACTIVITY)),
+    hint,
+  )
+
+  /** HyperOS launcher settings; exported and reachable from a third-party app. */
+  private fun xiaomiLauncherEntry(hint: String): Entry = Entry(
+    LEVEL_VENDOR,
+    Intent("com.miui.home.Setting").setPackage(XIAOMI_LAUNCHER_PACKAGE),
+    hint,
+  )
+
+  /** HyperOS negative-screen settings; exported and reachable from a third-party app. */
+  private fun xiaomiAssistantEntry(hint: String): Entry = Entry(
+    LEVEL_VENDOR,
+    Intent().setComponent(ComponentName(XIAOMI_ASSISTANT_PACKAGE, XIAOMI_ASSISTANT_SETTINGS_ACTIVITY)),
+    hint,
+  )
+
+  /** HyperOS content center; exported, but its own privacy agreement comes first. */
+  private fun xiaomiContentCenterEntry(hint: String): Entry = Entry(
+    LEVEL_VENDOR,
+    Intent().setComponent(ComponentName(XIAOMI_CONTENT_CENTER_PACKAGE, XIAOMI_CONTENT_CENTER_ACTIVITY)),
+    hint,
   )
 
   private fun homeScreen() = listOf(
@@ -149,6 +202,18 @@ internal object ClearScreenRecommendRoutes {
     putExtra("packageName", context.packageName)
     putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
   }
+
+  private const val XIAOMI_SEARCH_PACKAGE = "com.android.quicksearchbox"
+  private const val XIAOMI_SEARCH_SETTINGS_ACTIVITY =
+    "com.android.quicksearchbox.preferences.SearchSettingsPreferenceActivity"
+  private const val XIAOMI_BROWSER_PACKAGE = "com.android.browser"
+  private const val XIAOMI_BROWSER_SETTINGS_ACTIVITY = "com.android.browser.BrowserSettingsActivity"
+  private const val XIAOMI_LAUNCHER_PACKAGE = "com.miui.home"
+  private const val XIAOMI_ASSISTANT_PACKAGE = "com.miui.personalassistant"
+  private const val XIAOMI_ASSISTANT_SETTINGS_ACTIVITY =
+    "com.miui.personalassistant.settings.PASettingActivity"
+  private const val XIAOMI_CONTENT_CENTER_PACKAGE = "com.miui.newhome"
+  private const val XIAOMI_CONTENT_CENTER_ACTIVITY = "com.miui.newhome.business.ui.MainActivity"
 
   private const val VIVO_SUB_SETTINGS_ACTION = "android.settings.SETTINGS.SUB_SETTINGS"
   private const val VIVO_SUB_SETTINGS_EXTRA = "extra"

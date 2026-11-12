@@ -47,10 +47,22 @@ export default function AppNotificationsScreen({
     [apps],
   );
   const keyword = query.trim().toLocaleLowerCase();
-  const visible = useMemo(
-    () => keyword ? entries.filter(app => app.name.toLocaleLowerCase().includes(keyword)) : entries,
-    [entries, keyword],
-  );
+  const visible = useMemo(() => {
+    const matched = keyword
+      ? entries.filter(app => app.name.toLocaleLowerCase().includes(keyword))
+      : entries;
+    // 开关打开的排在前面，方便逐个关闭还在发通知的应用；组内保持原有名称顺序。
+    const group = (app: Entry) => {
+      const state = states[app.packageName];
+      if (state === true) return 0;
+      if (state === false) return 1;
+      return 2;
+    };
+    return matched
+      .map((app, index) => ({ app, index }))
+      .sort((a, b) => group(a.app) - group(b.app) || a.index - b.index)
+      .map(item => item.app);
+  }, [entries, keyword, states]);
 
   const loadStates = useCallback(async (knownAccess?: CleanupAccess) => {
     setLoading(true);

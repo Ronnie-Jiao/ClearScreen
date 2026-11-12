@@ -200,21 +200,41 @@ export default function QuickComponentsScreen({ onBack }: { onBack: () => void }
     ];
     return ordered.map(item => <Card key={item.id} compact style={s.targetCard}>
       <View style={s.targetRow}>
-        <Text style={s.rowTitle}>{item.title}</Text>
-        <View style={busy ? s.toggleBusy : undefined} pointerEvents={busy ? 'none' : 'auto'}>
-          <Toggle compact value={item.state === 'blocked'} unknown={item.state === 'unknown'} onChange={() => changeTarget(item)} />
+        <View style={s.rowText}>
+          <Text style={s.rowTitle}>{item.title}</Text>
+          <Text style={s.packageName} numberOfLines={1}>{item.packageName}</Text>
+          <Text style={s.rowHint}>{stateHint(item)}</Text>
         </View>
+        {item.state !== 'absent' ? (
+          <View style={busy || item.state === 'unknown' ? s.toggleBusy : undefined} pointerEvents={busy || item.state === 'unknown' ? 'none' : 'auto'}>
+            <Toggle compact value={item.state === 'blocked'} unknown={item.state === 'unknown'} onChange={() => changeTarget(item)} />
+          </View>
+        ) : null}
       </View>
     </Card>);
   };
+  // Show the scanned allowlist size separately from packages confirmed present.
+  const presentCount = targets.filter(item => item.state === 'active' || item.state === 'blocked').length;
+  const blockedCount = targets.filter(item => item.state === 'blocked').length;
   return (
     <Background>
       <ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
         <TopBar compact title="快应用与系统广告组件" onBack={onBack} />
+        {targetsScanned && targets.length ? (
+          <Text style={s.result}>已检查 {targets.length} 个目标，确认安装 {presentCount} 个，其中 {blockedCount} 个已停用。</Text>
+        ) : null}
         {rows()}
       </ScrollView>
     </Background>
   );
+}
+
+/** Say what the switch means for this component: on means 净屏 stopped it. */
+function stateHint(item: CleanupTarget) {
+  if (item.state === 'blocked') return '开：已停用';
+  if (item.state === 'active') return '关：正常运行';
+  if (item.state === 'absent') return '未安装';
+  return '状态读不到，暂不能操作';
 }
 
 /** Turn native failures into one sentence a user can act on. */
@@ -232,7 +252,11 @@ const s = StyleSheet.create({
   page: { paddingHorizontal: 18, paddingBottom: 36 },
   targetCard: { paddingHorizontal: COMPACT_UI.cardPadding, paddingVertical: 8, marginBottom: 12 },
   targetRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  rowTitle: { flex: 1, fontSize: COMPACT_UI.body, fontWeight: '800', color: C.text },
+  rowText: { flex: 1 },
+  rowTitle: { fontSize: COMPACT_UI.body, fontWeight: '800', color: C.text },
+  packageName: { fontSize: COMPACT_UI.caption, color: C.text2, marginTop: 2 },
+  rowHint: { fontSize: COMPACT_UI.caption, color: C.text2, marginTop: 3 },
+  result: { fontSize: COMPACT_UI.caption, color: C.text2, paddingHorizontal: 6, paddingBottom: 10 },
   toggleBusy: { opacity: 0.45 },
   empty: { paddingVertical: 22, textAlign: 'center', fontSize: COMPACT_UI.body, fontWeight: '700', color: C.text },
   emptyCard: { paddingHorizontal: COMPACT_UI.cardPadding, paddingVertical: 8, marginBottom: 12 },

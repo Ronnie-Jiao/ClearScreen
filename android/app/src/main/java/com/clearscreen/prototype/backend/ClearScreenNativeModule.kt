@@ -16,6 +16,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.util.Base64
 import android.view.accessibility.AccessibilityManager
+import android.widget.Toast
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -353,6 +354,11 @@ class ClearScreenNativeModule(
   fun openRecommendRoute(route: String, promise: Promise) {
     try {
       val landed = settingsNavigator.openRecommendRoute(route)
+      // The system page is already in front when this returns, so the guidance is shown as a
+      // short notice on top of that page instead of waiting for the user to come back.
+      if (landed.level != ClearScreenRecommendRoutes.LEVEL_APP_DETAILS) {
+        landed.hint?.let { Toast.makeText(reactContext, it, Toast.LENGTH_LONG).show() }
+      }
       promise.resolve(Arguments.createMap().apply {
         putString("level", landed.level)
         putString("component", landed.component)

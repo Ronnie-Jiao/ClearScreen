@@ -62,7 +62,6 @@ internal class ClearScreenAdLearning(
   private var trackedNode: AccessibilityNodeInfo? = null
   private var replayCooldown = 0L
   private val attempted = mutableMapOf<String, Long>()
-  private val seen = mutableMapOf<String, Long>()
   var message = ""
     private set
   val active get() = learningActive
@@ -270,20 +269,35 @@ internal class ClearScreenAdLearning(
         it.kind == selector.optString("kind") && it.label == selector.optString("label")
     }
     if (candidates.size > 20) return emptyList()
+    val stableSelectorFields = listOf("version", "id", "kind", "label", "anchorId", "anchorKind", "route")
+    // Ad creatives commonly change the text of sibling nodes between impressions.
+    // Keep the selected control, local anchor, relative route and uniqueness exact;
+    // only relax the volatile whole-card text hash when the target itself has a
+    // stable resource id, or a stable label under a resource-id anchor.
+    val canIgnoreCreativeText = selector.optString("id").isNotBlank() ||
+      selector.optString("label").isNotBlank() && selector.optString("anchorId").isNotBlank()
     return candidates.filter { candidate ->
       val live = if (cache.containsKey(candidate.path)) cache[candidate.path]
         else selectorFor(page, candidate).also { cache[candidate.path] = it }
-      live != null && listOf("version", "id", "kind", "label", "anchorId", "anchorKind", "route", "context")
-        .all { live.optString(it) == selector.optString(it) }
+      live != null && stableSelectorFields.all { live.optString(it) == selector.optString(it) } &&
+        (live.optString("context") == selector.optString("context") ||
+          canIgnoreCreativeText && candidates.size == 1)
     }
   }
+
+  /** Share retry protection across duplicate rules for the same selected control. */
+  private fun replayKey(rule: JSONObject, selector: JSONObject): String = listOf(
+    rule.optString("pkg"), rule.optLong("updated").toString(), selector.optString("version"),
+    selector.optString("id"), selector.optString("kind"), selector.optString("label"),
+    selector.optString("anchorId"), selector.optString("anchorKind"), selector.optString("route"),
+  ).joinToString("\u001f")
 
   /** Expand the finger hit area only; the saved rule and eventual action still use the real node. */
   private fun nearCompactControl(target: Control, x: Int, y: Int): Boolean {
     val bounds = target.bounds
-    if (bounds.width() !in 1..dp(40) || bounds.height() !in 1..dp(40)) return false
-    val horizontal = minOf(dp(16), maxOf(0, (dp(48) - bounds.width() + 1) / 2))
-    val vertical = minOf(dp(16), maxOf(0, (dp(48) - bounds.height() + 1) / 2))
+    if (bounds.width() !in 1..dp(56) || bounds.height() !in 1..dp(56)) return false
+    val horizontal = minOf(dp(28), maxOf(0, (dp(72) - bounds.width() + 1) / 2))
+    val vertical = minOf(dp(28), maxOf(0, (dp(72) - bounds.height() + 1) / 2))
     return Rect(bounds).apply { inset(-horizontal, -vertical) }.contains(x, y)
   }
 
@@ -809,31 +823,41 @@ internal class ClearScreenAdLearning(
     current.use { captured ->
       val page = captured.page
       if (page.pkg != pkg) return@synchronized false
-      val retainedKeys = (0 until rules.length()).mapNotNull { rules.optJSONObject(it)?.optString("key") }.toSet()
-      attempted.keys.retainAll(retainedKeys); seen.keys.retainAll(retainedKeys)
+      val retainedKeys = (0 until rules.length()).mapNotNull { index ->
+        rules.optJSONObject(index)?.let { rule ->
+          rule.optJSONObject("selector")?.let { selector -> replayKey(rule, selector) }
+        }
+      }.toSet()
+      attempted.keys.retainAll(retainedKeys)
       val now = SystemClock.uptimeMillis()
       val selectors = mutableMapOf<String, JSONObject?>()
       for (index in rules.length() - 1 downTo 0) {
         val rule = rules.optJSONObject(index) ?: continue
         val selector = rule.optJSONObject("selector") ?: continue // Legacy coordinate rules remain deletable, never replay.
         if (rule.optString("pkg") != pkg || rule.optLong("updated") != page.updated || selector.optInt("version") != 2) continue
-        val target = matches(page, selector, selectors).singleOrNull() ?: continue
+        if (matches(page, selector, selectors).size != 1) continue
         val key = rule.optString("key")
         if (key.isBlank()) continue
-        if (now - (seen[key] ?: now) > 30_000L) attempted.remove(key)
-        seen[key] = now
-        if (attempted.containsKey(key)) continue
+        val attemptKey = replayKey(rule, selector)
+        val lastAttempt = attempted[attemptKey]
+        if (lastAttempt != null && now - lastAttempt < 30_000L) continue
+        attempted.remove(attemptKey)
         val token = beginAttempt()
         handler.postDelayed({ synchronized(ClearScreenPrivacyConsentStore.operationLock) {
           if (generation != token || !pending || active || !allowed()) return@synchronized
           val sent = runCatching { frame()?.use {
             val live = matches(it.page, selector).singleOrNull()
-            if (sameWindow(page, it.page) && page.scroll == it.page.scroll && live != null && live.bounds == target.bounds) {
-              attempted[key] = SystemClock.uptimeMillis()
+            if (sameWindow(page, it.page) && page.scroll == it.page.scroll && live != null) {
+              attempted[attemptKey] = SystemClock.uptimeMillis()
               val sent = click(it, live)
               if (sent) checkClosure(it.page) { closed ->
-                store.appendEvent("skip", pkg, "learned-ad-close", if (closed) "success" else "unconfirmed",
-                  if (closed) "已执行跳过" else "处理记录")
+                synchronized(ClearScreenPrivacyConsentStore.operationLock) {
+                  if (closed) attempted.remove(attemptKey)
+                  store.appendEvent("skip", pkg, "learned-ad-close", if (closed) "success" else "unconfirmed",
+                    if (closed) "已执行跳过" else "处理记录")
+                }
+              } else {
+                attempted.remove(attemptKey)
               }
               sent
             } else false

@@ -85,7 +85,7 @@ export type AdbActionResult = { ok: boolean; message: string };
 export type AdLearningState = { active: boolean; count: number; message: string; records: LearnedCloseRecord[] };
 export type CleanupTarget = {
   id: string; title: string; category: 'quick' | 'ads'; packageName: string;
-  state: 'active' | 'blocked' | 'unknown'; canRestore: boolean;
+  state: 'active' | 'blocked' | 'unknown' | 'absent'; canRestore: boolean;
 };
 export type MarketingChannel = {
   packageName: string; id: string; name: string; state: 'on' | 'off' | 'unknown';

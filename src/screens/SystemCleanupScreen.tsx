@@ -7,12 +7,10 @@ export default function SystemCleanupScreen({
   onBack,
   onOpenSystemRecommend,
   onOpenAppNotifications,
-  onOpenQuickComponents,
 }: {
   onBack: () => void;
   onOpenSystemRecommend: () => void;
   onOpenAppNotifications: () => void;
-  onOpenQuickComponents: () => void;
 }) {
   return (
     <Background>
@@ -32,15 +30,6 @@ export default function SystemCleanupScreen({
           <Pressable accessibilityRole="button" onPress={onOpenAppNotifications} style={[s.row, s.rowPlain]}>
             <View style={s.rowText}>
               <Text style={s.rowTitle}>应用通知</Text>
-            </View>
-            <Chevron compact />
-          </Pressable>
-        </Card>
-
-        <Card compact style={s.card}>
-          <Pressable accessibilityRole="button" onPress={onOpenQuickComponents} style={[s.row, s.rowPlain]}>
-            <View style={s.rowText}>
-              <Text style={s.rowTitle}>快应用与系统广告组件</Text>
             </View>
             <Chevron compact />
           </Pressable>

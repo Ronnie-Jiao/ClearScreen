@@ -30,7 +30,9 @@ internal object ClearScreenUiCleanup {
     /** Route key handled by ClearScreenRecommendRoutes; null keeps the legacy category path. */
     val navigate: String? = null,
     /** Why this item cannot be handled automatically; shown instead of a silent omission. */
-    val reason: String? = null) {
+    val reason: String? = null,
+    /** System packages that must exist for this particular switch to be present. */
+    val requiredPackages: Set<String> = emptySet()) {
     fun matchesTitle(value: String): Boolean = value == title || value in titleAliases
     fun matchesPage(value: String): Boolean = value == page || value in pageAliases
     fun matchesStageEntry(value: String): Boolean = stages.any { it.matchesEntry(value) }
@@ -50,7 +52,12 @@ internal object ClearScreenUiCleanup {
   private var result: Pair<String, String>? = null
   private const val MAX_SESSION_MS = 180_000L
 
-  fun targets(context: Context): List<Target> = ClearScreenRecommendCatalog.targets(context)
+  /**
+   * Only supported-brand entries with installed system targets and a reachable route are
+   * listed. The live settings page and switch label are still checked before any operation.
+   */
+  fun targets(context: Context): List<Target> =
+    ClearScreenRecommendCatalog.targets(context).filter { it.support == "assisted" }
   private fun key(target: Target) = "ui:${target.id}"
 
   fun begin(context: Context, id: String, restore: Boolean, store: ClearScreenStore): Target = synchronized(lock) {

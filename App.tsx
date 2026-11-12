@@ -8,15 +8,14 @@ import SplashScreen from './src/screens/SplashScreen';
 import PermissionsScreen from './src/screens/PermissionsScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import AppsScreen from './src/screens/AppsScreen';
+import AdsScreen from './src/screens/AdsScreen';
 import AppDetailScreen from './src/screens/AppDetailScreen';
 import RecordsScreen from './src/screens/RecordsScreen';
 import LearnedCloseRecords from './src/screens/LearnedCloseRecords';
 import SettingsScreen from './src/screens/SettingsScreen';
-import SettingsDetailScreen, { type SettingsSection } from './src/screens/SettingsDetailScreen';
+import SettingsDetailScreen, { type HelpDestination, type SettingsSection } from './src/screens/SettingsDetailScreen';
 import ServicePermissionsScreen from './src/screens/ServicePermissionsScreen';
-import SystemCleanupScreen from './src/screens/SystemCleanupScreen';
 import AppNotificationsScreen from './src/screens/AppNotificationsScreen';
-import QuickComponentsScreen from './src/screens/QuickComponentsScreen';
 import MarketingChannelsScreen from './src/screens/MarketingChannelsScreen';
 import SystemRecommendScreen from './src/screens/SystemRecommendScreen';
 import WhitelistScreen from './src/screens/WhitelistScreen';
@@ -26,7 +25,7 @@ import IOSSafariScreen from './src/screens/IOSSafariScreen';
 import { AppItem, LogItem, LearnedCloseRecord } from './src/data';
 import { BackendSnapshot, ClearScreenNative, pickAccessibilityPermissions, type BackendPermissions, type AdLearningState } from './src/native/ClearScreenNative';
 
-type Page='splash'|'privacyConsent'|'privacyPolicy'|'permissions'|'home'|'apps'|'appDetail'|'records'|'recordDetail'|'learnedRecords'|'settings'|'servicePermissions'|'systemCleanup'|'systemRecommend'|'appNotifications'|'quickComponents'|'marketingChannels'|'whitelist'|SettingsSection;
+type Page='splash'|'privacyConsent'|'privacyPolicy'|'permissions'|'home'|'apps'|'appManagement'|'appDetail'|'records'|'recordDetail'|'learnedRecords'|'settings'|'servicePermissions'|'systemRecommend'|'appNotifications'|'marketingChannels'|'whitelist'|SettingsSection;
 type MainTab='home'|'apps'|'settings';
 type SettingsHandoff='accessibility'|'appInfo'|'startup'|'background'|'battery'|null;
 type RecordsQuery={appId?:string;todayOnly?:boolean};
@@ -54,6 +53,8 @@ function AppContent(){
  const [permissions,setPermissions]=useState<BackendPermissions>({skip:false,skipRunning:false,accessibilitySettingEnabled:false,accessibilityServiceBound:false,accessibilityProcessAlive:false,accessibilityHealth:'unknown',accessibilityStoredServices:'',network:false,networkRunning:false,bg:false,batteryOptimizationIgnored:null,backgroundRestricted:null,startupAllowed:null,backgroundAllowed:null,isVivoFamily:false,vendorStartupSettingsAvailable:false,vendorStartupGuideConfirmed:false,deviceManufacturer:'unknown',restrictedSettingsLikely:false});
  const [today,setToday]=useState({skip:0,network:0});
  const [settings,setSettings]=useState({logRetentionDays:7});
+ const [helpSearchInput,setHelpSearchInput]=useState('');
+ const [helpSearchTerm,setHelpSearchTerm]=useState('');
  const persistedRetentionDays=useRef(7);
  const requestedRetentionDays=useRef(7);
  const retentionChangeRevision=useRef(0);
@@ -288,7 +289,7 @@ function AppContent(){
  const tab=(t:MainTab)=>{setHistory([]);setPage(t)};
  useEffect(()=>{
    const settingsDetail=page==='privacyData'||page==='helpFeedback'||page==='about';
-   const settingsChild=(page==='privacyPolicy'||page==='servicePermissions'||page==='systemCleanup'||page==='systemRecommend'||page==='appNotifications'||page==='quickComponents'||page==='marketingChannels'||page==='permissions')&&history.includes('settings');
+   const settingsChild=(page==='privacyPolicy'||page==='servicePermissions'||page==='systemRecommend'||page==='appNotifications'||page==='marketingChannels'||page==='permissions')&&history.includes('settings');
    if(!settingsDetail&&!settingsChild)return;
    const subscription=BackHandler.addEventListener('hardwareBackPress',()=>{
      setHistory(history.slice(0,-1));
@@ -298,8 +299,13 @@ function AppContent(){
    return()=>subscription.remove();
  },[page,history]);
  const goRecords=(query:RecordsQuery={})=>{setRecordsQuery(query);go('records')};
+ const openHelpDestination=(destination:HelpDestination)=>{
+   if(destination==='home'){tab('home');return}
+   if(destination==='records'){goRecords();return}
+   go(destination);
+ };
  useEffect(()=>{
-   if(page!=='learnedRecords')return;
+   if(page!=='learnedRecords'&&page!=='appManagement')return;
    const subscription=BackHandler.addEventListener('hardwareBackPress',()=>{
      setHistory(history.slice(0,-1));setPage(history[history.length-1]||'home');return true;
    });
@@ -406,7 +412,7 @@ function AppContent(){
  const handleHomeAction=()=>{
    if(!permissions.skip){go('permissions');return}
    if(!permissions.skipRunning){go('permissions');return}
-   if(enabledAppCount===0){tab('apps');return}
+   if(enabledAppCount===0){go('appManagement');return}
    if(!master){void toggleMaster();return}
    void toggleMaster();
  };
@@ -425,7 +431,7 @@ function AppContent(){
  else if(page==='permissions')overlay=<PermissionsScreen onBack={back} onContinue={async()=>{
    completeOnboarding();
    const snapshot=await refresh();
-   if(snapshot?.permissions.skip&&snapshot.permissions.skipRunning)tab('apps');
+   if(snapshot?.permissions.skip&&snapshot.permissions.skipRunning){setHistory([]);setPage('appManagement')}
    else tab('home');
  }} onLater={()=>{completeOnboarding();tab('home')}} permissions={permissionsProps} onOpenAccessibility={()=>openPermission('skip')} onOpenAppInfo={openAppDetailsSettings} onHelp={()=>showAlert('开启方法','在系统设置中找到“净屏”，打开无障碍服务后返回此页。')}/>;
  else if(page==='privacyConsent')overlay=<PrivacyPolicyScreen mode="consent" onBack={()=>BackHandler.exitApp()} onAccept={()=>{void acceptPrivacyPolicy()}} onDecline={()=>BackHandler.exitApp()}/>;
@@ -438,17 +444,16 @@ function AppContent(){
  else if(page==='whitelist')overlay=<WhitelistScreen apps={apps} onChangeApps={updateApps} onBack={back}/>;
  else if(page==='learnedRecords')overlay=<LearnedCloseRecords records={learning.records} apps={apps} onBack={back} onDelete={deleteLearned}/>;
  else if(page==='servicePermissions')overlay=<ServicePermissionsScreen permissions={permissions} checking={permissionVerification==='checking'} verificationFailed={permissionVerification==='failed'} accessibilityChecking={accessibilityChecking} onBack={back} onOpenAccessibility={()=>openPermission('skip')} onStartup={()=>openPermission('startup')} onBackground={()=>openPermission('bg')} onBatteryOptimization={()=>openPermission('battery')}/>;
- else if(page==='systemCleanup')overlay=<SystemCleanupScreen onBack={back} onOpenSystemRecommend={()=>go('systemRecommend')} onOpenAppNotifications={()=>go('appNotifications')} onOpenQuickComponents={()=>go('quickComponents')}/>;
+ else if(page==='appManagement')overlay=<AppsScreen apps={apps} onChangeApps={updateApps} onOpen={goApp} onBack={back}/>;
  else if(page==='systemRecommend')overlay=<SystemRecommendScreen manufacturer={permissions.deviceManufacturer} onBack={back} onOpenSystemPrivacy={()=>{void ClearScreenNative.openSystemAdPrivacySettings().catch(()=>showAlert('无法打开系统设置','请在手机系统设置中搜索“广告”或“个性化推荐”。',undefined,{tone:'error'}))}} onOpenServicePermissions={()=>go('servicePermissions')}/>;
  else if(page==='appNotifications')overlay=<AppNotificationsScreen apps={apps} onBack={back} onOpenAccess={()=>go('servicePermissions')}/>;
- else if(page==='quickComponents')overlay=<QuickComponentsScreen onBack={back}/>;
  else if(page==='marketingChannels')overlay=<MarketingChannelsScreen apps={apps} onBack={back} onOpenServicePermissions={()=>go('servicePermissions')}/>;
- else if(page==='privacyData'||page==='helpFeedback'||page==='about')overlay=<SettingsDetailScreen key={page} section={page} logRetentionDays={settings.logRetentionDays} versionName={versionName} onBack={back} onClear={handleClearLogs} onRetentionChange={days=>handleRetentionChange(days).catch(error=>showAlert('保存失败',String(error),undefined,{tone:'error'}))} onWithdrawConsent={Platform.OS==='android'?withdrawPrivacyConsent:undefined}/>;
+ else if(page==='privacyData'||page==='helpFeedback'||page==='about')overlay=<SettingsDetailScreen key={page} section={page} logRetentionDays={settings.logRetentionDays} versionName={versionName} onBack={back} onClear={handleClearLogs} onRetentionChange={days=>handleRetentionChange(days).catch(error=>showAlert('保存失败',String(error),undefined,{tone:'error'}))} onWithdrawConsent={Platform.OS==='android'?withdrawPrivacyConsent:undefined} onHelpNavigate={openHelpDestination} helpSearchInput={helpSearchInput} helpSearchTerm={helpSearchTerm} onHelpSearchInputChange={setHelpSearchInput} onHelpSearchSubmit={setHelpSearchTerm}/>;
  const homeScreen=Platform.OS==='ios'
    ? <IOSSafariScreen onPrivacyPolicy={()=>go('privacyPolicy')}/>
    : <HomeScreen master={master} onAction={handleHomeAction} checking={accessibilityChecking} onTab={tab} onPermissions={()=>go('permissions')} onRecords={()=>goRecords()} onTodayRecords={()=>goRecords({todayOnly:true})} onOpenRecord={openRecord} onOpenApp={goApp} apps={apps} logs={logs} today={today} permissions={permissions} enabledAppCount={enabledAppCount} onLearn={Platform.OS==='android'?()=>{void handleLearn().catch(error=>showAlert('操作失败',String(error)))}:undefined} learning={learning.active} learnedRecords={learning.records} onLearnedRecords={Platform.OS==='android'?()=>go('learnedRecords'):undefined} onDeleteLearned={Platform.OS==='android'?deleteLearned:undefined}/>;
- const appsScreen=<AppsScreen apps={apps} onChangeApps={updateApps} onTab={tab} onOpen={goApp}/>;
- const settingsScreen=<SettingsScreen onTab={tab} onServicePermissions={()=>go('servicePermissions')} onSystemAds={Platform.OS==='android'?()=>go('systemCleanup'):undefined} onMarketingChannels={Platform.OS==='android'?()=>go('marketingChannels'):undefined} onOpenSection={go} onPrivacyPolicy={()=>go('privacyPolicy')} onRestoreDefaults={Platform.OS==='android'?handleRestoreDefaults:undefined}/>;
+ const appsScreen=<AdsScreen onTab={tab} onOpen={page=>go(page)} onOpenAppManagement={()=>go('appManagement')}/>;
+ const settingsScreen=<SettingsScreen onTab={tab} onServicePermissions={()=>go('servicePermissions')} onOpenSection={go} onPrivacyPolicy={()=>go('privacyPolicy')} onRestoreDefaults={Platform.OS==='android'?handleRestoreDefaults:undefined}/>;
  const recordsScreen=<RecordsScreen apps={apps} logs={logs} onBack={back} onOpenRecord={openRecord} filterAppId={recordsQuery.appId} todayOnly={recordsQuery.todayOnly}/>;
  return <ScreenInsetsContext.Provider value={sharedInsets}><StatusBar hidden={false} style="dark"/><View style={s.viewport}>
    <View style={[s.screenLayer,{display:page==='home'?'flex':'none'}]}>{homeScreen}</View>

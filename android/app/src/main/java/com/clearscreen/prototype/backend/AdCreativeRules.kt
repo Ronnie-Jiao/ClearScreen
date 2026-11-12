@@ -53,6 +53,59 @@ internal object AdCreativeRules {
     return largeCreative && redirectHint
   }
 
+  /** Caiyun's inline swipe-to-redirect video card; callers still require its real close node and OCR X. */
+  fun hasCaiyunSwipeRedirectVideoCard(
+    packageName: String,
+    texts: List<Text>,
+    close: AdGeometryRules.Box,
+    screen: AdGeometryRules.Box,
+  ): Boolean {
+    val width = screen.width.coerceAtLeast(1)
+    val height = screen.height.coerceAtLeast(1)
+    val screenArea = width.toLong() * height
+    val closeArea = close.width.toLong().coerceAtLeast(0L) * close.height.toLong().coerceAtLeast(0L)
+    if (packageName != "com.nowcasting.activity" ||
+      screen.width <= 0 || screen.height <= 0 || !contains(screen, close) ||
+      close.width > width * 0.13f || close.height > height * 0.09f ||
+      closeArea.toDouble() / screenArea > 0.015 ||
+      close.centerX !in (screen.left + width * 0.78f).toInt()..(screen.left + width * 0.97f).toInt() ||
+      close.centerY !in (screen.top + height * 0.20f).toInt()..(screen.top + height * 0.39f).toInt()
+    ) return false
+
+    val local = texts.filter { contains(screen, it.bounds) }
+    val adBadge = local.firstOrNull { text ->
+      AdSemanticRules.normalize(text.value) == "广告" &&
+        text.bounds.centerX in (screen.left + width * 0.20f).toInt()..(screen.left + width * 0.58f).toInt() &&
+        text.bounds.centerY in (screen.top + height * 0.43f).toInt()..(screen.top + height * 0.58f).toInt() &&
+        text.bounds.width <= width * 0.20f && text.bounds.height <= height * 0.07f
+    } ?: return false
+    val caption = local.firstOrNull { text ->
+      val value = AdSemanticRules.normalize(text.value)
+      (value.contains("滴滴") || value.contains("该省")) &&
+        text.bounds.centerX in (screen.left + width * 0.04f).toInt()..(screen.left + width * 0.96f).toInt() &&
+        text.bounds.centerY in (screen.top + height * 0.22f).toInt()..(screen.top + height * 0.39f).toInt() &&
+        text.bounds.height <= height * 0.10f
+    } ?: return false
+    val taxiAction = local.firstOrNull { text ->
+      AdSemanticRules.normalize(text.value).contains("打车立省") &&
+        text.bounds.centerX in (screen.left + width * 0.72f).toInt()..(screen.left + width * 0.99f).toInt() &&
+        text.bounds.centerY in (screen.top + height * 0.43f).toInt()..(screen.top + height * 0.59f).toInt()
+    } ?: return false
+    val footer = local.filter { text ->
+      text.bounds.centerX in (screen.left + width * 0.08f).toInt()..(screen.left + width * 0.96f).toInt() &&
+        text.bounds.centerY in (screen.top + height * 0.43f).toInt()..(screen.top + height * 0.59f).toInt()
+    }
+    val footerCopy = AdSemanticRules.normalize(footer
+      .sortedWith(compareBy<Text> { it.bounds.centerY }.thenBy { it.bounds.left })
+      .joinToString("") { it.value })
+    val swipeDisclosure = footerCopy.contains("滑动跳转") && footerCopy.contains("详情页") &&
+      footerCopy.contains("第三方应用")
+    val footerAligned = kotlin.math.abs(adBadge.bounds.centerY - taxiAction.bounds.centerY) <= height * 0.06f &&
+      kotlin.math.abs(close.centerY - caption.bounds.centerY) <= height * 0.10f &&
+      close.centerY + height * 0.10f < taxiAction.bounds.centerY
+    return swipeDisclosure && footerAligned
+  }
+
   private val version = Regex("""版本(?:号)?\s*[:：]?\s*\d+(?:\.\d+){1,3}""")
   private val downloadActions = listOf("点击立即下载", "立即下载", "抢先下载", "安全下载")
   private val disclosureLinks = listOf("功能", "权限", "隐私", "备案")
@@ -187,6 +240,191 @@ internal object AdCreativeRules {
         redirectActions.any { AdSemanticRules.normalize(text.value).contains(it) }
     }
     return exactTrafficOffer && redirect
+  }
+
+  /** A specific China Mobile broadband splash; callers still require a real skip control or fresh OCR target. */
+  fun hasMobileBroadbandSplashComposition(
+    packageName: String,
+    texts: List<Text>,
+    skip: AdGeometryRules.Box,
+    screen: AdGeometryRules.Box,
+  ): Boolean {
+    if (packageName != "com.greenpoint.android.mc10086.activity" ||
+      screen.width <= 0 || screen.height <= 0 || !contains(screen, skip) ||
+      skip.width > screen.width * 0.34 || skip.height > screen.height * 0.12 ||
+      skip.centerX < screen.left + screen.width * 0.65 ||
+      skip.top > screen.top + screen.height * 0.22
+    ) return false
+
+    val local = texts.filter { contains(screen, it.bounds) }
+    val badge = local.any { text ->
+      AdSemanticRules.normalize(text.value) == "广告" &&
+        text.bounds.width <= screen.width * 0.20 &&
+        text.bounds.height <= screen.height * 0.06 &&
+        text.bounds.centerX <= screen.left + screen.width * 0.40 &&
+        text.bounds.centerY <= screen.top + screen.height * 0.30
+    }
+    if (!badge) return false
+
+    val offer = AdSemanticRules.normalize(local
+      .sortedWith(compareBy<Text> { it.bounds.centerY }.thenBy { it.bounds.left })
+      .joinToString("") { it.value })
+    val exactBroadbandOffer = offer.contains("千兆宽带") &&
+      offer.contains("秋季特惠") && offer.contains("1元天起") && offer.contains("全家畅享")
+    val redirect = local.any { text ->
+      val action = AdSemanticRules.normalize(text.value).trimEnd('›', '〉', '→', '❯')
+      action in redirectActions &&
+        text.bounds.centerY >= screen.top + screen.height * 0.50 &&
+        text.bounds.centerY <= screen.top + screen.height * 0.90
+    }
+    return exactBroadbandOffer && redirect
+  }
+
+  /** China Telecom's branded startup ad: only a real, compact bottom-right Skip may be clicked. */
+  fun hasChinaTelecomBrandedSplash(
+    packageName: String,
+    skipText: String,
+    skip: AdGeometryRules.Box,
+    screen: AdGeometryRules.Box,
+    texts: List<Text>,
+  ): Boolean {
+    val width = screen.width.coerceAtLeast(1)
+    val height = screen.height.coerceAtLeast(1)
+    val skipArea = skip.width.toLong().coerceAtLeast(0L) * skip.height.toLong().coerceAtLeast(0L)
+    val screenArea = width.toLong() * height
+    if (packageName != "com.ct.client" ||
+      AdSemanticRules.normalize(skipText) != "跳过" ||
+      AdSemanticRules.isBlockedSkipLabel(skipText) ||
+      !contains(screen, skip) || skip.width > width * 0.28f || skip.height > height * 0.10f ||
+      skipArea.toDouble() / screenArea > 0.03 ||
+      skip.centerX < screen.left + width * 0.70f ||
+      skip.centerY < screen.top + height * 0.90f
+    ) return false
+
+    val local = texts.filter { contains(screen, it.bounds) }
+    val telecomLogo = local.any { text ->
+      AdSemanticRules.normalize(text.value).contains("中国电信") &&
+        text.bounds.centerX in (screen.left + width * 0.25f).toInt()..(screen.left + width * 0.75f).toInt() &&
+        text.bounds.centerY in (screen.top + height * 0.78f).toInt()..(screen.top + height * 0.93f).toInt() &&
+        text.bounds.width <= width * 0.55f && text.bounds.height <= height * 0.08f
+    }
+    if (!telecomLogo) return false
+
+    fun textInColumn(minX: Float, maxX: Float): String = local.asSequence()
+      .filter { text ->
+        text.bounds.centerX in (screen.left + width * minX).toInt()..(screen.left + width * maxX).toInt() &&
+          text.bounds.centerY in (screen.top + height * 0.38f).toInt()..(screen.top + height * 0.69f).toInt() &&
+          text.bounds.width <= width * 0.32f && text.bounds.height <= height * 0.28f
+      }
+      .sortedWith(compareBy<Text> { it.bounds.centerY }.thenBy { it.bounds.centerX })
+      .joinToString(separator = "") { AdSemanticRules.normalize(it.value) }
+
+    val leftSlogan = textInColumn(0.30f, 0.52f)
+    val rightSlogan = textInColumn(0.48f, 0.70f)
+    return leftSlogan.contains("用户") && leftSlogan.contains("至上") &&
+      rightSlogan.contains("用心") && rightSlogan.contains("服务")
+  }
+
+  /** China Mobile's centered plan-upgrade popup with its own lower-center close button. */
+  fun hasMobilePlanUpgradePopup(
+    packageName: String,
+    texts: List<Text>,
+    close: AdGeometryRules.Box,
+    screen: AdGeometryRules.Box,
+  ): Boolean {
+    val width = screen.width.coerceAtLeast(1)
+    val height = screen.height.coerceAtLeast(1)
+    val screenArea = width.toLong() * height
+    val closeArea = close.width.toLong().coerceAtLeast(0L) * close.height.toLong().coerceAtLeast(0L)
+    if (packageName != "com.greenpoint.android.mc10086.activity" ||
+      screen.width <= 0 || screen.height <= 0 || !contains(screen, close) ||
+      close.width > width * 0.12f || close.height > height * 0.09f ||
+      closeArea.toDouble() / screenArea > 0.015 ||
+      close.centerX !in (screen.left + width * 0.44f).toInt()..(screen.left + width * 0.56f).toInt() ||
+      close.centerY !in (screen.top + height * 0.70f).toInt()..(screen.top + height * 0.84f).toInt()
+    ) return false
+
+    val local = texts.filter { contains(screen, it.bounds) }
+    val adBadge = local.firstOrNull { text ->
+      AdSemanticRules.normalize(text.value) == "广告" &&
+        text.bounds.centerX in (screen.left + width * 0.78f).toInt()..(screen.left + width * 0.96f).toInt() &&
+        text.bounds.centerY in (screen.top + height * 0.22f).toInt()..(screen.top + height * 0.38f).toInt() &&
+        text.bounds.width <= width * 0.14f && text.bounds.height <= height * 0.06f
+    } ?: return false
+    val title = local.firstOrNull { text ->
+      val value = AdSemanticRules.normalize(text.value)
+      value.contains("套餐升级") && value.contains("享") &&
+        text.bounds.centerX in (screen.left + width * 0.28f).toInt()..(screen.left + width * 0.72f).toInt() &&
+        text.bounds.centerY in (screen.top + height * 0.22f).toInt()..(screen.top + height * 0.40f).toInt()
+    } ?: return false
+    val offer = local.firstOrNull { text ->
+      val value = AdSemanticRules.normalize(text.value)
+      value.contains("30gb") && value.contains("200分钟") &&
+        text.bounds.centerX in (screen.left + width * 0.20f).toInt()..(screen.left + width * 0.80f).toInt() &&
+        text.bounds.centerY in (screen.top + height * 0.29f).toInt()..(screen.top + height * 0.52f).toInt()
+    } ?: return false
+    val price = local.firstOrNull { text ->
+      AdSemanticRules.normalize(text.value).contains("19元月") &&
+        text.bounds.centerX in (screen.left + width * 0.30f).toInt()..(screen.left + width * 0.70f).toInt() &&
+        text.bounds.centerY in (screen.top + height * 0.55f).toInt()..(screen.top + height * 0.70f).toInt()
+    } ?: return false
+
+    val badgeAligned = kotlin.math.abs(adBadge.bounds.centerY - title.bounds.centerY) <= height * 0.09f &&
+      adBadge.bounds.centerX >= title.bounds.centerX + width * 0.18f
+    val closeBelowPrice = close.top >= price.bounds.bottom &&
+      close.top - price.bounds.bottom in (height * 0.03f).toInt()..(height * 0.20f).toInt() &&
+      kotlin.math.abs(close.centerX - price.bounds.centerX) <= width * 0.14f &&
+      close.centerY >= price.bounds.centerY + height * 0.08f
+    return badgeAligned && closeBelowPrice &&
+      offer.bounds.centerY > title.bounds.centerY && price.bounds.centerY > offer.bounds.centerY
+  }
+
+  /** China Mobile home floating gift ad: exact 20GB offer text and an X at that creative's upper-right edge. */
+  fun hasMobileGiftPromoFloatingClose(
+    packageName: String,
+    texts: List<Text>,
+    close: AdGeometryRules.Box,
+    screen: AdGeometryRules.Box,
+  ): Boolean {
+    if (packageName != "com.greenpoint.android.mc10086.activity" ||
+      screen.width <= 0 || screen.height <= 0 || !contains(screen, close) ||
+      close.width > screen.width * 0.12 || close.height > screen.height * 0.08 ||
+      close.centerX < screen.left + screen.width * 0.82f
+    ) return false
+
+    val local = texts.filter { contains(screen, it.bounds) }
+    val twentyGb = local.filter { AdSemanticRules.normalize(it.value).contains("20gb") }
+    val specialPackage = local.filter { AdSemanticRules.normalize(it.value).contains("特惠包") }
+    if (twentyGb.isEmpty() || specialPackage.isEmpty()) return false
+
+    val width = screen.width.coerceAtLeast(1)
+    val height = screen.height.coerceAtLeast(1)
+    for (gbText in twentyGb) for (offerText in specialPackage) {
+      if (kotlin.math.abs(gbText.bounds.centerX - offerText.bounds.centerX) > width * 0.12f ||
+        kotlin.math.abs(gbText.bounds.centerY - offerText.bounds.centerY) > height * 0.10f
+      ) continue
+
+      val offer = AdGeometryRules.Box(
+        minOf(gbText.bounds.left, offerText.bounds.left),
+        minOf(gbText.bounds.top, offerText.bounds.top),
+        maxOf(gbText.bounds.right, offerText.bounds.right),
+        maxOf(gbText.bounds.bottom, offerText.bounds.bottom),
+      )
+      if (close.centerX < offer.centerX || close.centerY >= offer.centerY ||
+        close.centerY < offer.top - height * 0.12f
+      ) continue
+
+      val creative = AdGeometryRules.Box(
+        maxOf(screen.left, offer.left - (width * 0.05f).toInt()),
+        maxOf(screen.top, offer.top - (height * 0.06f).toInt()),
+        minOf(screen.right, offer.right + (width * 0.04f).toInt()),
+        minOf(screen.bottom, offer.bottom + (height * 0.03f).toInt()),
+      )
+      if (AdGeometryRules.isOcrFloatingCreative(creative, screen) &&
+        AdGeometryRules.isCompactFloatingCreativeClose(close, creative, screen)
+      ) return true
+    }
+    return false
   }
 
   private fun contains(outer: AdGeometryRules.Box, inner: AdGeometryRules.Box): Boolean =

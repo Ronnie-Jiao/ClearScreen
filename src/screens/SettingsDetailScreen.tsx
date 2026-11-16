@@ -24,7 +24,7 @@ type HelpItem={title:string;body:string;keywords:string;destination:HelpDestinat
 type UpdateState='checking'|'unavailable'|'failed'|'latest'|'newer'|'ahead'|'unknown';
 type GitHubRelease={tag_name?:string;name?:string;body?:string;html_url?:string};
 
-const SECTION_TITLES:Record<SettingsSection,string>={privacyData:'隐私与数据',helpFeedback:'帮助与反馈',about:'关于净屏'};
+const SECTION_TITLES:Record<SettingsSection,string>={privacyData:'隐私与数据',helpFeedback:'使用说明',about:'关于净屏'};
 const RETENTION_OPTIONS:[number,string][]=[[0,'关闭记录'],[1,'1 天'],[7,'7 天'],[30,'30 天']];
 const UPDATE_URL='https://api.github.com/repos/Ronnie-Jiao/ClearScreen/releases/latest';
 const AUTHOR_REPOSITORY_URL='https://github.com/Ronnie-Jiao/ClearScreen';
@@ -32,16 +32,16 @@ const AUTHOR_REPOSITORY_URL='https://github.com/Ronnie-Jiao/ClearScreen';
 const ANDROID_HELP:HelpItem[]=[
  {title:'首次开启自动跳过',body:'进入“设置 > 服务与权限”，打开“自动跳过服务”，再按系统提示启用“净屏”无障碍服务。返回首页，状态显示“工作中”后即可使用。',keywords:'首次使用 开始 开启 权限 无障碍 自动跳过',destination:'servicePermissions'},
  {title:'开启或暂停净屏',body:'在首页点“开启净屏”开始自动处理，点“暂停净屏”暂停。首页显示“需要修复”或“状态待确认”时，按页面提示检查服务。',keywords:'首页 总开关 开关 工作中 暂停 继续',destination:'home'},
- {title:'选择要处理的应用',body:'打开“广告”页右上角的“应用管理”，用每个应用旁的开关控制是否自动处理。关闭某个应用后，净屏不会处理该应用。',keywords:'应用管理 应用列表 应用开关 排除 白名单',destination:'appManagement'},
- {title:'学习关闭广告控件',body:'在首页点“学习关闭”，切到出现广告的应用，在学习浮层点“选择控件”并点广告关闭控件；确认框选正确后点“确认选取”。规则保存在本机，只有目标仍能唯一匹配时才会执行。',keywords:'学习关闭 自定义 关闭窗口 控件 选择 确认 学习规则',destination:'home'},
+ {title:'选择要处理的应用',body:'打开“广告”页中的“应用管理”，用每个应用旁的开关控制是否自动处理。关闭某个应用后，净屏不会处理该应用。',keywords:'应用管理 应用列表 应用开关 排除 白名单',destination:'appManagement'},
+ {title:'学习关闭广告控件',body:'在首页点“学习关闭”，切到出现广告的应用，点学习浮层“选择控件”，再点广告关闭控件中心的蓝色小方框。净屏重新核对并尝试关闭，确认关闭后在本机保存规则；后续只在控件仍可唯一匹配时自动处理。',keywords:'学习关闭 自定义 关闭窗口 控件 选择 确认 学习规则',destination:'home'},
  {title:'查看或删除学习规则',body:'在首页“自定义关闭窗口”区域点“更多”，可查看已学规则并逐条删除。',keywords:'学习关闭 自定义关闭窗口 规则 删除',destination:'learnedRecords'},
  {title:'查看处理记录',body:'在首页“最近记录”点“更多”查看记录；点某条记录可查看详情。',keywords:'最近记录 日志 处理结果 今日记录',destination:'records'},
  {title:'设置系统推荐开关',body:'打开“广告 > 系统推荐开关”，选择要处理的项目并按页面提示操作。只会自动操作能确认页面和开关的项目。',keywords:'系统广告 系统推荐 个性化推荐 vivo 小米 华为 设置',destination:'systemRecommend'},
  {title:'管理应用通知',body:'打开“广告 > 应用通知”查找应用并查看通知状态。需要授权或连接服务时，按页面提示前往设置或连接。',keywords:'通知 应用通知 关闭通知 搜索应用',destination:'appNotifications'},
  {title:'扫描营销通知',body:'打开“广告 > 营销通知”查看通知渠道。未连接服务时只能观察部分渠道；按页面提示连接 ADB Shell 或 Shizuku 后，才能读取更完整的清单。',keywords:'营销通知 通知渠道 扫描 ADB Shell Shizuku 连接',destination:'marketingChannels'},
- {title:'连接 ADB Shell',body:'进入“设置 > 服务与权限”，点按“ADB Shell 操作能力”并按系统页面完成无线调试配对。开关显示已连接后，相关系统状态读取能力才可用。',keywords:'ADB Shell 无线调试 配对 连接 授权',destination:'servicePermissions'},
+ {title:'系统设置权限',body:'进入“设置 > 服务与权限”，点按“系统设置权限”并按系统页面完成无线调试配对。开关显示已连接后，相关系统设置读取和操作能力才可用。',keywords:'ADB Shell 无线调试 配对 连接 授权',destination:'servicePermissions'},
  {title:'允许后台运行',body:'进入“设置 > 服务与权限”，按手机系统页面设置开机自启动、后台运行和电池优化。不同品牌的设置入口名称可能不同。',keywords:'后台运行 开机自启动 自启动 电池优化 后台',destination:'servicePermissions'},
- {title:'管理记录和隐私数据',body:'进入“设置 > 隐私与数据”选择记录保留周期或清空记录。Android 还可撤回同意并删除净屏保存的数据。',keywords:'隐私 数据 清空记录 保留周期 撤回同意 删除',destination:'privacyData'},
+ {title:'管理记录和隐私数据',body:'进入“设置 > 隐私与数据”选择记录保留周期或清空记录。要删除本机全部数据，请在 Android 系统设置中清除净屏的应用数据或卸载应用。',keywords:'隐私 数据 清空记录 保留周期 删除 应用数据',destination:'privacyData'},
  {title:'广告没有被处理',body:'先确认首页总开关、目标应用开关和无障碍服务都已开启。净屏只处理能明确识别且有安全关闭控件的广告；强制观看、没有可访问控件或页面结构不支持的广告可能无法处理。',keywords:'故障 排查 没处理 未跳过 广告 无障碍 应用开关',destination:'servicePermissions'},
 ];
 const IOS_HELP:HelpItem[]=[
@@ -65,28 +65,26 @@ function compareVersions(current:string,latest:string):number|undefined{
  return 0;
 }
 
-function SettingsRow({title,value,onPress,last=false,destructive=false}:{
+function SettingsRow({title,value,onPress,last=false}:{
  title:string;
  value?:string;
  onPress:()=>void;
  last?:boolean;
- destructive?:boolean;
 }){
  return <Pressable accessibilityRole="button" onPress={onPress} style={[s.row,last&&s.lastRow]}>
-  <Text style={[s.rowTitle,destructive&&s.destructive]}>{title}</Text>
+  <Text style={s.rowTitle}>{title}</Text>
   {value?<Text style={s.value}>{value}</Text>:null}
   <Chevron compact/>
  </Pressable>;
 }
 
-export default function SettingsDetailScreen({section,logRetentionDays,versionName,onBack,onClear,onRetentionChange,onWithdrawConsent,onHelpNavigate,helpSearchInput='',helpSearchTerm='',onHelpSearchInputChange=()=>{},onHelpSearchSubmit=()=>{}}:{
+export default function SettingsDetailScreen({section,logRetentionDays,versionName,onBack,onClear,onRetentionChange,onHelpNavigate,helpSearchInput='',helpSearchTerm='',onHelpSearchInputChange=()=>{},onHelpSearchSubmit=()=>{}}:{
  section:SettingsSection;
  logRetentionDays:number;
  versionName:string;
  onBack:()=>void;
  onClear:()=>void;
  onRetentionChange:(days:number)=>void;
- onWithdrawConsent?:()=>void;
  onHelpNavigate?:(destination:HelpDestination)=>void;
  helpSearchInput?:string;
  helpSearchTerm?:string;
@@ -174,11 +172,9 @@ export default function SettingsDetailScreen({section,logRetentionDays,versionNa
        })}
       </View>
      </View>
-     <SettingsRow title="清空记录" onPress={onClear} destructive last/>
+     <SettingsRow title="清空记录" onPress={onClear} last/>
     </Card>
-    {Platform.OS==='android'&&onWithdrawConsent?<Card compact style={s.group}><SettingsRow title="撤回同意并删除" onPress={onWithdrawConsent} destructive last/></Card>:null}
    </>:section==='helpFeedback'?<>
-    <Text style={s.sectionTitle}>使用说明</Text>
     <View style={s.searchRow}>
      <View style={s.searchField}>
       <Ionicons name="search-outline" size={20} color={C.text2}/>
@@ -189,7 +185,6 @@ export default function SettingsDetailScreen({section,logRetentionDays,versionNa
       <Ionicons name="search" size={17} color="#FFFFFF"/><Text style={s.searchButtonText}>搜索</Text>
      </Pressable>
     </View>
-    <Text style={s.sectionTitle}>{helpSearchTerm?`搜索结果（${visibleHelpItems.length}）`:'全部内容'}</Text>
     <Card compact style={s.group}>
      {visibleHelpItems.length?visibleHelpItems.map((item,index)=><Pressable key={item.title} accessibilityRole={onHelpNavigate?'button':undefined} accessibilityLabel={onHelpNavigate?`${item.title}，前往相关页面`:undefined} disabled={!onHelpNavigate} onPress={()=>openHelpItem(item)} style={[s.helpItem,index===visibleHelpItems.length-1&&s.lastRow]}>
       <View style={s.helpHeader}><Text style={s.helpTitle}>{item.title}</Text>{onHelpNavigate?<Chevron compact/>:null}</View>
@@ -228,8 +223,7 @@ const s=StyleSheet.create({
  group:{paddingHorizontal:COMPACT_UI.cardPadding,marginBottom:COMPACT_UI.gap},
  row:{minHeight:COMPACT_UI.rowHeight,paddingVertical:12,flexDirection:'row',alignItems:'center',gap:8,borderBottomWidth:1,borderBottomColor:C.line},
  lastRow:{borderBottomWidth:0},rowTitle:{flex:1,fontSize:COMPACT_UI.body,fontWeight:'800',color:C.navy},
- value:{maxWidth:'62%',flexShrink:1,fontSize:COMPACT_UI.caption,lineHeight:18,fontWeight:'700',textAlign:'right',color:C.text2},destructive:{color:C.red},
- sectionTitle:{fontSize:COMPACT_UI.caption,fontWeight:'800',color:C.text2,paddingHorizontal:8,paddingBottom:8},
+ value:{maxWidth:'62%',flexShrink:1,fontSize:COMPACT_UI.caption,lineHeight:18,fontWeight:'700',textAlign:'right',color:C.text2},
  retentionBlock:{paddingTop:16,paddingBottom:14,borderBottomWidth:1,borderBottomColor:C.line},fieldTitle:{fontSize:COMPACT_UI.body,fontWeight:'800',color:C.navy,marginBottom:12},
  retentionOptions:{flexDirection:'row',flexWrap:'wrap',gap:8},retentionOption:{flexBasis:'45%',flexGrow:1,minHeight:COMPACT_UI.buttonHeight,paddingHorizontal:12,paddingVertical:10,borderWidth:1,borderColor:C.line,borderRadius:12,flexDirection:'row',alignItems:'center',gap:6,backgroundColor:'#F7FBFF'},
  retentionSelected:{borderColor:C.blue,backgroundColor:'#E9F4FF'},optionLabel:{flex:1,fontSize:COMPACT_UI.body,fontWeight:'700',color:C.text2},optionSelected:{color:C.blue},optionCheck:{width:18},

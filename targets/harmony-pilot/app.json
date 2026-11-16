@@ -4,7 +4,7 @@
     "slug": "clearscreen",
     "version": "1.0.0",
     "orientation": "default",
-    "icon": "./assets/icon.svg",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "platforms": [
@@ -18,7 +18,7 @@
     "harmony": {
       "bundleName": "com.example.clearscreen",
       "label": "ClearScreen",
-      "icon": "./assets/icon.svg",
+      "icon": "./assets/icon.png",
       "versionCode": 1
     }
   }

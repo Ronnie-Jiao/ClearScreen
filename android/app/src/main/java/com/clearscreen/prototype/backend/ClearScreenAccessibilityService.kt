@@ -83,6 +83,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   private var lastEventAt = 0L
   private val actionAttempts = AdActionAttemptGuard()
   private val visualAttempts = AdVisualAttemptGuard()
+  private val floatingCloseAttempts = AdVisualAttemptGuard()
   private val adScans = AdScanCoordinator()
   private val eventScans = AdEventCoalescer()
   private var eventScanPosted = false
@@ -106,8 +107,9 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     override fun run() = guardServiceTask("media-watch") { pollMediaWatch() }
   }
   private var lastActionAt = 0L
+  private var adGesturePending = false
   private var lastOcrRequestAt = 0L
-  private var pendingMobileSkipRetry: String? = null
+  private var pendingSplashSkipRetry: String? = null
   private var lastWifiOcrDiagnosticAt = 0L
   // Bounded stage summaries for every opted-in host; no nodes, images or OCR text.
   private data class WifiDiagnostic(val at: Long, val summary: String)
@@ -317,7 +319,10 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     eventScans.offer(packageName, event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)
     val urgentMobileTransition = packageName == MOBILE_TRAFFIC_CARD_PACKAGE &&
       event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-    if (urgentMobileTransition) {
+    val urgentLearnedTransition = windowChanged && store.getLearnedAdRules().let { rules ->
+      (0 until rules.length()).any { rules.optJSONObject(it)?.optString("pkg") == packageName }
+    }
+    if (urgentMobileTransition || urgentLearnedTransition) {
       handler.removeCallbacks(eventScanTick)
       eventScanPosted = true
       handler.post(eventScanTick)
@@ -329,7 +334,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   private fun processAccessibilityEvent(event: AdEventCoalescer.Event) {
     if (!ensureConsentAndStore()) return
-    if (adLearning?.active == true) { adScans.cancel(); stopMediaWatch(); return }
+    if (adLearning?.blocksReplay == true) { adScans.cancel(); stopMediaWatch(); return }
     if (ClearScreenUiCleanup.isActive()) { adScans.cancel(); return }
     if (!store.isMasterEnabled()) {
       adScans.cancel()
@@ -357,16 +362,18 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (now - lastActionAt < ACTION_COOLDOWN_MS) return
 
     val handled = tryHandlePackage(packageName)
-    if (handled) {
+    if (handled && adLearning?.replayPending != true) {
       adScans.cancel()
     } else {
       scheduleDynamicAdRetries(packageName, event.windowChanged)
-      requestOcrScan(
-        packageName,
-        prioritizeTransientSplash = event.windowChanged && packageName == MOBILE_TRAFFIC_CARD_PACKAGE,
-      )
-      maybeStartMediaWatch(packageName, if (event.windowChanged) AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED else
-        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)
+      if (!handled) {
+        requestOcrScan(
+          packageName,
+          prioritizeTransientSplash = event.windowChanged && packageName == MOBILE_TRAFFIC_CARD_PACKAGE,
+        )
+        maybeStartMediaWatch(packageName, if (event.windowChanged) AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED else
+          AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)
+      }
     }
   }
 
@@ -410,6 +417,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     writer.println("master=${store.isMasterEnabled()} screenshotPending=$ocrScreenshotPending")
     writer.println("screenReady=${isScreenReady()} suspended=$processingSuspended reset=$lastResetReason " +
       "eventAgeMs=${if (lastEventAt == 0L) -1 else SystemClock.uptimeMillis() - lastEventAt} ocrStalled=${isOcrStalled()}")
+    writer.println("learning=${adLearning?.replayDiagnostics().orEmpty()}")
     wifiDiagnostics.forEach { (stage, diagnostic) ->
       writer.println("$stage ageMs=${SystemClock.uptimeMillis() - diagnostic.at} ${diagnostic.summary}")
     }
@@ -459,16 +467,20 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     guardServiceTask("foreground-scan") { scanCurrentForegroundPackageInternal() }
   }
 
-  private fun scanCurrentForegroundPackageInternal() {
+  private fun scanCurrentForegroundPackageInternal(allowRetryWindow: Boolean = true) {
     if (serviceDestroyed || !isScreenReady() || !ensureConsentAndStore() || !store.isMasterEnabled()) return
-    val packageName = rootInActiveWindow?.packageName?.toString()
-      ?.takeIf(::isEligibleForegroundPackage)
-      ?: return
+    val foreground = foregroundRoot() ?: return
+    val packageName = try { foreground.packageName?.toString() }
+      finally { @Suppress("DEPRECATION") foreground.recycle() }
+    if (packageName == null || !isEligibleForegroundPackage(packageName)) return
     val rule = store.getAppRule(packageName)
     if (!rule.skipEnabled || rule.whitelist) return
     observeForeground(packageName)
-    if (!tryHandlePackage(packageName)) {
+    val handled = tryHandlePackage(packageName)
+    if (allowRetryWindow && (!handled || adLearning?.replayPending == true)) {
       scheduleDynamicAdRetries(packageName, waitForLateControls = true)
+    }
+    if (!handled) {
       requestOcrScan(packageName, prioritizeTransientSplash = packageName == MOBILE_TRAFFIC_CARD_PACKAGE)
       maybeStartMediaWatch(packageName, AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)
     }
@@ -505,6 +517,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   private fun clearVisualState() {
     visualGeneration++
     visualAttempts.clear()
+    floatingCloseAttempts.clear()
     visualConfirmationPending = false
     pendingVisualAction = null
     observedForegroundPackage = null
@@ -553,10 +566,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   private fun tryHandlePackageInternal(packageName: String, ocrFrame: OcrFrame?, followUpDepth: Int): Boolean {
     if (serviceDestroyed || !ensureConsentAndStore() || !store.isMasterEnabled()) return rejectScan("disabled")
-    if (adLearning?.active == true) return rejectScan("learning")
+    if (adLearning?.blocksReplay == true) return rejectScan("learning-selection")
     if (!isEligibleForegroundPackage(packageName)) return rejectScan("foreground-changed")
     val rule = store.getAppRule(packageName)
     if (!rule.skipEnabled || rule.whitelist) return rejectScan("app-excluded")
+    if (adGesturePending) return rejectScan("gesture-pending")
     if (adLearning?.tryReplay(packageName) == true) return true
     pendingVisualAction?.takeIf { it.packageName == packageName }?.let {
       if (SystemClock.uptimeMillis() - it.at <= 4_000L) return rejectScan("visual-action-pending")
@@ -607,7 +621,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       } != action.targetLabels ||
       isUnsafeCaiyunRedirectClickTarget(action.target, packageName)
     ) return rejectScan("target-changed")
-    if (!isAppProcessingEnabled(packageName) || !isEligibleForegroundPackage(packageName)) return false
+    if (!isAppProcessingEnabled(packageName) || !isEligibleForegroundPackage(packageName) ||
+      !visualWindowUnobstructed(liveRoot, action.targetBounds)) return false
     val fingerprint = action.targetFingerprint(packageName)
     if (!actionAttempts.tryBegin(fingerprint, now)) {
       if (action.allowVerifiedTouchFallback && ocrFrame != null) {
@@ -622,6 +637,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     // Only click a deliberately identified control. ACTION_DISMISS is exposed by
     // many ordinary dialogs and would close user-required popups even when no ad
     // close button was found.
+    adLearning?.onAutomaticAction()
     val clicked = action.target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     lastScanReason = if (clicked) "click-accepted" else "click-rejected"
     recordWifiDiagnostic(packageName, "action",
@@ -647,6 +663,63 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     return true
   }
 
+  /** Keep the selector visible while routing one automatic gesture underneath it. */
+  private fun dispatchAdGesture(
+    gesture: GestureDescription,
+    callback: GestureResultCallback? = null,
+    callbackHandler: Handler? = null,
+    current: () -> Boolean = { true },
+  ): Boolean {
+    if (Looper.myLooper() != handler.looper) {
+      val finished = java.util.concurrent.CountDownLatch(1)
+      val expired = java.util.concurrent.atomic.AtomicBoolean(false)
+      var accepted = false
+      handler.post {
+        try {
+          if (!expired.get() && current()) accepted = dispatchAdGesture(gesture, callback, callbackHandler) {
+            !expired.get() && current()
+          }
+        } finally { finished.countDown() }
+      }
+      val ready = try { finished.await(1_000L, TimeUnit.MILLISECONDS) }
+        finally { if (finished.count > 0L) expired.set(true) }
+      if (!ready) return false
+      return accepted
+    }
+    if (!current() || adGesturePending || serviceDestroyed) return false
+    val restore = runCatching { adLearning?.passThroughSelectionGesture() }.getOrElse { return false }
+    adGesturePending = true
+    var restored = false
+    fun finish() {
+      if (restored) return
+      restored = true
+      adGesturePending = false
+      restore?.invoke()
+    }
+    val bridge = object : GestureResultCallback() {
+      override fun onCompleted(gestureDescription: GestureDescription?) {
+        finish()
+        if (callbackHandler != null) callbackHandler.post { callback?.onCompleted(gestureDescription) }
+        else callback?.onCompleted(gestureDescription)
+      }
+      override fun onCancelled(gestureDescription: GestureDescription?) {
+        finish()
+        if (callbackHandler != null) callbackHandler.post { callback?.onCancelled(gestureDescription) }
+        else callback?.onCancelled(gestureDescription)
+      }
+    }
+    val accepted = runCatching {
+      synchronized(ClearScreenPrivacyConsentStore.operationLock) {
+        if (!current() || serviceDestroyed) false else {
+          if (adLearning?.blocksReplay != true) adLearning?.onAutomaticAction()
+          super.dispatchGesture(gesture, bridge, handler)
+        }
+      }
+    }.getOrDefault(false)
+    if (!accepted) finish() else handler.postDelayed({ finish() }, 3_000L)
+    return accepted
+  }
+
   /** Touch only the freshly re-identified accessible control, never an OCR-only location. */
   private fun tryDispatchVerifiedControlTouch(
     packageName: String,
@@ -654,7 +727,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     frame: OcrFrame,
     followUpDepth: Int,
   ): Boolean {
-    val root = rootInActiveWindow ?: return rejectScan("touch-root-unavailable")
+    val root = findRootForPackage(packageName) ?: return rejectScan("touch-root-unavailable")
     if (!isAppProcessingEnabled(packageName) || !isEligibleForegroundPackage(packageName) ||
       root.packageName?.toString() != packageName || root.windowId != previousAction.targetWindowId ||
       screenshotDisplayBounds() != frame.displayBounds
@@ -683,7 +756,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       .addStroke(GestureDescription.StrokeDescription(path, 0L, OCR_SKIP_GESTURE_DURATION_MS))
       .build()
     val dispatched = runCatching {
-      dispatchGesture(gesture, object : GestureResultCallback() {
+      dispatchAdGesture(gesture, object : GestureResultCallback() {
         override fun onCompleted(gestureDescription: GestureDescription?) {
           if (!ensureConsentAndStore() || !isAppProcessingEnabled(packageName)) return
           scheduleActionVerification(packageName, action, frame, fingerprint, followUpDepth,
@@ -798,10 +871,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   private fun scheduleDynamicAdRetries(packageName: String, waitForLateControls: Boolean = false) {
     val root = findRootForPackage(packageName) ?: return
-    val snapshot = snapshotForHints(root)
     val ticket = adScans.begin(
       packageName, root.windowId, SystemClock.uptimeMillis(),
-      waitForLateControls || hasPendingAdUi(snapshot),
+      // A replay already owns a fresh, guarded tree read. Do not make its
+      // completion wait behind another full snapshot on the handler thread.
+      waitForLateControls || adLearning?.replayPending == true || hasPendingAdUi(snapshotForHints(root)),
     ) ?: return
     postNextAdScan(ticket)
   }
@@ -912,8 +986,9 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         PLAYER_RESOURCE_MARKERS.any(node.resourceId::contains))
     }
 
-  private fun isAppProcessingEnabled(packageName: String): Boolean =
-    adLearning?.active != true && !ClearScreenUiCleanup.isActive() && !serviceDestroyed && ::store.isInitialized && store.isMasterEnabled() &&
+  private fun isAppProcessingEnabled(packageName: String, allowPendingReplay: Boolean = false): Boolean =
+    adLearning?.blocksReplay != true && (allowPendingReplay || adLearning?.replayPending != true) &&
+      !ClearScreenUiCleanup.isActive() && !serviceDestroyed && ::store.isInitialized && store.isMasterEnabled() &&
       store.getAppRule(packageName).let { it.skipEnabled && !it.whitelist }
 
   private fun isOcrWindowCurrent(frame: OcrFrame, snapshot: AccessibilitySnapshot): Boolean =
@@ -929,6 +1004,15 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   private fun isMobileSplashOcrCurrent(frame: OcrFrame, snapshot: AccessibilitySnapshot): Boolean =
     frame.packageName == MOBILE_TRAFFIC_CARD_PACKAGE && isOcrWindowCurrent(frame, snapshot) &&
       SystemClock.uptimeMillis() - frame.capturedAt <= MOBILE_OCR_MAX_ACTION_AGE_MS
+
+  /**
+   * The China Mobile splash countdown changes its accessibility text while OCR is running.
+   * For skip candidates, retain fresh evidence from the same window and bounds despite that
+   * expected mutation; all campaign, target geometry, and enabled-state checks still apply.
+   */
+  private fun isSkipOcrEvidenceCurrent(frame: OcrFrame, snapshot: AccessibilitySnapshot): Boolean =
+    if (snapshot.packageName == MOBILE_TRAFFIC_CARD_PACKAGE) isMobileSplashOcrCurrent(frame, snapshot)
+    else isOcrScopeCurrent(frame, snapshot, "0")
 
   private fun isOcrScopeCurrent(frame: OcrFrame, snapshot: AccessibilitySnapshot, path: String): Boolean {
     if (!isOcrWindowCurrent(frame, snapshot)) return false
@@ -998,9 +1082,9 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     ) return
 
     val now = SystemClock.uptimeMillis()
-    val urgentMobileSplash = prioritizeTransientSplash && packageName == MOBILE_TRAFFIC_CARD_PACKAGE
+    val urgentTransientSplash = prioritizeTransientSplash
     val minimumInterval = if (confirmVisualTarget) 650L else OCR_MIN_INTERVAL_MS
-    if (!urgentMobileSplash && now - lastOcrRequestAt < minimumInterval) return
+    if (!urgentTransientSplash && now - lastOcrRequestAt < minimumInterval) return
     val beforeCapture = captureOcrEvidence(packageName) ?: return
     val rootBounds = beforeCapture.rootBounds
     val displayBounds = screenshotDisplayBounds() ?: return
@@ -1215,7 +1299,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
                     // from 2 to 1 must not discard every ad on the screen.
                     val handled = verifyPendingVisualAction(frame, currentSnapshot) ||
                       tryHandlePackage(packageName, frame, followUpDepth) ||
-                      tryHandleOcrOnlyMobileSkip(packageName, frame, currentRoot, currentSnapshot, followUpDepth) ||
+                      tryHandleOcrOnlySplashSkip(packageName, frame, currentRoot, currentSnapshot, followUpDepth) ||
+                      tryHandleOcrFloatingClose(packageName, frame, currentRoot, currentSnapshot) ||
                       tryHandleVisualAdControl(packageName, frame, currentRoot, currentSnapshot)
                     recordWifiDiagnostic(packageName, "ocr-decision",
                       "handled=$handled window=${frame.windowId} windowStable=${isOcrScopeCurrent(frame, currentSnapshot, "0")} " +
@@ -1278,21 +1363,53 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     }
   }
 
-  private fun isCurrentForegroundPackage(packageName: String): Boolean =
-    rootInActiveWindow?.packageName?.toString() == packageName
+  /** Only our verified selector can substitute the top application beneath it. */
+  private fun foregroundRoot(): AccessibilityNodeInfo? {
+    val observed = rootInActiveWindow
+    if (adLearning?.selectionWindowId == null ||
+      observed != null && !adLearning!!.ownsSelectionOverlay(observed.windowId)) return observed
+    val available = runCatching { windows }.getOrDefault(emptyList())
+    return try {
+      val own = available.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY &&
+        adLearning?.ownsSelectionOverlay(it.id) == true &&
+        (observed?.windowId == it.id || observed == null && (it.isFocused || it.isActive)) }
+      if (own == null) observed else {
+        @Suppress("DEPRECATION") observed?.recycle()
+        available.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.layer < own.layer }
+          .maxByOrNull { it.layer }?.root
+      }
+    } finally { @Suppress("DEPRECATION") available.forEach { it.recycle() } }
+  }
+
+  private fun isCurrentForegroundPackage(packageName: String): Boolean {
+    val root = foregroundRoot() ?: return false
+    return try { root.packageName?.toString() == packageName }
+    finally { @Suppress("DEPRECATION") root.recycle() }
+  }
+
+  private fun currentForegroundWindowId(): Int? {
+    val root = foregroundRoot() ?: return null
+    return try { root.windowId } finally { @Suppress("DEPRECATION") root.recycle() }
+  }
 
   private fun visualWindowUnobstructed(root: AccessibilityNodeInfo, bounds: Rect): Boolean {
     val available = runCatching { windows }.getOrDefault(emptyList())
-    val active = available.firstOrNull { it.id == root.windowId && it.isActive } ?: return false
-    return available.none { window ->
-      val other = Rect().also(window::getBoundsInScreen)
-      window.id != active.id && window.layer > active.layer &&
-        (window.type == AccessibilityWindowInfo.TYPE_APPLICATION ||
-          window.type == AccessibilityWindowInfo.TYPE_SYSTEM ||
-          window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD ||
-          window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) &&
-        other.contains(bounds.centerX(), bounds.centerY())
-    }
+    return try {
+      val selecting = available.any { it.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY &&
+        adLearning?.ownsSelectionOverlay(it.id) == true }
+      val active = available.firstOrNull { it.id == root.windowId && (it.isActive || selecting) } ?: return false
+      available.none { window ->
+        val other = Rect().also(window::getBoundsInScreen)
+        val ownSelector = window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY &&
+          adLearning?.ownsSelectionOverlay(window.id) == true
+        window.id != active.id && !ownSelector && window.layer > active.layer &&
+          (window.type == AccessibilityWindowInfo.TYPE_APPLICATION ||
+            window.type == AccessibilityWindowInfo.TYPE_SYSTEM ||
+            window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD ||
+            window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) &&
+          other.contains(bounds.centerX(), bounds.centerY())
+      }
+    } finally { @Suppress("DEPRECATION") available.forEach { it.recycle() } }
   }
 
   private fun queueVisualConfirmation(packageName: String, windowId: Int) {
@@ -1304,13 +1421,156 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       if (generation != visualGeneration) return@postDelayed
       visualConfirmationPending = false
       if (!ensureConsentAndStore() || !isAppProcessingEnabled(packageName) ||
-        !isEligibleForegroundPackage(packageName) || rootInActiveWindow?.windowId != windowId
+        !isEligibleForegroundPackage(packageName) || currentForegroundWindowId() != windowId
       ) { visualAttempts.clear(); return@postDelayed }
       requestOcrScan(packageName, retryOnSignatureMismatch = false, confirmVisualTarget = true)
     }, delay)
   }
 
-  /** No generic X coordinate clicks. Only a two-frame, bounded labelled button on a proven ad page. */
+  /**
+   * Some compact ad tiles rasterize their X and expose no clickable accessibility node.
+   * Permit one bounded tap only after the same local ad copy and X survive two fresh OCR frames.
+   */
+  private fun tryHandleOcrFloatingClose(
+    packageName: String,
+    frame: OcrFrame,
+    root: AccessibilityNodeInfo,
+    snapshot: AccessibilitySnapshot,
+  ): Boolean {
+    val now = SystemClock.uptimeMillis()
+    if (!isAppProcessingEnabled(packageName) || !isEligibleForegroundPackage(packageName) ||
+      packageName != snapshot.packageName || root.windowId != frame.windowId ||
+      !isOcrWindowCurrent(frame, snapshot) || now - frame.capturedUptime > 1_600L ||
+      screenshotDisplayBounds() != frame.displayBounds ||
+      (!store.isSettingEnabled(ClearScreenStore.KEY_CLOSE_POPUP_ADS, true) &&
+        !store.isSettingEnabled(ClearScreenStore.KEY_CLOSE_FEED_ADS, true)) ||
+      isProtectedTimeSensitiveSnapshot(root, snapshot) ||
+      AdDecisionPolicy.isProtectedConfirmation(snapshot.nodes.filter { it.isVisible }.map { it.compactLabel }) ||
+      snapshot.nodes.any { it.isVisible && (it.isEditable || it.isPassword) }
+    ) {
+      floatingCloseAttempts.clear()
+      return rejectScan("floating-close-evidence-unavailable")
+    }
+
+    val candidates = findOcrFloatingCloseCandidates(packageName, frame, snapshot)
+    if (candidates.size != 1) {
+      floatingCloseAttempts.clear()
+      if (candidates.size > 1) rejectControl("floating-close-ambiguous")
+      return rejectScan(if (candidates.isEmpty()) "no-floating-close-candidate" else "floating-close-ambiguous")
+    }
+    val candidate = candidates.single()
+    if (hasAccessibleFloatingCloseOwner(snapshot, candidate.closeBounds)) {
+      floatingCloseAttempts.clear()
+      rejectControl("floating-close-accessible-owner")
+      return rejectScan("floating-close-accessible-owner")
+    }
+
+    val key = "$OCR_FLOATING_CLOSE_RULE|$packageName|${frame.windowId}|" +
+      "${candidate.closeBounds.left},${candidate.closeBounds.top},${candidate.semanticStamp}"
+    if (!floatingCloseAttempts.observe(key, candidate.closeBounds.toBox(), candidate.semanticStamp,
+        frame.capturedUptime, now)
+    ) {
+      queueVisualConfirmation(packageName, frame.windowId)
+      recordWifiDiagnostic(packageName, "controls", "reason=floating-close-waiting-second-frame candidates=1")
+      return rejectScan("floating-close-waiting-second-frame")
+    }
+
+    val liveRoot = findRootForPackage(packageName) ?: return rejectScan("floating-close-root-unavailable")
+    val liveSnapshot = AccessibilitySnapshot.capture(liveRoot)
+    val liveCandidate = findOcrFloatingCloseCandidates(packageName, frame, liveSnapshot).singleOrNull()
+      ?: return rejectScan("floating-close-target-changed")
+    if (!isOcrWindowCurrent(frame, liveSnapshot) || liveRoot.windowId != frame.windowId ||
+      liveCandidate != candidate || screenshotDisplayBounds() != frame.displayBounds ||
+      now - frame.capturedUptime > 1_600L || isProtectedTimeSensitiveSnapshot(liveRoot, liveSnapshot) ||
+      AdDecisionPolicy.isProtectedConfirmation(liveSnapshot.nodes.filter { it.isVisible }.map { it.compactLabel }) ||
+      liveSnapshot.nodes.any { it.isVisible && (it.isEditable || it.isPassword) } ||
+      hasAccessibleFloatingCloseOwner(liveSnapshot, candidate.closeBounds) ||
+      !visualWindowUnobstructed(liveRoot, candidate.closeBounds) ||
+      !isAppProcessingEnabled(packageName) || !isEligibleForegroundPackage(packageName)
+    ) return rejectScan("floating-close-target-changed")
+
+    if (now - lastActionAt < ACTION_COOLDOWN_MS || !actionAttempts.tryBegin(key, now)) {
+      return rejectScan("floating-close-repeat-guard")
+    }
+    lastActionAt = now
+    visualAttempts.clear()
+    floatingCloseAttempts.clear()
+    pendingVisualAction = PendingVisualAction(
+      packageName = packageName,
+      windowId = liveSnapshot.windowId,
+      rootBounds = Rect(liveSnapshot.rootBounds),
+      displayBounds = Rect(frame.displayBounds),
+      button = Rect(candidate.closeBounds),
+      scope = Rect(candidate.creativeBounds),
+      signature = liveSnapshot.signature,
+      at = now,
+      ruleId = OCR_FLOATING_CLOSE_RULE,
+    )
+    val path = Path().apply { moveTo(candidate.closeBounds.exactCenterX(), candidate.closeBounds.exactCenterY()) }
+    val gesture = GestureDescription.Builder()
+      .addStroke(GestureDescription.StrokeDescription(path, 0L, OCR_SKIP_GESTURE_DURATION_MS))
+      .build()
+    val dispatched = runCatching { dispatchAdGesture(gesture, object : GestureResultCallback() {
+      override fun onCompleted(gestureDescription: GestureDescription?) {
+        if (!ensureConsentAndStore() || !isAppProcessingEnabled(packageName)) return
+        store.appendEvent(type = "skip", packageName = packageName, ruleId = OCR_FLOATING_CLOSE_RULE,
+          result = "pending", text = "已触摸广告关闭按钮，结果待确认")
+        recordWifiDiagnostic(packageName, "result", "mode=ocr-floating-close result=pending")
+        handler.postDelayed({
+          if (ensureConsentAndStore() && isAppProcessingEnabled(packageName) &&
+            isCurrentForegroundPackage(packageName)
+          ) requestOcrScan(packageName, retryOnSignatureMismatch = false, confirmVisualTarget = true)
+        }, 850L)
+      }
+
+      override fun onCancelled(gestureDescription: GestureDescription?) {
+        pendingVisualAction = null
+        if (!ensureConsentAndStore() || !isAppProcessingEnabled(packageName)) return
+        recordWifiDiagnostic(packageName, "result", "mode=ocr-floating-close result=cancelled")
+        store.appendEvent(type = "skip", packageName = packageName, ruleId = OCR_FLOATING_CLOSE_RULE,
+          result = "failed", text = "广告关闭按钮触摸未完成")
+      }
+    }, null) }.getOrDefault(false)
+    if (!dispatched) {
+      pendingVisualAction = null
+      store.appendEvent(type = "skip", packageName = packageName, ruleId = OCR_FLOATING_CLOSE_RULE,
+        result = "failed", text = "广告关闭按钮触摸未能发送")
+    }
+    recordWifiDiagnostic(packageName, "action", "mode=ocr-floating-close accepted=$dispatched window=${frame.windowId}")
+    return if (dispatched) {
+      lastScanReason = "ocr-floating-close-dispatched"
+      true
+    } else rejectScan("ocr-floating-close-rejected")
+  }
+
+  private fun findOcrFloatingCloseCandidates(
+    packageName: String,
+    frame: OcrFrame,
+    snapshot: AccessibilitySnapshot,
+  ): List<OcrFloatingCloseCandidate> = frame.closeGlyphText.flatMap { glyph ->
+    val glyphBounds = Rect(glyph.screenBounds)
+    if (!isCompactOcrCloseGlyph(glyph, glyphBounds, snapshot.rootBounds)) return@flatMap emptyList()
+    AdCreativeRules.findOcrFloatingCloseEvidence(
+      packageName, frame.compositionText, glyphBounds.toBox(), snapshot.rootBounds.toBox(),
+    ).map { evidence ->
+      val creativeBounds = Rect(evidence.creative.left, evidence.creative.top,
+        evidence.creative.right, evidence.creative.bottom)
+      OcrFloatingCloseCandidate(glyphBounds, creativeBounds,
+        evidence.semanticStamp xor evidence.creative.hashCode())
+    }
+  }.distinctBy { Triple(it.closeBounds, it.creativeBounds, it.semanticStamp) }
+
+  private fun hasAccessibleFloatingCloseOwner(
+    snapshot: AccessibilitySnapshot,
+    closeBounds: Rect,
+  ): Boolean = snapshot.nodes.any { node ->
+    node.isVisible && node.bounds.contains(closeBounds.centerX(), closeBounds.centerY()) &&
+      (node.node.isClickable || !node.isEnabled || node.isEditable || node.isPassword ||
+        AdSemanticRules.isBusinessControlResource(node.resourceId) ||
+        node.controlLabels.any(AdSemanticRules::isBlockedControlLabel))
+  }
+
+  /** OCR-only labelled controls remain limited to a two-frame, bounded button on a proven ad page. */
   private fun tryHandleVisualAdControl(
     packageName: String,
     frame: OcrFrame,
@@ -1380,7 +1640,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val path = Path().apply { moveTo(button.bounds.exactCenterX(), button.bounds.exactCenterY()) }
     val gesture = GestureDescription.Builder()
       .addStroke(GestureDescription.StrokeDescription(path, 0L, OCR_SKIP_GESTURE_DURATION_MS)).build()
-    val dispatched = runCatching { dispatchGesture(gesture, object : GestureResultCallback() {
+    val dispatched = runCatching { dispatchAdGesture(gesture, object : GestureResultCallback() {
       override fun onCompleted(gestureDescription: GestureDescription?) {
         if (!ensureConsentAndStore() || !isAppProcessingEnabled(packageName)) return
         store.appendEvent(type = "skip", packageName = packageName, ruleId = VISUAL_CONTROL_RULE,
@@ -1411,53 +1671,80 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (pending.packageName != frame.packageName) { pendingVisualAction = null; return false }
     if (frame.capturedUptime - pending.at < 500L) return true
     val sameWindow = pending.windowId == frame.windowId && pending.rootBounds == frame.rootBounds &&
-      pending.displayBounds == frame.displayBounds && isOcrScopeCurrent(frame, snapshot, "0")
-    val stillPresent = frame.controlText.any { Rect.intersects(pending.button, it.screenBounds) }
+      pending.displayBounds == frame.displayBounds &&
+      (pending.ruleId == OCR_FLOATING_CLOSE_RULE || isOcrScopeCurrent(frame, snapshot, "0"))
+    val stillPresent = (if (pending.ruleId == OCR_FLOATING_CLOSE_RULE) frame.closeGlyphText else frame.controlText)
+      .any { Rect.intersects(pending.button, it.screenBounds) }
     val readableContent = snapshot.signature != pending.signature && snapshot.nodes.count { it.isVisible &&
       it.controlLabels.any { value -> value.length >= 2 && AdSemanticRules.controlLabel(listOf(value)) == null } } >= 4 &&
       snapshot.nodes.any { it.isVisible && it.isScrollable }
-    val adEvidenceRemains = (frame.elements + frame.lines).any { pending.scope.contains(it.screenBounds) &&
+    val scopedTexts = frame.compositionText.filter { pending.scope.contains(it.bounds.centerX.toInt(), it.bounds.centerY.toInt()) }
+    val adEvidenceRemains = if (pending.ruleId == OCR_FLOATING_CLOSE_RULE) {
+      AdCreativeRules.hasOcrFloatingPromoEvidence(frame.packageName, scopedTexts)
+    } else (frame.elements + frame.lines).any { pending.scope.contains(it.screenBounds) &&
       (AdControlEvidenceRules.isAdBadge(it.text) || AdControlEvidenceRules.hasRedirectDisclosure(it.text)) }
     val result = when {
       !sameWindow -> "pending"
       stillPresent -> "failed"
+      pending.ruleId == OCR_FLOATING_CLOSE_RULE && adEvidenceRemains -> "failed"
       readableContent && !adEvidenceRemains -> "success"
       else -> "pending"
     }
-    recordWifiDiagnostic(frame.packageName, "result", "mode=visual result=$result targetStillPresent=$stillPresent")
-    store.appendEvent(type = "skip", packageName = frame.packageName, ruleId = VISUAL_CONTROL_RULE, result = result,
+    val verificationMode = if (pending.ruleId == OCR_FLOATING_CLOSE_RULE) "ocr-floating-close" else "visual"
+    recordWifiDiagnostic(frame.packageName, "result", "mode=$verificationMode result=$result targetStillPresent=$stillPresent")
+    store.appendEvent(type = "skip", packageName = frame.packageName, ruleId = pending.ruleId, result = result,
       text = when (result) { "success" -> "已关闭广告"; "failed" -> "动作未生效"; else -> "关闭结果未确认" })
     pendingVisualAction = null
     return true
   }
 
   /**
-   * China Mobile may render a confirmed splash's skip/countdown as screenshot
-   * text without exposing a matching accessibility click target. Use a gesture
-   * only when an exact campaign, its ad badge, the top-right skip label, and the
-   * same fresh accessibility window all still match.
+   * A splash may render its skip/countdown only in the screenshot. Try that
+   * visible control as soon as it appears, but only for a full-screen ad layout
+   * with an ad badge, compact top-right skip and lower redirect disclosure.
    */
-  private fun tryHandleOcrOnlyMobileSkip(
+  private fun tryHandleOcrOnlySplashSkip(
     packageName: String,
     frame: OcrFrame,
     root: AccessibilityNodeInfo,
     snapshot: AccessibilitySnapshot,
     followUpDepth: Int,
   ): Boolean {
-    if (packageName != MOBILE_TRAFFIC_CARD_PACKAGE) return false
     val rejection = when {
       !store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true) -> "splash-disabled"
       !isAppProcessingEnabled(packageName) -> "app-disabled"
       !isEligibleForegroundPackage(packageName) -> "foreground-changed"
-      !isMobileSplashOcrCurrent(frame, snapshot) -> "ocr-window-stale"
+      !isOcrWindowCurrent(frame, snapshot) -> "ocr-window-stale"
       screenshotDisplayBounds() != frame.displayBounds -> "display-changed"
       isProtectedTimeSensitiveSnapshot(root, snapshot) -> "protected-screen"
       snapshot.nodes.any { it.isVisible && (it.isPassword || (it.isEditable && it.isFocused)) } -> "editable-screen"
       else -> null
     }
     if (rejection != null) {
-      Log.i(TAG, "mobile-ocr-skip rejected=$rejection window=${frame.windowId} " +
-        "ageMs=${SystemClock.uptimeMillis() - frame.capturedAt}")
+      val sameSplashWindow = frame.packageName == packageName && snapshot.packageName == packageName &&
+        frame.windowId == snapshot.windowId && frame.rootBounds == snapshot.rootBounds &&
+        screenshotDisplayBounds() == frame.displayBounds
+      val staleSplashHint = sameSplashWindow && snapshot.nodes.none { it.isVisible && it.isScrollable } &&
+        (frame.elements + frame.lines).distinctBy { it.compactText to it.screenBounds }.any { line ->
+          val bounds = line.screenBounds
+          !AdSemanticRules.isBlockedSkipLabel(line.text) &&
+            isSkipOcrLabel(line.compactText) &&
+            hasUsableBounds(bounds) && snapshot.rootBounds.contains(bounds) && frame.displayBounds.contains(bounds) &&
+            isVeryNearTopRight(bounds, snapshot.rootBounds) && isCompactControl(bounds, snapshot.rootBounds) &&
+            hasCompactSkipTarget(bounds, bounds, snapshot.rootBounds) &&
+            AdCreativeRules.hasRedirectSplashComposition(
+              frame.compositionText, bounds.toBox(), frame.displayBounds.toBox(),
+            )
+        }
+      val retryStaleFrame = rejection == "ocr-window-stale" && sameSplashWindow &&
+        staleSplashHint &&
+        !isProtectedTimeSensitiveSnapshot(root, snapshot) &&
+        snapshot.nodes.none { it.isVisible && (it.isPassword || (it.isEditable && it.isFocused)) }
+      val retryScheduled = retryStaleFrame && scheduleSplashSkipRetry(
+        packageName, frame.windowId, frame, followUpDepth, retryDelayMs = SPLASH_OCR_STALE_RETRY_DELAY_MS,
+      )
+      Log.i(TAG, "splash-ocr-skip rejected=$rejection window=${frame.windowId} " +
+        "ageMs=${SystemClock.uptimeMillis() - frame.capturedAt} retry=$retryScheduled")
       return false
     }
 
@@ -1477,7 +1764,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       .asSequence()
       .filter { line ->
         !AdSemanticRules.isBlockedSkipLabel(line.text) &&
-          (isCountdownSkipLabel(line.compactText) || line.compactText == "跳过" || line.compactText == "skip")
+          isSkipOcrLabel(line.compactText)
       }
       .filter { line ->
         val bounds = line.screenBounds
@@ -1487,30 +1774,43 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       }
       .toList()
     val trafficCampaignCandidates = skipCandidates.filter { line ->
+      packageName == MOBILE_TRAFFIC_CARD_PACKAGE &&
       AdCreativeRules.hasMobileTrafficCardSplashComposition(
         packageName, ocrTexts, line.screenBounds.toBox(), screenBox,
       )
     }
-    val broadbandCampaignCandidates = if (snapshot.nodes.none { it.isVisible && it.isScrollable }) {
+    val broadbandCampaignCandidates = if (packageName == MOBILE_TRAFFIC_CARD_PACKAGE &&
+      snapshot.nodes.none { it.isVisible && it.isScrollable }) {
       skipCandidates.filter { line ->
         AdCreativeRules.hasMobileBroadbandSplashComposition(
           packageName, ocrTexts, line.screenBounds.toBox(), screenBox,
         )
       }
     } else emptyList()
-    val campaignCandidates = trafficCampaignCandidates + broadbandCampaignCandidates
+    val redirectCampaignCandidates = if (
+      hasAdBadge && snapshot.nodes.none { it.isVisible && it.isScrollable }
+    ) {
+      skipCandidates.filter { line ->
+        AdCreativeRules.hasRedirectSplashComposition(
+          ocrTexts, line.screenBounds.toBox(), screenBox,
+        )
+      }
+    } else emptyList()
+    val campaignCandidates = (trafficCampaignCandidates + broadbandCampaignCandidates +
+      redirectCampaignCandidates).distinctBy { it.compactText to it.screenBounds }
     if (!hasAdBadge || campaignCandidates.isEmpty()) {
       val normalizedOffer = AdSemanticRules.normalize(frame.lines.joinToString("") { it.text })
       val offerMarkers = listOf(
-        "55gb", "大流量卡", "39元", "40gb", "云盘", "千兆宽带", "秋季特惠", "1元天起", "全家畅享",
+        "55gb", "85gb", "大流量卡", "39元", "49元", "40gb", "云盘", "千兆宽带", "秋季特惠", "1元天起", "全家畅享",
       )
         .count { marker -> normalizedOffer.contains(marker) }
-      val hasRedirect = frame.lines.any { line ->
+      val hasRedirect = (frame.compositionText + frame.lines.map { AdCreativeRules.Text(it.text, it.screenBounds.toBox()) }).any { text ->
         listOf("点击跳转详情页面", "点击跳转详情页", "点击跳转第三方应用", "点击跳转第三方页面")
-          .any { marker -> AdSemanticRules.normalize(line.text).contains(marker) }
+          .any { marker -> AdSemanticRules.normalize(text.value).contains(marker) }
       }
-      Log.i(TAG, "mobile-ocr-skip no-match badge=$hasAdBadge skip=${skipCandidates.size} " +
+      Log.i(TAG, "splash-ocr-skip no-match badge=$hasAdBadge skip=${skipCandidates.size} " +
         "traffic=${trafficCampaignCandidates.size} broadband=${broadbandCampaignCandidates.size} " +
+        "brandedRedirect=${redirectCampaignCandidates.size} " +
         "offerMarkers=$offerMarkers redirect=$hasRedirect " +
         "lines=${frame.lines.size} ageMs=${SystemClock.uptimeMillis() - frame.capturedAt}")
       return false
@@ -1521,43 +1821,59 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     ) ?: return false
 
     val isBroadbandCampaign = broadbandCampaignCandidates.any { it.screenBounds == skipLine.screenBounds }
-    if (AdSemanticRules.isCountdownSkip(skipLine.compactText) &&
-      !AdSemanticRules.isZeroCountdownSkip(skipLine.compactText)
-    ) {
-      scheduleMobileSkipRetry(packageName, frame.windowId, frame, followUpDepth)
-      Log.i(TAG, "mobile-ocr-skip waiting-ready window=${frame.windowId} " +
-        "campaign=${if (isBroadbandCampaign) "broadband" else "traffic"} " +
-        "ageMs=${SystemClock.uptimeMillis() - frame.capturedAt}")
-      return false
+    val isExactTrafficCampaign = trafficCampaignCandidates.any { it.screenBounds == skipLine.screenBounds }
+    val isBrandedRedirectCampaign = redirectCampaignCandidates.any { it.screenBounds == skipLine.screenBounds }
+    val campaignName = when {
+      isBroadbandCampaign -> "broadband"
+      isExactTrafficCampaign -> "traffic"
+      isBrandedRedirectCampaign -> "branded-redirect"
+      else -> "unknown"
     }
-    val actionRuleId = if (isBroadbandCampaign) MOBILE_BROADBAND_OCR_SKIP_RULE else MOBILE_OCR_SKIP_RULE
+    val actionRuleId = when {
+      isBroadbandCampaign -> MOBILE_BROADBAND_OCR_SKIP_RULE
+      isBrandedRedirectCampaign && !isExactTrafficCampaign -> if (packageName == MOBILE_TRAFFIC_CARD_PACKAGE) {
+        MOBILE_REDIRECT_OCR_SKIP_RULE
+      } else SPLASH_REDIRECT_OCR_SKIP_RULE
+      packageName == MOBILE_TRAFFIC_CARD_PACKAGE -> MOBILE_OCR_SKIP_RULE
+      else -> SPLASH_REDIRECT_OCR_SKIP_RULE
+    }
 
-    // If the tree exposes a real skip target here, leave it to the node path
-    // (including its enabled-state checks) and refresh once instead of tapping around it.
-    val hasAccessibleSkipTarget = snapshot.nodes.any { node ->
+    // An enabled accessibility target is handled by the normal click path. If
+    // it is disabled during a countdown, the OCR path still tries the visible
+    // skip label now and retries once the countdown is ready.
+    val hasEnabledAccessibleSkipTarget = snapshot.nodes.any { node ->
         val hasSkipIdentity = node.controlLabels.any { label -> isSkipOcrLabel(normalizeLabel(label)) } ||
           isSkipOcrLabel(normalizeLabel(node.resourceId)) || hasSkipResourceId(node.resourceId)
         val target = if (node.isVisible && hasSkipIdentity) clickableTarget(node.node) else null
-        if (target == null) return@any false
+        if (target == null || !target.isVisibleToUser || !target.isEnabled || !target.isClickable) return@any false
         val targetBounds = Rect().also(target::getBoundsInScreen)
         targetBounds.contains(skipLine.screenBounds.centerX(), skipLine.screenBounds.centerY()) ||
           skipLine.screenBounds.contains(targetBounds.centerX(), targetBounds.centerY())
       }
-    if (hasAccessibleSkipTarget) {
-      scheduleMobileSkipRetry(packageName, frame.windowId, frame, followUpDepth)
+    if (hasEnabledAccessibleSkipTarget) {
+      scheduleSplashSkipRetry(packageName, frame.windowId, frame, followUpDepth)
       return false
     }
 
     val now = SystemClock.uptimeMillis()
     val actionNow = SystemClock.uptimeMillis()
     if (actionNow - lastActionAt < ACTION_COOLDOWN_MS) return false
-    // The same campaign's countdown text/box can shrink; it is still one skip per window.
-    val fingerprint = "ocr-mobile-skip|$packageName|${frame.windowId}"
-    if (!actionAttempts.tryBegin(fingerprint, actionNow)) return false
+    val countdownPending = AdSemanticRules.isCountdownSkip(skipLine.compactText) &&
+      !AdSemanticRules.isZeroCountdownSkip(skipLine.compactText)
+    val attemptStage = if (countdownPending) "countdown" else "ready"
+    // Permit one immediate countdown tap and one ready-state retry, without
+    // sending repeated touches on every countdown frame.
+    val fingerprint = "ocr-splash-skip|$packageName|${frame.windowId}|$attemptStage"
+    if (!actionAttempts.tryBegin(fingerprint, actionNow)) {
+      if (countdownPending) scheduleSplashSkipRetry(packageName, frame.windowId, frame, followUpDepth)
+      return false
+    }
     lastActionAt = actionNow
 
-    Log.i(TAG, "mobile-ocr-skip candidate window=${frame.windowId} label=${skipLine.compactText} " +
-      "bounds=${skipLine.screenBounds} ageMs=${now - frame.capturedAt}")
+    if (countdownPending) scheduleSplashSkipRetry(packageName, frame.windowId, frame, followUpDepth)
+
+    Log.i(TAG, "splash-ocr-skip candidate window=${frame.windowId} label=${skipLine.compactText} " +
+      "stage=$attemptStage campaign=$campaignName bounds=${skipLine.screenBounds} ageMs=${now - frame.capturedAt}")
 
     val centerX = skipLine.screenBounds.centerX().toFloat()
     val centerY = skipLine.screenBounds.centerY().toFloat()
@@ -1569,7 +1885,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       .addStroke(GestureDescription.StrokeDescription(path, 0L, OCR_SKIP_GESTURE_DURATION_MS))
       .build()
     val dispatched = runCatching {
-      dispatchGesture(gesture, object : GestureResultCallback() {
+      dispatchAdGesture(gesture, object : GestureResultCallback() {
         override fun onCompleted(gestureDescription: GestureDescription?) {
           if (!ensureConsentAndStore() || !isAppProcessingEnabled(packageName) ||
             !isEligibleForegroundPackage(packageName)
@@ -1625,18 +1941,19 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     return true
   }
 
-  private fun scheduleMobileSkipRetry(
+  private fun scheduleSplashSkipRetry(
     packageName: String,
     windowId: Int,
     frame: OcrFrame,
     followUpDepth: Int,
-  ) {
-    if (followUpDepth >= MAX_ACTION_FOLLOW_UPS) return
+    retryDelayMs: Long = SPLASH_OCR_COUNTDOWN_RETRY_DELAY_MS,
+  ): Boolean {
+    if (followUpDepth >= MAX_ACTION_FOLLOW_UPS) return false
     val key = "$packageName|$windowId"
-    if (pendingMobileSkipRetry == key) return
-    pendingMobileSkipRetry = key
+    if (pendingSplashSkipRetry == key) return false
+    pendingSplashSkipRetry = key
     handler.postDelayed({
-      if (pendingMobileSkipRetry == key) pendingMobileSkipRetry = null
+      if (pendingSplashSkipRetry == key) pendingSplashSkipRetry = null
       if (!ensureConsentAndStore() || !isAppProcessingEnabled(packageName) ||
         !isEligibleForegroundPackage(packageName) ||
         !store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true)
@@ -1644,9 +1961,9 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       val liveRoot = findRootForPackage(packageName) ?: return@postDelayed
       if (liveRoot.windowId != windowId) return@postDelayed
       if (ocrScreenshotPending) {
-        if (SystemClock.uptimeMillis() - frame.capturedAt < MOBILE_OCR_MAX_ACTION_AGE_MS) {
-          scheduleMobileSkipRetry(packageName, windowId, frame, followUpDepth)
-        }
+        scheduleSplashSkipRetry(
+          packageName, windowId, frame, followUpDepth + 1, retryDelayMs = retryDelayMs,
+        )
         return@postDelayed
       }
       requestOcrScan(
@@ -1655,7 +1972,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         followUpDepth = followUpDepth + 1,
         prioritizeTransientSplash = true,
       )
-    }, MOBILE_OCR_COUNTDOWN_RETRY_DELAY_MS)
+    }, retryDelayMs)
+    return true
   }
 
   /**
@@ -1672,97 +1990,67 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (!::store.isInitialized) {
       store = ClearScreenStore(this).apply { prepareAfterConsent() }
     }
-    if (adLearning == null) adLearning = ClearScreenAdLearning(this, handler, store, ::learningRoot, { bounds ->
-      val root = learningRoot()
-      try { root != null && visualWindowUnobstructed(root, bounds) }
+    if (adLearning == null) adLearning = ClearScreenAdLearning(this, handler, store, ::learningRoot,
+      ::validateLearningPage, { pkg, window, bounds ->
+      // The frame already checked protected UI. Rechecking identity and windows
+      // here avoids another complete tree read immediately before the action.
+      val root = foregroundRoot()
+      try { root != null && root.packageName?.toString() == pkg && root.windowId == window &&
+        visualWindowUnobstructed(root, bounds) }
       finally { @Suppress("DEPRECATION") root?.recycle() }
-    }, ::scanCurrentForegroundPackage)
+    }, ::scanCurrentForegroundPackage, {
+      // A miss continues normal recognition without creating another retry
+      // window. The original finite window stays armed while replay reads.
+      guardServiceTask("learning-replay-miss") { scanCurrentForegroundPackageInternal(allowRetryWindow = false) }
+    }, { gesture, current -> dispatchAdGesture(gesture, current = current) })
     return true
   }
 
-  private fun learningRoot(): AccessibilityNodeInfo? {
-    if (serviceDestroyed || !privacyConsentStore.hasCurrentConsent() || !::store.isInitialized ||
-      !store.isMasterEnabled() || ClearScreenUiCleanup.isActive() ||
-      (getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager)?.isKeyguardLocked != false) return null
-    var candidateRoot = rootInActiveWindow
-    var resolvedThroughOwnOverlay = false
-    // A touch-modal selector owns focus. Resolve its captured application window, not the overlay.
-    // Never substitute a background app when the real foreground is the ClearScreen activity.
-    if (adLearning?.active == true && (candidateRoot == null || candidateRoot.packageName?.toString() == packageName)) {
-      val available = runCatching { windows }.getOrDefault(emptyList())
-      try {
-        val observed = candidateRoot
-        val expectedId = adLearning?.selectionWindowId
-        val ownOverlay = available.any { window ->
-          window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY &&
-            if (observed != null) window.id == observed.windowId
-            else expectedId != null && (window.isFocused || window.isActive) && window.root?.let {
-              try { it.packageName?.toString() == packageName }
-              finally { @Suppress("DEPRECATION") it.recycle() }
-            } == true
-        }
-        if (ownOverlay) {
-          @Suppress("DEPRECATION") candidateRoot?.recycle()
-          candidateRoot = null
-          val applications = available.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
-          val target = if (expectedId == null) applications.filter { it.isFocused }.singleOrNull()
-            // The captured window is identified by id; confirm still re-checks
-            // unobstructed visuals, so a higher layer alone must not deny reads.
-            else applications.singleOrNull { it.id == expectedId }
-          candidateRoot = target?.root
-          resolvedThroughOwnOverlay = target != null && candidateRoot?.windowId == target.id
-        }
-      } finally {
-        @Suppress("DEPRECATION") available.forEach { it.recycle() }
-      }
-    }
-    val root = candidateRoot ?: return null
-    if (adLearning?.selectionWindowId?.let { root.windowId != it } == true) {
-      @Suppress("DEPRECATION") root.recycle()
-      return null
-    }
+  private fun canReadLearningPage(): Boolean =
+    !serviceDestroyed && privacyConsentStore.hasCurrentConsent() && ::store.isInitialized &&
+      store.isMasterEnabled() && !ClearScreenUiCleanup.isActive() &&
+      (getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager)?.isKeyguardLocked == false
+
+  private fun learningRoot(): AccessibilityNodeInfo? = if (canReadLearningPage()) foregroundRoot() else null
+
+  /** Reuse the learning tree's safety evidence; do not build another OCR snapshot. */
+  private fun validateLearningPage(root: AccessibilityNodeInfo, safety: ClearScreenAdLearning.PageSafety): Boolean {
+    if (!canReadLearningPage()) return false
     val pkg = root.packageName?.toString().orEmpty()
     val bounds = Rect().also(root::getBoundsInScreen)
-    val snapshot = AccessibilitySnapshot.capture(root, redactInputs = true)
     val rule = store.getAppRule(pkg)
-    val learningActive = adLearning?.active == true
-    // Our verified selector may own focus. Requiring rootInActiveWindow to be the app
-    // here would reject the very application window resolved above on every tap.
-    val eligibleWindow = isEligibleAdPackage(pkg) &&
-      (resolvedThroughOwnOverlay || isCurrentForegroundPackage(pkg))
+    val learningActive = adLearning?.active == true && adLearning?.replayPending != true
+    val eligibleWindow = isEligibleAdPackage(pkg)
     val rejected = when {
       !eligibleWindow -> "window"
       !learningActive && (!rule.skipEnabled || rule.whitelist) -> "app-excluded"
-      isProtectedTimeSensitiveSnapshot(root, snapshot) -> "protected-screen"
-      AdDecisionPolicy.isProtectedConfirmation(snapshot.nodes.filter { it.isVisible }.map { it.compactLabel }) ->
+      ProtectedUiPolicy.isProtectedScreen(
+        packageName = pkg,
+        windowClassName = if (pkg == WifiPromotionRules.CALENDAR_PACKAGE_NAME &&
+          calendarWindowClass.isNotEmpty() && root.windowId == calendarWindowId
+        ) calendarWindowClass else root.className?.toString().orEmpty(),
+        visibleLabels = safety.visibleLabels,
+        visibleResourceIds = safety.visibleResourceIds,
+      ) -> "protected-screen"
+      AdDecisionPolicy.isProtectedConfirmation(safety.visibleLabels.map(AdSemanticRules::normalize)) ->
         "confirmation"
       // Password screens stay blocked; a focused editable no longer blanks the
       // whole page during manual selection. Inputs are never candidates (unsafe)
       // and their text never enters learning fingerprints.
-      snapshot.nodes.any { it.isVisible && it.isPassword } ||
-        (snapshot.nodes.any { it.isVisible && it.isEditable && it.isFocused } &&
+      safety.hasVisiblePassword ||
+        (safety.hasVisibleFocusedInput &&
           adLearning?.selectionWindowId == null && adLearning?.preparingSelection != true) -> "input"
       !learningActive && !visualWindowUnobstructed(root, bounds) -> "obscured"
       else -> null
     }
-    @Suppress("DEPRECATION")
-    snapshot.nodes.filter { it.node !== root }.forEach { it.node.recycle() }
     if (rejected != null) {
       if (adLearning?.preparingSelection == true) Log.i("ClearScreenLearning", "entry-rejected=$rejected")
       if (adLearning?.selectionWindowId != null) Log.i("ClearScreenLearning", "selection-rejected=$rejected")
-      @Suppress("DEPRECATION") root.recycle()
-      return null
     }
-    return root
+    return rejected == null
   }
 
   internal fun beginAdLearning() {
-    adScans.cancel()
-    stopMediaWatch()
-    clearVisualState()
-    handler.removeCallbacks(eventScanTick)
-    eventScans.clear()
-    eventScanPosted = false
     adLearning?.start()
   }
 
@@ -1908,24 +2196,25 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   /** Uses local ownership and independent evidence, with no screen-corner gate. */
   private fun findUnifiedAdScope(
     snapshot: AccessibilitySnapshot,
-    frame: OcrFrame,
+    frame: OcrFrame?,
     targetBounds: Rect,
     label: AdSemanticRules.ControlLabel,
     owner: ScreenNode? = null,
   ): UnifiedAdScope? {
     val density = resources.displayMetrics.density.toDouble()
     val rootArea = snapshot.rootBounds.width().toLong() * snapshot.rootBounds.height()
-    if (rootArea <= 0 || !isOcrWindowCurrent(frame, snapshot)) return null
+    if (rootArea <= 0) return null
+    val currentFrame = frame?.takeIf { isOcrWindowCurrent(it, snapshot) }
     val scopes = snapshot.nodes.asSequence().filter { scope ->
       scope.isVisible && !scope.isScrollable && scope.bounds.contains(targetBounds) &&
         scope.bounds.width().toLong() * scope.bounds.height() > targetBounds.width().toLong() * targetBounds.height() * 2 &&
         (owner == null || owner.path == scope.path || AdDecisionPolicy.isDescendantOf(owner.path, scope.path))
     }.sortedBy { it.bounds.width().toLong() * it.bounds.height() }
     for (scope in scopes) {
-      if (!isOcrScopeCurrent(frame, snapshot, scope.path)) {
-        rejectControl("stale-scope")
-        continue
-      }
+      // OCR is optional for a structurally marked ad subtree. A stale frame
+      // loses its text evidence, while the fresh accessibility tree can still
+      // prove that an ad container owns both the creative and control.
+      val scopedFrame = currentFrame?.takeIf { isOcrScopeCurrent(it, snapshot, scope.path) }
       val local = snapshot.nodes.filter { it.isVisible &&
         (it.path == scope.path || AdDecisionPolicy.isDescendantOf(it.path, scope.path)) }
       if (local.any { it.isScrollable || SCROLL_CONTAINER_CLASSES.any(it.className::contains) ||
@@ -1935,7 +2224,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       val fullScreen = areaRatio >= 0.82
       if (fullScreen && VideoAdRules.isSupported(snapshot.packageName) && hasPlayerSurface(snapshot) &&
         label.kind != AdSemanticRules.ControlKind.SKIP && !label.explicitAd &&
-        (owner == null || owner.ancestorRegions.none { it.path != "0" && AdControlEvidenceRules.isAdContainer(it.resourceId) })
+        (owner == null || owner.ancestorRegions.none { it.path != "0" &&
+          AdControlEvidenceRules.isAdStructureNode(it.resourceId, it.className) })
       ) continue
       if (fullScreen && snapshot.nodes.any { it.isVisible &&
           (it.isScrollable || SCROLL_CONTAINER_CLASSES.any(it.className::contains) ||
@@ -1944,18 +2234,20 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       ) continue
       val visuals = local.filter { it.node != owner?.node && isVisualCreativeNode(it) &&
         it.bounds.width().toLong() * it.bounds.height() >= rootArea * (if (fullScreen) 0.36 else 0.008) }
-      if (visuals.isEmpty() && (!fullScreen || !frame.rasterCreative ||
-          frame.visualButtons.none { it.bounds == targetBounds })) continue
-      val texts = (frame.lines + frame.elements).filter { scope.bounds.contains(it.screenBounds) }
+      val structuralAd = hasStructuralAdCreative(local, visuals, owner?.path, targetBounds)
+      val rasterCreative = fullScreen && scopedFrame?.rasterCreative == true &&
+        scopedFrame.visualButtons.any { it.bounds == targetBounds }
+      if (visuals.isEmpty() && !rasterCreative) continue
+      val texts = scopedFrame?.let { current ->
+        (current.lines + current.elements).filter { scope.bounds.contains(it.screenBounds) }
+      }.orEmpty()
       if (texts.any { AdSemanticRules.isBlockedControlLabel(it.text) || ProtectedUiPolicy.isProtectedText(it.text) ||
           normalizeLabel(it.text) in setOf("新手引导", "操作教程", "支付确认", "身份验证", "权限请求") }
         || AdDecisionPolicy.isProtectedConfirmation(texts.map { it.compactText })
       ) continue
-      val badge = texts.any { it.screenBounds.height() <= 64 * density &&
-        AdControlEvidenceRules.isAdBadge(it.text) } || local.any { peer ->
-        peer.node != owner?.node && peer.bounds.height() <= 64 * density &&
-          peer.controlLabels.any(AdControlEvidenceRules::isAdBadge)
-      }
+      val badge = hasAdBadgeNearCreative(
+        local, texts, visuals, targetBounds, snapshot.rootBounds, density,
+      )
       val redirectTexts = texts.filter { AdControlEvidenceRules.hasRedirectDisclosure(it.text) }
       val redirect = redirectTexts.isNotEmpty() || local.any { peer -> peer.node != owner?.node &&
         peer.controlLabels.any(AdControlEvidenceRules::hasRedirectDisclosure) }
@@ -1963,10 +2255,11 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       val readyCountdown = label.kind == AdSemanticRules.ControlKind.SKIP &&
         AdSemanticRules.isCountdownSkip(label.value) && SystemClock.uptimeMillis() - foregroundEntryAt in 0L..8_000L
       val evidence = AdControlEvidenceRules.Evidence(
-        visual = true, badge = badge, redirect = redirect,
+        visual = visuals.isNotEmpty() || rasterCreative, badge = badge, redirect = redirect,
         callToAction = texts.any { AdControlEvidenceRules.hasCallToAction(it.text) } ||
           local.any { it.controlLabels.any(AdControlEvidenceRules::hasCallToAction) },
         adContainer = sdk, fullScreen = fullScreen, readyCountdown = readyCountdown,
+        structuralAdContainer = structuralAd,
       )
       if (!evidence.permits(label)) { rejectControl("insufficient-ad-evidence"); continue }
       // Even a fully evidenced ad does not authorize a broad parent click area.
@@ -1978,10 +2271,64 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       return UnifiedAdScope(scope.path, Rect(scope.bounds), evidence, overlay,
         (scope.path + "|" + scope.resourceId + "|" + scope.bounds + "|" + evidence +
           "|" + visuals.map { it.bounds }.distinct() +
-          "|" + redirectTexts.map { it.compactText }.distinct().sorted()).hashCode())
+          "|" + redirectTexts.map { it.compactText }.distinct().sorted() +
+          "|structural=$structuralAd").hashCode())
     }
     rejectControl("unowned-ad-control")
     return null
+  }
+
+  /** Requires one marked ad root to own both the visual creative and close target. */
+  private fun hasStructuralAdCreative(
+    local: List<ScreenNode>,
+    visuals: List<ScreenNode>,
+    ownerPath: String?,
+    candidateBounds: Rect? = null,
+  ): Boolean {
+    if (visuals.isEmpty()) return false
+    return local.any { root ->
+      AdControlEvidenceRules.isAdStructureNode(root.resourceId, root.className) &&
+        (ownerPath == null || ownerPath == root.path ||
+          AdDecisionPolicy.isDescendantOf(ownerPath, root.path)) &&
+        (candidateBounds == null || root.bounds.contains(candidateBounds)) &&
+        visuals.any { creative ->
+          creative.path == root.path || AdDecisionPolicy.isDescendantOf(creative.path, root.path)
+        }
+    }
+  }
+
+  /** Bind an explicit ad disclosure and the candidate to the same visual creative. */
+  private fun hasAdBadgeNearCreative(
+    local: List<ScreenNode>,
+    texts: List<OcrLine>,
+    visuals: List<ScreenNode>,
+    targetBounds: Rect?,
+    screenBounds: Rect,
+    density: Double,
+  ): Boolean {
+    if (visuals.isEmpty() || !hasUsableBounds(screenBounds)) return false
+    val maxBadgeHeight = (64 * density).toInt()
+    val badgeBounds = texts.filter { it.screenBounds.height() <= maxBadgeHeight &&
+      AdControlEvidenceRules.isAdBadge(it.text) }.map { it.screenBounds } +
+      local.filter { it.bounds.height() <= maxBadgeHeight &&
+        it.controlLabels.any(AdControlEvidenceRules::isAdBadge) }.map { it.bounds }
+    if (badgeBounds.isEmpty()) return false
+
+    for (visual in visuals) {
+      val paddingX = maxOf((screenBounds.width() * 0.06f).toInt(), (24 * density).toInt())
+      val paddingY = maxOf((screenBounds.height() * 0.04f).toInt(), (24 * density).toInt())
+      val creative = visual.bounds
+      val nearby = Rect(
+        (creative.left - paddingX).coerceAtLeast(screenBounds.left),
+        (creative.top - paddingY).coerceAtLeast(screenBounds.top),
+        (creative.right + paddingX).coerceAtMost(screenBounds.right),
+        (creative.bottom + paddingY).coerceAtMost(screenBounds.bottom),
+      )
+      if (badgeBounds.any { nearby.contains(it.centerX(), it.centerY()) } &&
+        (targetBounds == null || nearby.contains(targetBounds.centerX(), targetBounds.centerY()))
+      ) return true
+    }
+    return false
   }
 
   private fun findUnifiedControlCandidate(
@@ -1989,26 +2336,33 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     snapshot: AccessibilitySnapshot,
     frame: OcrFrame?,
   ): DetectionAction? {
-    if (!node.isVisible || !node.isEnabled || frame == null) return null
+    if (!node.isVisible || !node.isEnabled) return null
+    val currentFrame = frame?.takeIf {
+      isOcrWindowCurrent(it, snapshot) && isOcrScopeCurrent(it, snapshot, node.path)
+    }
     val nativeLabel = AdSemanticRules.controlLabel(node.controlLabels)
-    val ocrLabels = frame.controlText.filter { node.bounds.contains(it.screenBounds) }
-    if (nativeLabel == null && ocrLabels.isEmpty()) return null
+    val ocrLabels = currentFrame?.controlText?.filter { node.bounds.contains(it.screenBounds) }.orEmpty()
     val target = clickableTarget(node.node) ?: run { rejectControl("no-accessible-target"); return null }
     val bounds = Rect().also(target::getBoundsInScreen)
     val targetNode = snapshot.nodes.firstOrNull { it.node == target } ?: return null
+    val structuralCloseResource = hasAdCloseResourceId(node.resourceId) ||
+      hasAdCloseResourceId(target.viewIdResourceName.orEmpty().lowercase(Locale.ROOT))
+    if (nativeLabel == null && ocrLabels.isEmpty() && !structuralCloseResource) return null
     if (!target.isVisibleToUser || !target.isEnabled || targetNode.isScrollable ||
       isUnsafeCaiyunRedirectClickTarget(target, snapshot.packageName)
     ) { rejectControl("target-unavailable"); return null }
-    val texts = frame.controlText.filter { bounds.contains(it.screenBounds) }
+    val texts = currentFrame?.controlText?.filter { bounds.contains(it.screenBounds) }.orEmpty()
     val label = nativeLabel ?: texts.mapNotNull { AdSemanticRules.controlLabel(listOf(it.text)) }
-      .distinctBy { it.kind }.singleOrNull() ?: return null
+      .distinctBy { it.kind }.singleOrNull() ?: if (structuralCloseResource) {
+        AdSemanticRules.ControlLabel("关闭广告", AdSemanticRules.ControlKind.CLOSE, true)
+      } else return null
     val controlNodes = snapshot.nodes.filter { it.isVisible &&
       (it.path == targetNode.path || AdDecisionPolicy.isDescendantOf(it.path, targetNode.path)) }
     if (controlNodes.any { it.isScrollable || it.isEditable || it.isPassword ||
         it.controlLabels.any { value ->
           !AdSemanticRules.isNeutralControlLabel(value) && !AdSemanticRules.isControlCounter(value) &&
             AdSemanticRules.controlLabel(listOf(value))?.kind != label.kind
-        } } || frame.lines.any { bounds.contains(it.screenBounds.centerX(), it.screenBounds.centerY()) &&
+        } } || currentFrame?.lines.orEmpty().any { bounds.contains(it.screenBounds.centerX(), it.screenBounds.centerY()) &&
           (AdSemanticRules.isBlockedControlLabel(it.text) || AdSemanticRules.hasPendingSkipHint(listOf(it.text))) }
     ) { rejectControl("business-or-waiting-control"); return null }
     val labelBounds = texts.firstOrNull {
@@ -2018,7 +2372,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
         snapshot.rootBounds.toBox(), snapshot.rootBounds.toBox(), resources.displayMetrics.density.toDouble(),
         label.kind == AdSemanticRules.ControlKind.GLYPH)
     ) { rejectControl("oversize-target"); return null }
-    val scope = findUnifiedAdScope(snapshot, frame, bounds, label, targetNode) ?: return null
+    val scope = findUnifiedAdScope(snapshot, currentFrame, bounds, label, targetNode) ?: return null
     val category = when {
       scope.evidence.fullScreen || label.kind == AdSemanticRules.ControlKind.SKIP -> DetectionCategory.SPLASH_VIDEO
       scope.overlay -> DetectionCategory.POPUP
@@ -2042,19 +2396,29 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   private fun runDynamicAdRetry(ticket: AdScanCoordinator.Ticket) {
     if (!adScans.isCurrent(ticket)) return
     val packageName = ticket.packageName
-    if (!ensureConsentAndStore() || !isAppProcessingEnabled(packageName) ||
+    if (!ensureConsentAndStore() || !isAppProcessingEnabled(packageName, allowPendingReplay = true) ||
       !isEligibleForegroundPackage(packageName)
     ) {
       adScans.cancel(ticket)
       return
     }
     val root = findRootForPackage(packageName)
-    if (root == null || root.windowId != ticket.windowId || isProtectedTimeSensitiveWindow(root, packageName)) {
+    if (root == null || root.windowId != ticket.windowId) {
+      adScans.cancel(ticket)
+      return
+    }
+    if (adLearning?.replayPending == true) {
+      // The replay's worker checks protected UI on both reads. Keep this
+      // finite retry ticket alive without competing for the same tree.
+      postNextAdScan(ticket)
+      return
+    }
+    if (isProtectedTimeSensitiveWindow(root, packageName)) {
       adScans.cancel(ticket)
       return
     }
     if (tryHandlePackage(packageName)) {
-      adScans.cancel(ticket)
+      if (adLearning?.replayPending == true) postNextAdScan(ticket) else adScans.cancel(ticket)
       return
     }
     // Later controls need fresh OCR as well as node rescans. Ordinary pages
@@ -2168,14 +2532,20 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     }.filter { scope ->
       val local = snapshot.nodes.filter { it.isVisible &&
         (it.path == scope.path || AdDecisionPolicy.isDescendantOf(it.path, scope.path)) }
-      val ocr = frame?.takeIf { isOcrScopeCurrent(it, snapshot, scope.path) }?.compositionText
-        ?.filter { AdControlEvidenceRules.contains(scope.bounds.toBox(), it.bounds) }?.map { it.value }.orEmpty()
-      val labels = local.flatMap { it.controlLabels } + ocr
+      val ocrLines = frame?.takeIf { isOcrScopeCurrent(it, snapshot, scope.path) }
+        ?.let { current -> (current.lines + current.elements).filter {
+          scope.bounds.contains(it.screenBounds)
+        } }.orEmpty()
+      val visualNodes = local.filter(::isVisualCreativeNode)
+      val structuralAd = hasStructuralAdCreative(
+        local, visualNodes, ownerPath = null,
+      )
+      val localAdBadge = hasAdBadgeNearCreative(
+        local, ocrLines, visualNodes, null, snapshot.rootBounds,
+        resources.displayMetrics.density.toDouble(),
+      )
       local.none { it.isScrollable || it.isEditable || it.isPassword } &&
-        local.any(::isVisualCreativeNode) && labels.any(AdControlEvidenceRules::isAdBadge) &&
-        (labels.any(AdControlEvidenceRules::hasCallToAction) ||
-          labels.any(AdControlEvidenceRules::hasRedirectDisclosure) ||
-          local.any { AdControlEvidenceRules.isAdContainer(it.resourceId) })
+        visualNodes.isNotEmpty() && (structuralAd || localAdBadge)
     }.map { it.path }.toSet()
   }
 
@@ -2296,7 +2666,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
   ): DetectionAction? {
     if (!store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true)) return null
     if (!node.isVisible) return null
-    val ocrFrame = frame?.takeIf { isOcrScopeCurrent(it, snapshot, "0") }
+    val ocrFrame = frame?.takeIf { isSkipOcrEvidenceCurrent(it, snapshot) }
     if (node.controlLabels.any(AdSemanticRules::isBlockedSkipLabel)) return null
     val compact = AdSemanticRules.selectSkipLabel(node.controlLabels) ?: node.compactLabel
     val resourceId = node.resourceId
@@ -2375,19 +2745,19 @@ class ClearScreenAccessibilityService : AccessibilityService() {
             AdDecisionPolicy.isDescendantOf(it.path, region.path) }.map { it.bounds.toBox() },
         )
     }
+    val ocrMotionSplash = ocrFrame != null &&
+      snapshot.nodes.none { it.isVisible && it.isScrollable } &&
+      AdCreativeRules.hasMotionRedirectSplashComposition(
+        ocrFrame.compositionText,
+        targetBounds.toBox(), snapshot.rootBounds.toBox(),
+      )
     val ocrSplashAdContext = hasOcrBackedSplashAdContext(
       candidateText = candidateText,
       targetBounds = targetBounds,
       labelBounds = labelBounds,
       snapshot = snapshot,
       frame = ocrFrame,
-    )
-    val ocrMotionSplash = ocrSplashAdContext && ocrFrame != null &&
-      snapshot.nodes.none { it.isVisible && it.isScrollable } &&
-      AdCreativeRules.hasMotionRedirectSplashComposition(
-        ocrFrame.compositionText,
-        targetBounds.toBox(), snapshot.rootBounds.toBox(),
-      )
+    ) || ocrMotionSplash
     val verifiedSplashAdContext = nodeSplashAdContext || caiyunRedirectSplashContext ||
       ocrSplashAdContext || chinaTelecomSplashContext
     val topCenterInterstitialContext = plainLabel && hasTopCenterThirdPartyInterstitialContext(
@@ -2521,7 +2891,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val root = snapshot.rootBounds
     val topRight = isVeryNearTopRight(targetBounds, root)
     val bottomLeft = AdGeometryRules.isBottomLeftSplashSkip(targetBounds.toBox(), root.toBox())
-    if (!isOcrScopeCurrent(currentFrame, snapshot, "0") ||
+    if (!isSkipOcrEvidenceCurrent(currentFrame, snapshot) ||
       !isSkipOcrLabel(normalizeLabel(candidateText)) ||
       (!topRight && !bottomLeft) ||
       !isCompactControl(targetBounds, root) ||
@@ -2665,6 +3035,30 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     )
   }
 
+  /** Bind Tencent Video's lower-right free-viewing bubble to its local OCR X and copy. */
+  private fun hasOcrBackedTencentFreeViewingPromoCloseContext(
+    targetBounds: Rect,
+    snapshot: AccessibilitySnapshot,
+    frame: OcrFrame?,
+  ): Boolean {
+    if (snapshot.packageName != "com.tencent.qqlive") return false
+    val currentFrame = frame ?: return false
+    if (!isOcrWindowCurrent(currentFrame, snapshot) ||
+      !isOcrScopeCurrent(currentFrame, snapshot, "0") ||
+      !isNearOcrPopupScreenEdge(targetBounds, snapshot.rootBounds) ||
+      currentFrame.closeGlyphText.none {
+        isCompactOcrCloseGlyph(it, targetBounds, snapshot.rootBounds)
+      }
+    ) return false
+
+    return AdCreativeRules.hasTencentFreeViewingPromoClose(
+      snapshot.packageName,
+      currentFrame.compositionText,
+      targetBounds.toBox(),
+      snapshot.rootBounds.toBox(),
+    )
+  }
+
   private fun hasOcrBackedFullScreenAdCloseContext(
     targetBounds: Rect,
     closeSemantic: Boolean,
@@ -2767,9 +3161,20 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (!store.isSettingEnabled(ClearScreenStore.KEY_CLOSE_POPUP_ADS, true)) return null
     if (!node.isVisible || !node.isEnabled) return null
     val ocrFrame = frame?.takeIf { isOcrScopeCurrent(it, snapshot, node.path) }
+    val oppeinDismissLabel = node.controlLabels.firstOrNull { normalizeLabel(it) == "残忍离开" }
+      ?: ocrFrame?.compositionText?.firstOrNull { text ->
+        normalizeLabel(text.value) == "残忍离开" &&
+          node.bounds.contains(text.bounds.centerX, text.bounds.centerY)
+      }?.value
+    val oppeinPopupCopy = oppeinDismissLabel != null && ocrFrame != null &&
+      isOcrWindowCurrent(ocrFrame, snapshot) &&
+      AdCreativeRules.hasOppeinRecommendedPopupCopy(
+        ocrFrame.compositionText, snapshot.rootBounds.toBox(),
+      )
     if (AdSemanticRules.selectCloseLabel(node.controlLabels) == null &&
       !hasGenericCloseResourceId(node.resourceId) &&
-      ocrFrame?.closeGlyphText?.none { node.bounds.contains(it.screenBounds.centerX(), it.screenBounds.centerY()) } != false
+      ocrFrame?.closeGlyphText?.none { node.bounds.contains(it.screenBounds.centerX(), it.screenBounds.centerY()) } != false &&
+      !oppeinPopupCopy
     ) return null
     val target = clickableTarget(node.node) ?: return null
     if (!target.isVisibleToUser || !target.isEnabled) return null
@@ -2783,10 +3188,16 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
     val targetBounds = Rect().also(target::getBoundsInScreen)
     if (!hasUsableBounds(targetBounds)) return null
+    val oppeinDismissEvidence = if (oppeinPopupCopy && targetBounds.contains(node.bounds) &&
+      AdCreativeRules.hasOppeinRecommendedPopupDismiss(
+        oppeinDismissLabel.orEmpty(), ocrFrame!!.compositionText,
+        targetBounds.toBox(), snapshot.rootBounds.toBox(),
+      )
+    ) "${node.path}|oppein-recommended-reward-popup" else null
     val independentCloseControl = isIndependentCloseTarget(targetBounds, snapshot.rootBounds)
     val possibleFullScreenCloseControl = isVeryNearTopRight(targetBounds, snapshot.rootBounds) &&
       AdGeometryRules.isCompactFullScreenAdClose(targetBounds.toBox(), snapshot.rootBounds.toBox())
-    if (!independentCloseControl && !possibleFullScreenCloseControl) return null
+    if (!independentCloseControl && !possibleFullScreenCloseControl && oppeinDismissEvidence == null) return null
     findKnownWifiPromotionCloseCandidate(node, target, targetBounds, snapshot, ocrFrame)?.let { return it }
     val centeredPosterEvidence = findKnownCenteredPosterAdEvidence(
       node = node,
@@ -2804,6 +3215,9 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       snapshot = snapshot,
     )
     val mobilePosterEvidence = findKnownMobilePosterAdEvidence(node, target, snapshot, ocrFrame)
+    val kplFinalsPosterEvidence = findKnownKplFinalsPosterAdEvidence(
+      node, target, targetBounds, snapshot, ocrFrame,
+    )
     val mobilePlanUpgradeEvidence = findKnownMobilePlanUpgradeAdEvidence(
       node, target, targetBounds, snapshot, ocrFrame,
     )
@@ -2839,19 +3253,26 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       snapshot = snapshot,
       frame = ocrFrame,
     )
-    val ocrFloatingCreativeContext = mobileGiftPromoContext || hasOcrBackedFloatingCreativeCloseContext(
-      node = node,
+    val tencentFreeViewingPromoContext = hasOcrBackedTencentFreeViewingPromoCloseContext(
       targetBounds = targetBounds,
-      hasCloseSemantic = closeLabel || explicitAdResource || unlabeledEdgeClose || ocrGlyphCloseSemantic,
       snapshot = snapshot,
       frame = ocrFrame,
     )
+    val ocrFloatingCreativeContext = mobileGiftPromoContext || tencentFreeViewingPromoContext ||
+      hasOcrBackedFloatingCreativeCloseContext(
+        node = node,
+        targetBounds = targetBounds,
+        hasCloseSemantic = closeLabel || explicitAdResource || unlabeledEdgeClose || ocrGlyphCloseSemantic,
+        snapshot = snapshot,
+        frame = ocrFrame,
+      )
     val belongsToAdOverlay = node.ancestorRegions.any { region ->
       region.path != "0" && isLocalAdRegion(region, snapshot.rootBounds) && isOverlayLayer(region)
     }
     if (!closeLabel && !explicitAdResource && !unlabeledEdgeClose && !mobileGiftPromoContext &&
+      !tencentFreeViewingPromoContext &&
       centeredPosterEvidence == null && caiyunInterstitialEvidence == null && mobilePosterEvidence == null &&
-      mobilePlanUpgradeEvidence == null
+      kplFinalsPosterEvidence == null && mobilePlanUpgradeEvidence == null && oppeinDismissEvidence == null
     ) return null
     val genericCloseLabel = isGenericPopupCloseLabel(compact)
 
@@ -2863,30 +3284,35 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (!localStrongAdContext && !fullScreenAdContext && !ocrOverlayContext && !ocrFullScreenAdContext &&
       !ocrFloatingCreativeContext &&
       centeredPosterEvidence == null && caiyunInterstitialEvidence == null && mobilePosterEvidence == null &&
-      mobilePlanUpgradeEvidence == null
+      kplFinalsPosterEvidence == null && mobilePlanUpgradeEvidence == null && oppeinDismissEvidence == null
     ) return null
     if (!belongsToAdOverlay && !fullScreenAdContext && !ocrOverlayContext && !ocrFullScreenAdContext &&
       !ocrFloatingCreativeContext &&
       !explicitAdResource && centeredPosterEvidence == null && caiyunInterstitialEvidence == null &&
-      mobilePosterEvidence == null && mobilePlanUpgradeEvidence == null
+      mobilePosterEvidence == null && kplFinalsPosterEvidence == null && mobilePlanUpgradeEvidence == null &&
+      oppeinDismissEvidence == null
     ) return null
     if (((!nearPopupEdge && !ocrFloatingCreativeContext) ||
       (!compactControl && !ocrFullScreenAdContext && !ocrFloatingCreativeContext)) &&
-      mobilePlanUpgradeEvidence == null
+      kplFinalsPosterEvidence == null && mobilePlanUpgradeEvidence == null && oppeinDismissEvidence == null
     ) return null
 
     // Generic "关闭"/X controls are only safe in the conventional ad position.
     // Ad-specific labels such as "关闭广告" may also appear on the popup edge.
     if (genericCloseLabel && !nearTopRight && !explicitAdResource && !ocrOverlayContext &&
-      !ocrFloatingCreativeContext && mobilePlanUpgradeEvidence == null
+      !ocrFloatingCreativeContext && kplFinalsPosterEvidence == null && mobilePlanUpgradeEvidence == null
     ) return null
     if (unlabeledEdgeClose && !nearPopupEdge && centeredPosterEvidence == null &&
-      caiyunInterstitialEvidence == null && !mobileGiftPromoContext
+      caiyunInterstitialEvidence == null && !mobileGiftPromoContext && kplFinalsPosterEvidence == null &&
+      oppeinDismissEvidence == null && !tencentFreeViewingPromoContext
     ) return null
 
     var score = when {
+      oppeinDismissEvidence != null -> 148
+      tencentFreeViewingPromoContext -> 130
       mobilePosterEvidence != null -> 142
       mobilePlanUpgradeEvidence != null -> 136
+      kplFinalsPosterEvidence != null -> 134
       mobileGiftPromoContext -> 122
       explicitAdResource -> 124
       caiyunInterstitialEvidence != null -> 122
@@ -2911,12 +3337,16 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       score = score,
       minimumScore = if (explicitAdResource || centeredPosterEvidence != null || ocrFullScreenAdContext ||
         ocrFloatingCreativeContext ||
-        caiyunInterstitialEvidence != null || mobilePosterEvidence != null || mobilePlanUpgradeEvidence != null
+        caiyunInterstitialEvidence != null || mobilePosterEvidence != null || kplFinalsPosterEvidence != null ||
+        mobilePlanUpgradeEvidence != null || oppeinDismissEvidence != null
       ) 120 else 112,
       actionPriority = 1,
       ruleId = when {
+        oppeinDismissEvidence != null -> "builtin.popup.close.oppein-recommended-reward"
+        tencentFreeViewingPromoContext -> "builtin.popup.close.tencent-free-viewing-promo"
         mobilePosterEvidence != null -> "builtin.popup.close.mobile-campaign-carousel"
         mobilePlanUpgradeEvidence != null -> "builtin.popup.close.mobile-plan-upgrade-modal"
+        kplFinalsPosterEvidence != null -> "builtin.popup.close.kpl-finals-poster"
         mobileGiftPromoContext -> "builtin.popup.close.mobile-gift-promo"
         explicitAdResource -> "builtin.popup.close.resource-id"
         caiyunInterstitialEvidence != null -> "builtin.popup.close.caiyun-interstitial.bottom-center"
@@ -2930,9 +3360,17 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       label = node.label.ifBlank { node.className }.take(MAX_LOG_LABEL_LENGTH),
       successText = "已关闭弹窗广告",
       category = DetectionCategory.POPUP,
-      evidenceFingerprint = mobilePosterEvidence ?: mobilePlanUpgradeEvidence ?: caiyunInterstitialEvidence ?: centeredPosterEvidence ?: ocrFrame?.lines
-        ?.filter { isAdRelatedOcrText(it.text) }
-        ?.joinToString("|") { it.compactText }?.take(240).orEmpty(),
+      evidenceFingerprint = when {
+        oppeinDismissEvidence != null -> oppeinDismissEvidence
+        tencentFreeViewingPromoContext -> "tencent-free-viewing-promo"
+        kplFinalsPosterEvidence != null -> kplFinalsPosterEvidence
+        mobilePosterEvidence != null -> mobilePosterEvidence
+        mobilePlanUpgradeEvidence != null -> mobilePlanUpgradeEvidence
+        caiyunInterstitialEvidence != null -> caiyunInterstitialEvidence
+        centeredPosterEvidence != null -> centeredPosterEvidence
+        else -> ocrFrame?.lines?.filter { isAdRelatedOcrText(it.text) }
+          ?.joinToString("|") { it.compactText }?.take(240).orEmpty()
+      },
     )
   }
 
@@ -3293,6 +3731,34 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       }
     }
     return null
+  }
+
+  private fun findKnownKplFinalsPosterAdEvidence(
+    node: ScreenNode,
+    target: AccessibilityNodeInfo,
+    targetBounds: Rect,
+    snapshot: AccessibilitySnapshot,
+    frame: OcrFrame?,
+  ): String? {
+    if (!target.isClickable || !target.isVisibleToUser || !target.isEnabled ||
+      !node.isVisible || !node.isEnabled || node.isScrollable ||
+      !node.controlLabels.all {
+        AdSemanticRules.isNeutralControlLabel(it) || AdSemanticRules.selectCloseLabel(listOf(it)) != null
+      }
+    ) return null
+
+    val currentFrame = frame ?: return null
+    if (!isOcrWindowCurrent(currentFrame, snapshot) ||
+      !isOcrScopeCurrent(currentFrame, snapshot, node.path) ||
+      currentFrame.closeGlyphText.none {
+        isCompactOcrCloseGlyph(it, targetBounds, snapshot.rootBounds)
+      } ||
+      !AdCreativeRules.hasKplFinalsPosterClose(
+        currentFrame.compositionText, targetBounds.toBox(), snapshot.rootBounds.toBox(),
+      )
+    ) return null
+
+    return "${node.path}|kpl-finals-poster"
   }
 
   private fun findKnownMobilePlanUpgradeAdEvidence(
@@ -3831,17 +4297,10 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       !isScrollingRegion(region)
 
   private fun findRootForPackage(packageName: String): AccessibilityNodeInfo? {
-    if (!isCurrentForegroundPackage(packageName)) return null
-    val active = rootInActiveWindow
-    if (active != null) {
-      val activePackage = active.packageName?.toString()
-      if (activePackage == packageName) return active
-    }
-    return runCatching {
-      windows.asSequence()
-        .mapNotNull { window -> runCatching { window.root }.getOrNull() }
-        .firstOrNull { root -> root.packageName?.toString() == packageName }
-    }.getOrNull()
+    val root = foregroundRoot() ?: return null
+    if (root.packageName?.toString() == packageName) return root
+    @Suppress("DEPRECATION") root.recycle()
+    return null
   }
 
   private fun isIndependentCloseTarget(bounds: Rect, rootBounds: Rect): Boolean {
@@ -4057,6 +4516,12 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   private data class OcrVisualButton(val label: OcrLine, val bounds: Rect)
 
+  private data class OcrFloatingCloseCandidate(
+    val closeBounds: Rect,
+    val creativeBounds: Rect,
+    val semanticStamp: Int,
+  )
+
   private data class UnifiedAdScope(
     val path: String,
     val bounds: Rect,
@@ -4074,6 +4539,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     val scope: Rect,
     val signature: String,
     val at: Long,
+    val ruleId: String = VISUAL_CONTROL_RULE,
   )
 
   private data class OcrNodeIdentity(
@@ -4241,6 +4707,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     private const val TAG = "ClearScreenA11y"
     private const val UNIFIED_CONTROL_RULE = "builtin.ad.close.unified-evidence"
     private const val VISUAL_CONTROL_RULE = "builtin.ad.close.visual-confirmed"
+    private const val OCR_FLOATING_CLOSE_RULE = "builtin.ad.close.ocr-floating-two-frame"
 
     /** Preserve word boxes and join only adjacent pieces of the same OCR line. */
     private fun ocrControlText(lines: List<OcrLine>, elements: List<OcrLine>): List<OcrLine> {
@@ -4273,7 +4740,10 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     private const val MOBILE_TRAFFIC_CARD_PACKAGE = "com.greenpoint.android.mc10086.activity"
     private const val MOBILE_OCR_SKIP_RULE = "builtin.skip.splash.mobile-traffic-ocr-gesture"
     private const val MOBILE_BROADBAND_OCR_SKIP_RULE = "builtin.skip.splash.mobile-broadband-ocr-gesture"
-    private const val MOBILE_OCR_COUNTDOWN_RETRY_DELAY_MS = 500L
+    private const val MOBILE_REDIRECT_OCR_SKIP_RULE = "builtin.skip.splash.mobile-branded-redirect-ocr-gesture"
+    private const val SPLASH_REDIRECT_OCR_SKIP_RULE = "builtin.skip.splash.branded-redirect-ocr-gesture"
+    private const val SPLASH_OCR_COUNTDOWN_RETRY_DELAY_MS = 500L
+    private const val SPLASH_OCR_STALE_RETRY_DELAY_MS = 120L
     private const val OCR_SKIP_GESTURE_DURATION_MS = 90L
     private const val ACTION_COOLDOWN_MS = 480L
     private const val ACTION_VERIFY_DELAY_MS = 650L
@@ -4289,7 +4759,10 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     private const val OCR_SIGNATURE_RETRY_DELAY_MS = 1_350L
     private const val OCR_FRAME_MAX_AGE_MS = 2_500L
     private const val MOBILE_OCR_MAX_LONG_EDGE = 1_800
-    private const val MOBILE_OCR_MAX_ACTION_AGE_MS = 1_800L
+    // Mobile splash recognition can take about 2.2 seconds on-device. Keep this
+    // path within the global OCR frame limit while avoiding rejection of every
+    // otherwise valid frame on slower devices.
+    private const val MOBILE_OCR_MAX_ACTION_AGE_MS = 2_500L
     private const val MAX_OCR_TEXT_ELEMENTS = 900
     private const val POST_ACTION_RESCAN_DELAY_MS = 850L
     private const val MAX_ACTION_FOLLOW_UPS = 2

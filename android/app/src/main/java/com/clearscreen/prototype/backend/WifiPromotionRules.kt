@@ -12,7 +12,7 @@ internal object WifiPromotionRules {
     MEMBERSHIP_OFFER("builtin.popup.close.wifi-membership-offer"),
     EXTERNAL_FLOATING_BANNER("builtin.popup.close.sdk-external-floating-banner"),
     FLOATING_GAME("builtin.popup.close.wifi-floating-lingzhu"),
-    FLOATING_PRIZE_GAME("builtin.popup.close.wifi-floating-prize-game"),
+    FLOATING_PROMOTION("builtin.popup.close.wifi-floating-promotion"),
     VIDEO_POSTER("builtin.popup.close.wifi-video-poster"),
     CALENDAR_DOWNLOAD_CARD("builtin.feed.close.calendar-download-footer"),
   }
@@ -118,8 +118,8 @@ internal object WifiPromotionRules {
       return if (downloadFooter) Kind.CALENDAR_DOWNLOAD_CARD else null
     }
 
-    // These two game creatives are only accepted as small, edge-mounted
-    // overlays with their own X, never as ordinary game-page buttons.
+    // Compact edge promos are accepted only with their own X, never as ordinary
+    // game-page buttons. Their copy is joined locally so OCR can split words or lines.
     val floatingGameGeometry = region.width <= width * 0.40 && region.height <= height * 0.30 &&
       creative.width <= width * 0.36 && creative.height <= height * 0.18 &&
       creative.right >= screen.right - width * 0.04 &&
@@ -134,17 +134,22 @@ internal object WifiPromotionRules {
     }
     if (packageName == PACKAGE_NAME && floatingGame) return Kind.FLOATING_GAME
 
-    // The screenshot campaign renders its headline and prize copy into the
-    // artwork. Requiring both phrases inside that same compact creative keeps
-    // unrelated game controls and background promotion text out of scope.
-    val floatingPrizeGame = floatingGameGeometry && creativeTexts.any {
-      AdSemanticRules.normalize(it.value).contains("天天打企鹅") &&
-        it.bounds.centerY >= creative.top + creative.height * 0.30
-    } && creativeTexts.any {
-      AdSemanticRules.normalize(it.value).contains("好运赢大奖") &&
-        it.bounds.centerY >= creative.top + creative.height * 0.30
+    // OCR may split artwork copy across multiple lines or word boxes. Join only
+    // text geometrically contained by this compact creative before matching it.
+    // A disclosure plus CTA, or combined reward/benefit and action semantics,
+    // can establish promotion intent without matching a campaign title.
+    val floatingCreativeCopy = normalizedText(creativeTexts.filter {
+      it.bounds.centerY >= creative.top + creative.height * 0.30
+    })
+    val hasExplicitAdMarker = creativeTexts.any { AdControlEvidenceRules.isAdBadge(it.value) }
+    val hasAdDisclosureAndAction = hasExplicitAdMarker &&
+      AdControlEvidenceRules.hasCallToAction(floatingCreativeCopy)
+    val hasGenericOfferIntent = AdSemanticRules.hasCommercialOfferIntent(floatingCreativeCopy)
+    if (packageName == PACKAGE_NAME && floatingGameGeometry &&
+      (hasAdDisclosureAndAction || hasGenericOfferIntent)
+    ) {
+      return Kind.FLOATING_PROMOTION
     }
-    if (packageName == PACKAGE_NAME && floatingPrizeGame) return Kind.FLOATING_PRIZE_GAME
     return null
   }
 

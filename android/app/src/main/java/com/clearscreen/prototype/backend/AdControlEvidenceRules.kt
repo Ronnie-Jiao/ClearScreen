@@ -13,17 +13,22 @@ internal object AdControlEvidenceRules {
     val adContainer: Boolean,
     val fullScreen: Boolean,
     val readyCountdown: Boolean = false,
+    /** A marked ad root owns both the visible creative and the candidate control. */
+    val structuralAdContainer: Boolean = false,
   ) {
     fun permits(label: AdSemanticRules.ControlLabel): Boolean {
       if (!visual) return false
       if (label.kind == AdSemanticRules.ControlKind.GLYPH) {
-        // An ordinary player X has the same shape. Require a bounded ad subtree.
-        return !fullScreen && badge && (redirect || callToAction || adContainer)
+        // A local ad disclosure plus creative is enough for a bounded promo;
+        // generic full-screen/player X controls still need stronger evidence.
+        return structuralAdContainer || (!fullScreen && badge)
       }
-      if (label.explicitAd) return badge || adContainer || redirect
-      if (!fullScreen) return badge && (redirect || callToAction || adContainer)
+      if (label.explicitAd) return structuralAdContainer || badge || adContainer || redirect
+      if (!fullScreen) return structuralAdContainer || badge
       return (badge && (redirect || adContainer)) || (adContainer && redirect) ||
-        (label.kind == AdSemanticRules.ControlKind.SKIP && readyCountdown && redirect)
+        (label.kind == AdSemanticRules.ControlKind.SKIP && readyCountdown && redirect) ||
+        (label.kind == AdSemanticRules.ControlKind.SKIP && badge) ||
+        structuralAdContainer
     }
 
     fun permitsVisualTouch(label: AdSemanticRules.ControlLabel): Boolean =
@@ -35,12 +40,23 @@ internal object AdControlEvidenceRules {
     val text = AdSemanticRules.normalize(value)
     if (listOf("免广告", "去广告", "无广告", "广告设置", "关闭广告", "跳过广告").any(text::contains)) return false
     return text in setOf("广告", "推荐广告", "互动广告", "推广", "赞助", "ad", "ads", "sponsored", "advertisement") ||
+      (text.contains("广告") && text.length <= 20) ||
       (text.startsWith("互动广告") && text.length <= 18)
   }
 
   fun isAdContainer(resourceId: String): Boolean = Regex(
     """(?:^|[/_.-])(?:adview|adcontainer|ad_container|ad_layout|ad_content|ad_root|ad_view|splashad|splash_ad|interstitial|gdt_ad|ksad|tt_ad)(?:$|[/_.\d-])"""
   ).containsMatchIn(resourceId.lowercase())
+
+  /** Structural markers can identify an ad even when OCR cannot read its creative. */
+  fun isAdStructureNode(resourceId: String, className: String): Boolean {
+    if (isAdContainer(resourceId)) return true
+    val classId = className.lowercase()
+    return listOf(
+      "adview", "adcontainer", "adlayout", "adroot", "adcontent", "adframe", "adslot",
+      "bannerad", "nativead", "interstitialad", "splashad", "rewardedad",
+    ).any(classId::contains)
+  }
 
   fun hasRedirectDisclosure(value: String): Boolean {
     val text = AdSemanticRules.normalize(value)

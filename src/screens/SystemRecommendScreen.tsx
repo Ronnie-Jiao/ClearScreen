@@ -6,10 +6,10 @@ import { ClearScreenNative, type UiCleanupTarget } from '../native/ClearScreenNa
 import { C, COMPACT_UI } from '../theme';
 
 const accessHint = (message: string) => {
-  if (message.includes('配对')) return '还没和这台手机连上，请在「服务与权限」中打开 ADB Shell 操作能力。';
-  if (message.includes('Shizuku')) return '还没和这台手机连上，请在「服务与权限」中打开 ADB Shell 操作能力。';
+  if (message.includes('配对')) return '还没和这台手机连上，请在「服务与权限」中打开「系统设置权限」。';
+  if (message.includes('Shizuku')) return '还没和这台手机连上，请在「服务与权限」中打开「系统设置权限」。';
   if (message.includes('超时')) return '连接超时，请再试一次。';
-  return '请先在「服务与权限」中连接 ADB Shell 操作能力，再回来开关。';
+  return '请先在「服务与权限」中连接「系统设置权限」，再回来开关。';
 };
 
 const ROUTE_AD_PRIVACY = 'settings.adPrivacy';
@@ -24,6 +24,28 @@ const GROUP_ROWS = [
 ] as const;
 
 const ACTION_ORDER = [true, false] as const;
+
+/** Assisted switches have no readable system value; the label reflects the last confirmed state. */
+type AssistedStatus = 'toSet' | 'set' | 'unknown';
+const STATUS_LABEL: Record<AssistedStatus, string> = {
+  toSet: '去设置', set: '已设置', unknown: '未知',
+};
+function assistedStatus(target: UiCleanupTarget): AssistedStatus {
+  if (target.state === 'off') return 'set';
+  if (target.state === 'on') return 'toSet';
+  return target.canRestore ? 'unknown' : 'toSet';
+}
+function StatusPill({ status, busy, title, onPress }: {
+  status: AssistedStatus; busy: boolean; title: string; onPress: () => void;
+}) {
+  const pillTone = status === 'set' ? s.pillSet : status === 'unknown' ? s.pillUnknown : s.pillToSet;
+  const textTone = status === 'set' ? s.pillTextSet : status === 'unknown' ? s.pillTextUnknown : s.pillTextToSet;
+  return <Pressable accessibilityRole="button" accessibilityLabel={`${title}，${STATUS_LABEL[status]}`}
+    accessibilityState={{ disabled: busy }} disabled={busy} onPress={onPress}
+    style={({ pressed }) => [s.pill, pillTone, pressed && s.pillPressed, busy && s.pillBusy]}>
+    <Text style={[s.pillText, textTone]}>{STATUS_LABEL[status]}</Text>
+  </Pressable>;
+}
 
 const needsSystemToggleOn = (target: UiCleanupTarget | null) =>
   target?.needsSystemToggleOn === true;
@@ -145,7 +167,7 @@ export default function SystemRecommendScreen({
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes('Shizuku') || message.includes('配对') || message.includes('还没和这台手机连上')) {
-        showAlert('要先连接 ADB Shell 操作能力', accessHint(message), [
+        showAlert('需要系统设置权限', accessHint(message), [
           { text: '取消', style: 'cancel' },
           { text: '去连接', onPress: onOpenServicePermissions },
         ], { tone: 'warning' });
@@ -180,15 +202,16 @@ export default function SystemRecommendScreen({
     start();
   };
   const changeTarget = (target: UiCleanupTarget) => {
-    if (target.state === 'unknown') {
-      showAlert(target.title, '当前状态未确认，请选择要设置的状态。', [
+    if (!target.direct && assistedStatus(target) === 'set') {
+      showAlert(target.title, '这一项已经设置好了。', [
         { text: '取消', style: 'cancel' },
-        { text: '开启', onPress: () => changeTargetTo(target, false) },
-        { text: '关闭', onPress: () => changeTargetTo(target, true) },
+        { text: '重新设置', onPress: () => changeTargetTo(target, true) },
+        { text: '恢复开启', onPress: () => changeTargetTo(target, false) },
       ]);
       return;
     }
-    changeTargetTo(target, target.state !== 'off');
+    // Assisted switches have no live value to flip: "去设置" and "未知" both mean "set it now".
+    changeTargetTo(target, target.direct ? target.state !== 'off' : true);
   };
   // Category rows open pages; they are not separate system switches.
   const categoryTargets = GROUP_ROWS.map(row => ({ row, target: null }));
@@ -196,8 +219,11 @@ export default function SystemRecommendScreen({
     <View key={target.id} style={[s.row, plain && s.rowPlain]}>
       <View style={s.rowText}><Text style={s.rowTitle}>{target.title}</Text></View>
       <View style={s.stateWrap}>
-        <Toggle compact unknown={target.state === 'unknown'} value={target.state === 'on'}
-          onChange={() => { if (!busyTarget) changeTarget(target); }} />
+        {target.direct ?
+          <Toggle compact unknown={target.state === 'unknown'} value={target.state === 'on'}
+            onChange={() => { if (!busyTarget) changeTarget(target); }} /> :
+          <StatusPill status={assistedStatus(target)} busy={Boolean(busyTarget)} title={target.title}
+            onPress={() => { if (!busyTarget) changeTarget(target); }} />}
       </View>
     </View>
   );
@@ -246,6 +272,16 @@ const s = StyleSheet.create({
   rowPlain: { borderBottomWidth: 0 },
   rowText: { flex: 1 },
   stateWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  pill: { minWidth: 68, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, alignItems: 'center' },
+  pillToSet: { backgroundColor: '#EAF4FF' },
+  pillSet: { backgroundColor: C.greenBg },
+  pillUnknown: { backgroundColor: '#EDF1F6' },
+  pillPressed: { opacity: 0.7 },
+  pillBusy: { opacity: 0.5 },
+  pillText: { fontSize: COMPACT_UI.caption, fontWeight: '800', lineHeight: 16 },
+  pillTextToSet: { color: C.blue },
+  pillTextSet: { color: C.green },
+  pillTextUnknown: { color: '#7186A3' },
   rowTitle: { fontSize: COMPACT_UI.body, fontWeight: '800', color: C.text },
   rowStatus: { fontSize: COMPACT_UI.body, color: C.text, marginTop: 3, lineHeight: 20 },
   emptyStatus: { fontSize: COMPACT_UI.body, color: C.text, paddingHorizontal: 8, paddingVertical: 14, lineHeight: 21 },

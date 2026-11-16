@@ -141,7 +141,7 @@ class ClearScreenNativeModule(
               ClearScreenUiCleanup.stop()
               ClearScreenAccessibilityService.learningService?.beginAdLearning()
             }
-            "stop" -> learning?.stop("已取消学习")
+            "stop" -> learning?.stop("已取消学习", resumeProcessing = true)
             "clear" -> {
               learning?.stop()
               check(store.clearLearnedAdRules()) { "学习规则清除失败" }
@@ -157,11 +157,12 @@ class ClearScreenNativeModule(
             val rule = rules.optJSONObject(i) ?: continue
             val id = rule.optString("key")
             if (id.isBlank()) continue
+            val selectorVersion = rule.optJSONObject("selector")?.optInt("version") ?: 0
             records.pushMap(Arguments.createMap().apply {
               putString("id", id)
               putString("appId", rule.optString("pkg"))
               putDouble("timestamp", rule.optLong("created", 0L).toDouble())
-              putBoolean("needsRelearn", rule.optJSONObject("selector")?.optInt("version") != 2)
+              putBoolean("needsRelearn", selectorVersion !in 2..4)
             })
           }
           promise.resolve(Arguments.createMap().apply {

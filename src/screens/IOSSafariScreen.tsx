@@ -1,14 +1,10 @@
 import React, { useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Background, Badge, BrandHeader, Card, Chevron, PrimaryButton, SquareIcon } from '../components/UI';
 import { C } from '../theme';
 import { getIOSURLFilterReadiness, getIOSURLFilterReadinessLabel } from '../platform/ios/urlFilter';
 
-export default function IOSSafariScreen({
-  onPrivacyPolicy,
-}: {
-  onPrivacyPolicy: () => void;
-}) {
+export default function IOSSafariScreen() {
   const [stepsVisible, setStepsVisible] = useState(false);
   const urlFilterReadiness = getIOSURLFilterReadiness(Platform.Version);
 
@@ -73,10 +69,6 @@ export default function IOSSafariScreen({
             </Text>
           </Card>
 
-          <Pressable accessibilityRole="button" onPress={onPrivacyPolicy} style={s.policyRow}>
-            <Text style={s.policyText}>隐私政策</Text>
-            <Chevron />
-          </Pressable>
         </ScrollView>
       </View>
     </Background>
@@ -102,14 +94,4 @@ const s = StyleSheet.create({
   scope: { marginTop: 14, padding: 16, gap: 10 },
   scopeHeading: { minHeight: 36, flexDirection: 'row', alignItems: 'center' },
   scopeTitle: { flex: 1, color: C.navy, fontSize: 18, fontWeight: '900' },
-  policyRow: {
-    minHeight: 62,
-    marginTop: 12,
-    paddingHorizontal: 16,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,.94)',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  policyText: { flex: 1, color: C.navy, fontSize: 17, fontWeight: '900' },
 });

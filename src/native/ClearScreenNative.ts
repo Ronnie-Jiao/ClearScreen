@@ -184,7 +184,7 @@ function fallbackSnapshot(): BackendSnapshot {
   return {
     backendReady: false,
     privacyConsentAccepted: false,
-    privacyPolicyVersion: '2026-11-03-v3',
+    privacyPolicyVersion: '2026-11-14-v1',
     onboardingCompleted: false,
     masterEnabled: false,
     installedAppCount: 0,
@@ -259,7 +259,7 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
   return {
     backendReady: Boolean(raw.backendReady),
     privacyConsentAccepted: Boolean(raw.privacyConsentAccepted),
-    privacyPolicyVersion: String(raw.privacyPolicyVersion || '2026-10-29-v2'),
+    privacyPolicyVersion: String(raw.privacyPolicyVersion || '2026-11-14-v1'),
     onboardingCompleted: Boolean(raw.onboardingCompleted),
     masterEnabled: Boolean(raw.masterEnabled),
     installedAppCount: Number(raw.installedAppCount || apps.length),

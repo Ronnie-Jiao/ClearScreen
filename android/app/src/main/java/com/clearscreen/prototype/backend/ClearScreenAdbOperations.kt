@@ -352,7 +352,6 @@ internal object ClearScreenAdbOperations {
     context.getSharedPreferences("clearscreen_adb", Context.MODE_PRIVATE)
 
   fun requestReconnect(context: Context) {
-    check(ClearScreenPrivacyConsentStore(context).hasCurrentConsent()) { "请先同意隐私政策" }
     setReconnectRequested(context, true)
   }
 

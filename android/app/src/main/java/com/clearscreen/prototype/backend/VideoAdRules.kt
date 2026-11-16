@@ -24,20 +24,6 @@ internal object VideoAdRules {
     CONTEXTUAL_SKIP,
   }
 
-  private val skipLabels = setOf(
-    "跳过广告", "跳过此广告", "跳过这条广告", "跳过贴片广告",
-    "跳过视频广告", "跳过片前广告", "跳过中插广告",
-    "广告跳过", "立即跳过广告",
-    "skipad", "skipthisad", "skipvideoad", "skipads",
-    "skipadvertisement", "skipadvertisements",
-  )
-  private val closeLabels = setOf(
-    "关闭广告", "关闭此广告", "关闭这条广告", "关闭贴片广告",
-    "关闭视频广告", "关闭中插广告",
-    "closead", "closethisad", "closeadvertisement",
-    "dismissad",
-  )
-  private val genericSkipLabels = setOf("跳过", "skip")
   private val unsafePlaybackTokens = listOf(
     "跳过片头", "跳过片尾", "跳过前情", "跳过回顾",
     "跳过教程", "跳过引导", "跳过剧情",
@@ -72,8 +58,8 @@ internal object VideoAdRules {
   fun isUnsafePlaybackControl(label: String): Boolean {
     val compact = AdSemanticRules.normalize(label)
     // "关闭视频" means exit player, while "关闭视频广告" is an explicit
-    // ad action. Exact, supported ad labels take precedence over substrings.
-    if (compact in skipLabels || compact in closeLabels) return false
+    // ad action. Ad-targeting semantic labels take precedence over substrings.
+    if (AdSemanticRules.isExplicitSkip(compact) || AdSemanticRules.isExplicitAdClose(compact)) return false
     return unsafePlaybackTokens.any(compact::contains) ||
       notYetSkippable.any(compact::contains)
   }
@@ -131,14 +117,20 @@ internal object VideoAdRules {
     val variants = labels.map(AdSemanticRules::normalize).filter(String::isNotBlank)
     if (variants.any(::isUnsafePlaybackControl) || isUnsafePlaybackControl(resourceId)) return Action.NONE
 
-    if (variants.any { it in skipLabels }) return Action.EXPLICIT_SKIP
-    if (variants.any { it in closeLabels }) return Action.EXPLICIT_CLOSE
+    if (variants.any(AdSemanticRules::isExplicitSkip)) return Action.EXPLICIT_SKIP
+    if (variants.any(AdSemanticRules::isExplicitAdClose)) return Action.EXPLICIT_CLOSE
+
+    // Phrases such as "残忍离开", "以后再说" and "不需要了" carry dismissal
+    // intent but do not identify the target as an ad. Require a local ad marker.
+    if (nearbyAdEvidence && variants.any(AdSemanticRules::isContextualAdDismissal)) {
+      return Action.EXPLICIT_CLOSE
+    }
 
     if (nearbyAdEvidence && isExplicitAdResource(resourceId, "skip")) return Action.EXPLICIT_SKIP
     if (nearbyAdEvidence && isExplicitAdResource(resourceId, "close")) return Action.EXPLICIT_CLOSE
 
     if (atRightEdge && nearbyAdEvidence &&
-      variants.any { it in genericSkipLabels || countdownSkip.matches(it) }
+      variants.any { AdSemanticRules.isPlainSkip(it) || countdownSkip.matches(it) }
     ) return Action.CONTEXTUAL_SKIP
 
     return Action.NONE

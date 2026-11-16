@@ -31,7 +31,6 @@
     page:'splash',
     history:[],
     master:true,
-    theme:localStorage.getItem('cs-theme') || 'system',
     startup:true,
     autoUpdate:true,
     debug:false,
@@ -68,14 +67,6 @@
       check:'<path d="M5 12l4 4 10-10" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>'
     };
     return '<svg viewBox="0 0 24 24" width="'+size+'" height="'+size+'" aria-hidden="true">'+(a[name]||'')+'</svg>';
-  }
-
-  function setTheme(){
-    const root = document.documentElement;
-    root.classList.remove('dark');
-    const dark = state.theme === 'dark' || (state.theme==='system' && matchMedia('(prefers-color-scheme: dark)').matches);
-    if(dark) root.classList.add('dark');
-    localStorage.setItem('cs-theme',state.theme);
   }
 
   function go(page, push=true){
@@ -122,14 +113,14 @@
     clearTimeout(state.splashTimer);
     state.splashTimer=setTimeout(()=>{ if(state.page==='splash') go('welcome',false); },1100);
     return '<div class="app-shell"><main class="splash">'+
-      '<div class="brand-lockup"><img src="/logo.svg"><h1>净屏</h1><p>Clear<span>Screen</span></p><div class="tag">净化屏幕</div><div class="loader"></div></div>'+
+      '<div class="brand-lockup"><img src="/logo.png"><h1>净屏</h1><p>Clear<span>Screen</span></p><div class="tag">净化屏幕 畅享生活</div><div class="loader"></div></div>'+
       '</main></div>';
   }
 
   function welcome(){
     return '<div class="app-shell"><main class="screen no-nav onboard">'+
-      '<div class="brand-lockup"><img src="/logo.svg"><h1>净屏</h1><p>Clear<span>Screen</span></p></div>'+
-      '<div class="onboard-title">净化屏幕 · 专注生活</div>'+
+      '<div class="brand-lockup"><img src="/logo.png"><h1>净屏</h1><p>Clear<span>Screen</span></p></div>'+
+      '<div class="onboard-title">净化屏幕 畅享生活</div>'+
       '<div class="illustration"><div class="shield">'+icon('check',82)+'</div></div>'+
       '<div class="feature-grid">'+
         '<div class="card feature">'+square('play','blue')+'<b>自动跳过</b></div>'+
@@ -154,7 +145,7 @@
   }
 
   function logoHeader(){
-    return '<div class="logo-row"><img src="/logo.svg"><div class="logo-name"><b>净屏</b><span>Clear<em>Screen</em></span></div><div class="tagline">净化屏幕<br>专注生活</div></div>';
+    return '<div class="logo-row"><img src="/logo.png"><div class="logo-name"><b>净屏</b><span>Clear<em>Screen</em></span></div><div class="tagline">净化屏幕<br>畅享生活</div></div>';
   }
 
   function home(){
@@ -183,7 +174,7 @@
       '<div class="mini-control"><span>自动跳过</span><span class="mini-switch">'+sw(a.skip,'app:'+a.id+':skip')+'</span></div></div>').join('');
     const chip=(id,label)=>'<button class="chip '+(state.appFilter===id?'active':'')+'" data-filter="'+id+'">'+label+'</button>';
     return '<div class="app-shell"><main class="screen">'+
-      '<div class="logo-row"><img src="/logo.svg"><div class="logo-name"><b>应用</b><span>Clear<em>Screen</em></span></div></div>'+
+      '<div class="logo-row"><img src="/logo.png"><div class="logo-name"><b>应用</b><span>Clear<em>Screen</em></span></div></div>'+
       '<div class="search">'+icon('search',24)+'<input id="searchInput" value="'+escapeHtml(state.search)+'" placeholder="搜索应用"></div>'+
       '<div class="chips">'+chip('all','全部 ('+apps.length+')')+chip('enabled','已开启')+chip('white','白名单')+'</div>'+
       '<section class="card app-list">'+rows+'</section>'+
@@ -218,12 +209,11 @@
   }
 
   function settings(){
-    const seg='<div class="segment">'+['system','light','dark'].map(x=>'<button data-theme="'+x+'" class="'+(state.theme===x?'active':'')+'">'+({system:'跟随系统',light:'浅色',dark:'深色'}[x])+'</button>').join('')+'</div>';
     return '<div class="app-shell"><main class="screen">'+logoHeader()+
       '<section class="card settings-group"><div class="group-title">基础设置</div>'+
         '<div class="row">'+square('settings','blue')+'<div class="row-main"><div class="row-title">开机后恢复上次状态</div></div>'+sw(state.startup,'startup')+'</div>'+
         '<div class="row">'+square('refresh','green')+'<div class="row-main"><div class="row-title">规则自动更新</div></div>'+sw(state.autoUpdate,'autoUpdate')+'</div>'+
-        '<div class="row" data-go="appearance">'+square('palette','purple')+'<div class="row-main"><div class="row-title">外观</div></div>'+seg+'</div>'+
+        '<div class="row" data-go="appearance">'+square('palette','purple')+'<div class="row-main"><div class="row-title">外观</div></div><div class="row-right">白天模式 '+chevron()+'</div></div>'+
       '</section>'+
       '<section class="card settings-group"><div class="group-title">权限与服务</div>'+
         '<div class="row" data-go="permissions">'+square('access','blue')+'<div class="row-main"><div class="row-title">自动跳过权限状态</div></div><div class="row-right good">'+(state.permissions.skip?'已开启':'未开启')+chevron()+'</div></div>'+
@@ -239,7 +229,6 @@
         '<div class="row" data-go="rules">'+square('refresh','blue')+'<div class="row-main"><div class="row-title">规则管理</div></div><div class="row-right">'+chevron()+'</div></div>'+
         '<div class="row">'+square('bug','purple')+'<div class="row-main"><div class="row-title">调试模式</div></div>'+sw(state.debug,'debug')+'</div>'+
         '<div class="row" data-action="toast:当前版本 v1.0.0">'+square('info','green')+'<div class="row-main"><div class="row-title">当前版本</div></div><div class="row-right">v1.0.0 '+chevron()+'</div></div>'+
-        '<div class="row" data-action="toast:原型入口">'+square('info','blue')+'<div class="row-main"><div class="row-title">隐私政策</div></div><div class="row-right">'+chevron()+'</div></div>'+
       '</section>'+
       '</main>'+bottomNav('settings')+toastHtml()+modalHtml()+'</div>';
   }
@@ -247,14 +236,10 @@
   // Obsolete prototype pages removed.
 
   function appearance(){
-    const card=(id,label,preview)=>'<button class="card" data-theme="'+id+'" style="padding:12px;min-height:176px;border:2px solid '+(state.theme===id?'#188af0':'transparent')+';cursor:pointer"><div style="height:112px;border-radius:16px;background:'+preview+';box-shadow:inset 0 0 0 1px var(--border);margin-bottom:10px"></div><b style="font-size:17px">'+label+'</b></button>';
     return '<div class="app-shell"><main class="screen no-nav">'+topbar('外观')+
-      '<section class="card settings-group"><div class="group-title">'+square('palette','blue')+'主题模式</div>'+
-        '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px 0">'+
-          card('system','跟随系统','linear-gradient(90deg,#f4fbfd 50%,#10212e 50%)')+
-          card('light','浅色','linear-gradient(#f7fbfd,#eef7fb)')+
-          card('dark','深色','linear-gradient(#0b1721,#163041)')+
-        '</div></section>'+
+      '<section class="card settings-group"><div class="group-title">'+square('palette','blue')+'显示模式</div>'+
+        '<div class="row"><div class="row-main"><div class="row-title">白天模式</div></div><div class="row-right good">已启用</div></div>'+
+      '</section>'+
       '<section class="card settings-group"><div class="group-title">'+square('settings','blue')+'界面设置</div>'+
         '<div class="row" data-action="toast:图标风格已设为圆润"><div class="row-main"><div class="row-title">图标风格</div></div><div class="segment"><button class="active">圆润</button><button>简约</button><button>方形</button></div></div>'+
         '<div class="row" data-action="toast:卡片圆角已设为中"><div class="row-main"><div class="row-title">卡片圆角</div></div><div class="segment"><button>小</button><button class="active">中</button><button>大</button></div></div>'+
@@ -298,7 +283,6 @@
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
   function render(){
-    setTheme();
     const views={splash, welcome, permissions, home, apps:appsPage, appDetail, records, settings, appearance, whitelist, rules};
     document.getElementById('app').innerHTML=(views[state.page]||home)();
     bind();
@@ -325,12 +309,10 @@
     document.querySelectorAll('[data-perm]').forEach(el=>el.addEventListener('click',()=>togglePermission(el.dataset.perm)));
     document.querySelectorAll('[data-filter]').forEach(el=>el.addEventListener('click',()=>{state.appFilter=el.dataset.filter;render();}));
     document.querySelectorAll('[data-logfilter]').forEach(el=>el.addEventListener('click',()=>{state.logFilter=el.dataset.logfilter;render();}));
-    document.querySelectorAll('[data-theme]').forEach(el=>el.addEventListener('click',e=>{e.stopPropagation();state.theme=el.dataset.theme;render();}));
     document.querySelectorAll('[data-app]').forEach(el=>el.addEventListener('click',()=>{state.selectedApp=el.dataset.app;go('appDetail');}));
     const input=document.getElementById('searchInput');
     if(input) input.addEventListener('input',e=>{state.search=e.target.value;const pos=e.target.selectionStart;render();const n=document.getElementById('searchInput'); if(n){n.focus();n.setSelectionRange(pos,pos);}});
   }
 
-  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',()=>{if(state.theme==='system')render();});
   render();
 })();

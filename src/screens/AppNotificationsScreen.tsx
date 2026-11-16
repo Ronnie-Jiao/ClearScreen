@@ -224,9 +224,9 @@ export default function AppNotificationsScreen({
 /** Turn native failures into one sentence a user can act on. */
 function explainError(error: unknown): string {
   const raw = (error instanceof Error ? error.message : String(error ?? '')).trim();
-  if (/隐私|同意/.test(raw)) return '隐私授权已失效，请回首页重新同意隐私政策后再试。';
-  if (/没有响应|超时|timeout|timed out/i.test(raw)) return '手机系统命令没有响应，连接可能已经断了。去「ADB Shell 操作能力」重连后再试。';
-  if (/Shizuku|授权通道|未连接|没有连接|请先启动|请先授予/i.test(raw)) return '还没连上这台手机。去「ADB Shell 操作能力」连上后再试。';
+  if (/隐私|同意/.test(raw)) return '本机权限没有生效，请重试；仍然不行就去「服务与权限」重新检查。';
+  if (/没有响应|超时|timeout|timed out/i.test(raw)) return '手机系统命令没有响应，连接可能已经断了。去「系统设置权限」重连后再试。';
+  if (/Shizuku|授权通道|未连接|没有连接|请先启动|请先授予/i.test(raw)) return '还没连上这台手机。去「系统设置权限」连上后再试。';
   if (!raw) return '系统没有给出原因，请重试；仍然不行就重新连接这台手机。';
   return raw;
 }

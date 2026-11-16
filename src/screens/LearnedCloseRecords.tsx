@@ -13,12 +13,12 @@ function recordTime(value: number) {
   return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-export function LearnedCloseRow({record, apps, onDelete, compact=false}: {
-  record: LearnedCloseRecord; apps: AppItem[]; onDelete: (record: LearnedCloseRecord) => void; compact?: boolean;
+export function LearnedCloseRow({record, apps, onDelete, compact=false, last=false}: {
+  record: LearnedCloseRecord; apps: AppItem[]; onDelete: (record: LearnedCloseRecord) => void; compact?: boolean; last?: boolean;
 }) {
   const app = apps.find(item => item.id === record.appId || item.packageName === record.appId);
   const name = app?.name || record.appId || '未知应用';
-  return <View style={[s.row, compact && s.compactRow]}>
+  return <View style={[s.row, compact && s.compactRow, last && s.lastRow]}>
     {app ? <AppIcon source={app.icon} size={compact ? 36 : 40}/> : <View style={s.fallback}><Ionicons name="apps-outline" size={21} color={C.blue}/></View>}
     <View style={s.nameBox}><Text style={s.name} numberOfLines={1}>{name}</Text><Text style={s.time}>{recordTime(record.timestamp)}{record.needsRelearn ? ' · 需重新学习' : ''}</Text></View>
     <Pressable accessibilityRole="button" accessibilityLabel={`删除${name}的自定义关闭记录`} onPress={() => onDelete(record)} style={s.deleteButton} hitSlop={5}>
@@ -41,7 +41,7 @@ export default function LearnedCloseRecords({records, apps, onBack, onDelete}: {
 const s = StyleSheet.create({
   page:{flexGrow:1,paddingHorizontal:18,paddingBottom:30},card:{paddingHorizontal:10},
   row:{minHeight:60,flexDirection:'row',alignItems:'center',gap:9,borderBottomWidth:1,borderBottomColor:C.line},
-  compactRow:{minHeight:COMPACT_UI.rowHeight},nameBox:{flex:1,minWidth:0},
+  compactRow:{minHeight:COMPACT_UI.rowHeight},lastRow:{borderBottomWidth:0},nameBox:{flex:1,minWidth:0},
   name:{fontSize:14,fontWeight:'800',color:C.text},time:{fontSize:12,color:C.text2,marginTop:2},
   fallback:{width:40,height:40,borderRadius:10,alignItems:'center',justifyContent:'center',backgroundColor:'#EAF4FF'},
   deleteButton:{width:44,height:44,alignItems:'center',justifyContent:'center'},

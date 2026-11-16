@@ -204,10 +204,11 @@ internal object ClearScreenShellOps {
    * switch is off. No per-app command is needed, so large lists load quickly.
    */
   fun blockedNotifications(runner: ClearScreenShellRunner): String {
+    val user = runner.userId()
     val blocked = linkedSetOf<String>()
     var answered = false
     for (mode in listOf("ignore", "deny")) {
-      val query = runner.exec("/system/bin/cmd", "appops", "query-op", "POST_NOTIFICATION", mode)
+      val query = runner.exec("/system/bin/cmd", "appops", "query-op", "--user", user.toString(), "POST_NOTIFICATION", mode)
       if (query.code != 0) continue
       answered = true
       for (line in query.output.lineSequence()) {
@@ -231,14 +232,18 @@ internal object ClearScreenShellOps {
             pkg = null
           }
           line.startsWith("POST_NOTIFICATION: mode=") -> {
-            if (isBlockedMode(line.substringAfter("mode=").trim())) uid?.let { blockedUids.add(it) }
+            val owner = uid
+            if (isBlockedMode(line.substringAfter("mode=").trim()) && owner != null && owner / 100000 == user) {
+              blockedUids.add(owner)
+            }
           }
           line.startsWith("Package ") -> {
             pkg = line.removePrefix("Package ").trim().removeSuffix(":").trim()
           }
           line.startsWith("POST_NOTIFICATION (") -> {
             val name = pkg
-            if (name != null && name.matches(PACKAGE_PATTERN)) {
+            val owner = uid
+            if (name != null && name.matches(PACKAGE_PATTERN) && owner != null && owner / 100000 == user) {
               packageModes[name] = line.substringAfter("POST_NOTIFICATION (").substringBefore(')').trim()
             }
           }
@@ -246,14 +251,17 @@ internal object ClearScreenShellOps {
       }
       packageModes.forEach { (name, mode) -> if (isBlockedMode(mode)) blocked.add(name) }
       if (blockedUids.isNotEmpty()) {
-        val list = runner.exec("/system/bin/pm", "list", "packages", "-U", "--user", runner.userId().toString())
+        val list = runner.exec("/system/bin/pm", "list", "packages", "-U", "--user", user.toString())
         if (list.code == 0) {
           for (raw in list.output.lineSequence()) {
             val text = raw.trim()
             if (!text.startsWith("package:")) continue
             val name = text.removePrefix("package:").substringBefore(' ').trim()
             val id = text.substringAfter("uid:", "").trim().toIntOrNull() ?: continue
-            if (id in blockedUids && name.matches(PACKAGE_PATTERN) && name !in packageModes) blocked.add(name)
+            val packageMode = packageModes[name]?.lowercase(Locale.ROOT)
+            if (id in blockedUids && name.matches(PACKAGE_PATTERN) &&
+              (packageMode == null || packageMode == "default")
+            ) blocked.add(name)
           }
         }
       }
@@ -265,15 +273,21 @@ internal object ClearScreenShellOps {
   /** Reads the real system notification switch of an installed package. */
   fun appNotificationState(runner: ClearScreenShellRunner, packageName: String): String {
     val pkg = requirePackage(packageName)
-    val result = runner.exec("/system/bin/cmd", "appops", "get", pkg, "POST_NOTIFICATION")
+    val user = runner.userId()
+    val result = runner.exec("/system/bin/cmd", "appops", "get", "--user", user.toString(), pkg, "POST_NOTIFICATION")
     if (result.code != 0) return "unknown"
     val lines = result.output.lineSequence().map { it.trim() }.toList()
-    val op = lines.firstOrNull { it.startsWith("POST_NOTIFICATION:") }
-    if (op != null) return modeToState(op.substringAfter(':').trim().substringBefore(';').trim())
+    val packageMode = lines.firstOrNull { it.startsWith("POST_NOTIFICATION:") }
+      ?.substringAfter(':')?.trim()?.substringBefore(';')?.trim()
+    if (packageMode != null && !packageMode.equals("default", ignoreCase = true)) {
+      return modeToState(packageMode)
+    }
     val uidMode = lines.firstOrNull { it.startsWith("Uid mode:") && it.contains("POST_NOTIFICATION:") }
-    if (uidMode != null) return modeToState(uidMode.substringAfter("POST_NOTIFICATION:").trim().substringBefore(';').trim())
+      ?.substringAfter("POST_NOTIFICATION:")?.trim()?.substringBefore(';')?.trim()
+    if (uidMode != null && !uidMode.equals("default", ignoreCase = true)) return modeToState(uidMode)
     val fallback = lines.firstOrNull { it.startsWith("Default mode:") }
     if (fallback != null) return modeToState(fallback.substringAfter(':').trim())
+    if (packageMode != null || uidMode != null) return "enabled"
     return "unknown"
   }
 
@@ -293,11 +307,15 @@ internal object ClearScreenShellOps {
     val mode = if (enabled) "allow" else "ignore"
     // Keep the package and uid levels in agreement: MIUI's switch writes both,
     // and query-op only reports the package level.
-    val written = runner.exec("/system/bin/cmd", "appops", "set", pkg, "POST_NOTIFICATION", mode)
+    val written = runner.exec(
+      "/system/bin/cmd", "appops", "set", "--user", user.toString(), pkg, "POST_NOTIFICATION", mode,
+    )
     check(written.code == 0) { "系统拒绝了这次修改" }
-    val writtenUid = runner.exec("/system/bin/cmd", "appops", "set", "--uid", pkg, "POST_NOTIFICATION", mode)
+    val writtenUid = runner.exec(
+      "/system/bin/cmd", "appops", "set", "--user", user.toString(), "--uid", pkg, "POST_NOTIFICATION", mode,
+    )
     check(writtenUid.code == 0) { "系统拒绝了这次修改" }
-    check(appNotificationState(runner, pkg) == desired) { "修改后没有读到新状态，系统没有接受这次操作" }
+    check(appNotificationState(runner, pkg) == desired) { "系统返回的通知状态与操作不一致" }
     return desired
   }
 

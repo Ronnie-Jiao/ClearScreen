@@ -170,7 +170,7 @@ export default function QuickComponentsScreen({ onBack }: { onBack: () => void }
     }
     showAlert(`${restore ? '恢复' : '关闭'}${target.title}？`, restore
       ? '将按净屏保存的原状态恢复此项目。'
-      : '关闭可能影响快应用或锁屏画报等系统功能。原状态仅保存在净屏，撤回同意或卸载前请先恢复。', [
+      : '关闭可能影响快应用或锁屏画报等系统功能。原状态仅保存在净屏，清除应用数据或卸载前请先恢复。', [
       { text: '取消', style: 'cancel' },
       { text: restore ? '恢复' : '关闭', onPress: () => { void (async () => {
         try {
@@ -240,7 +240,7 @@ function stateHint(item: CleanupTarget) {
 /** Turn native failures into one sentence a user can act on. */
 function explainError(error: unknown): string {
   const raw = (error instanceof Error ? error.message : String(error ?? '')).trim();
-  if (/隐私|同意/.test(raw)) return '隐私授权已失效，请回首页重新同意隐私政策后再试。';
+  if (/隐私|同意/.test(raw)) return '暂时无法完成操作，请重试。';
   if (/无障碍|自动跳过/.test(raw)) return '自动跳过服务没开，净屏读不到系统信息。请在系统设置里开启后再试。';
   if (/没有响应|超时|timeout|timed out/i.test(raw)) return '手机系统命令没有响应，连接可能已经断了。点「现在连上」重连后再试。';
   if (/Shizuku|授权通道|未连接|没有连接|请先启动|请先授予/i.test(raw)) return '还没连上这台手机，所以查不了。点「现在连上」，用无线调试配对一次再试。';

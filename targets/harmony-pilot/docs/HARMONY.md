@@ -39,7 +39,7 @@ pnpm bundle:harmony    # EXPO_METRO_TARGET=harmony 导出 JS bundle 到 harmony 
     "harmony": {
       "bundleName": "com.example.app",   // 必填，prebuild 前置检查
       "label": "示例",
-      "icon": "./assets/icon.svg",        // HarmonyOS 图标建议 SVG
+      "icon": "./assets/icon.png",        // 使用与其他平台一致的品牌图
       "versionCode": 1,
       "permissions": [                    // 写入 entry/src/main/module.json5
         { "name": "ohos.permission.CAMERA", "reason": "$string:camera_reason", "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } }

@@ -34,8 +34,35 @@ internal object AdSemanticRules {
   )
   private val explicitAdClose = setOf(
     "关闭广告", "关闭此广告", "关闭推广", "关闭开屏广告",
-    "关闭这条广告", "关闭视频广告", "关闭此推广",
+    "关闭这条广告", "关闭视频广告", "关闭贴片广告", "关闭中插广告", "关闭此推广",
     "closead", "closeadvertisement", "dismissad", "closethisad",
+  )
+  private val adTarget = "(?:广告(?:内容|页面|弹窗|活动)?|视频广告|商业推广|品牌推广|推广(?:内容)?|赞助内容|开屏广告|贴片广告|片前广告|中插广告|插屏广告|激励视频|促销(?:广告|活动)?|广告推广|ads?|advertisements?|advertising|promotion|sponsoredcontent|sponsoredpost|promotedpost|promotedcontent|preroll|midroll|interstitial)"
+  private val targetPrefix = "(?:(?:本次|此次|这次|本条|这条|当前(?:这条)?|这个|该|此|这|this|that|the|current))?"
+  private val composedExplicitSkip = Regex(
+    """^(?:(?:先|立即|现在|马上|直接|果断|毅然|一键|狠心|忍痛)?(?:跳过|略过)${targetPrefix}${adTarget}|(?:now|immediately|quickly)?skip(?:this|that|the|current)?(?:ad|ads|video|advertisement|promotion))$"""
+  )
+  private val composedClose = Regex(
+    """^(?:(?:请|立即|现在|马上|直接|点此|点击|一键)?(?:关闭|关掉|关上|关闭掉|收起|隐藏|移除|退出|离开|dismiss|close|hide|remove)(?:${targetPrefix}(?:弹窗|窗口|页面|提示|广告|推广|开屏广告|视频广告|贴片广告|中插广告|促销|活动|优惠|福利|奖励|礼包|内容|offer|promotion|advertisement))?|(?:广告|推广|弹窗|窗口|促销|活动|优惠|福利|奖励|礼包|promotion|offer)(?:关闭|关掉|关闭掉|dismiss|close))$"""
+  )
+  private val explicitAdClosePhrase = Regex(
+    """^(?:(?:请|立即|现在|马上|直接|点此|点击|一键)?(?:关闭|关掉|关上|关闭掉|跳过|略过|退出|离开|拒绝|放弃|不看|dismiss|close|skip|leave|decline|reject|exit)${targetPrefix}${adTarget}|${adTarget}(?:关闭|关掉|关闭掉|跳过|略过|退出|离开|关闭按钮|close|skip|dismiss))$"""
+  )
+  private val dramaticDismissal = Regex(
+    """^(?:残忍|狠心|忍痛|不舍|舍不得|忍心|果断|毅然|痛快|无情)(?:地|的)?(?:离开|退出|关闭|关掉|关闭掉|放弃|拒绝|不看|跳过|略过)(?:(?:本次|此次|这次|当前|这个|此|这)?(?:广告|推广|开屏|视频广告|贴片广告|中插广告|优惠|活动|福利|奖励|礼包|会员|内容))?$"""
+  )
+  private val offerDecline = Regex(
+    """^(?:我)?(?:放弃|拒绝|不要|不需要|不想要|暂不|暂时不|稍后|以后|算了|不了|不想看|暂时不看|不再看|不再参与|不继续)(?:(?:本次|此次|这次|当前|这个|该|此|这)?(?:广告|推广|优惠|福利|活动|奖励|礼包|会员|特权|参与|领取|观看|开通|订购|购买|安装|下载|使用|权益|内容|继续|浏览|逛逛|再说))$"""
+  )
+  private val deferredDismissals = setOf(
+    "以后再说", "稍后再说", "下次再说", "暂不", "暂时不", "先不了", "不用了",
+    "不需要", "不用", "不想要", "不要", "不想看", "不再看", "不继续", "暂时不看", "稍后", "以后", "不需要了", "不要了", "不想要了", "不看了", "不想看了", "不继续了", "不了谢谢",
+    "不谢谢", "以后再说吧", "稍后再说吧", "不想参与", "暂不参与", "放弃领取",
+    "nothanks", "nothankyou", "notnow", "maybelater", "nevermind",
+    "declineoffer", "rejectoffer", "leaveoffer", "leavead", "exitad",
+  )
+  private val plainSkipPhrase = Regex(
+    """^(?:(?:请|先|立即|现在|马上|直接|继续)?(?:跳过|略过)(?:吧|掉)?|skip(?:this)?)$"""
   )
   private val strongAdSignals = listOf(
     "广告", "广告位", "开屏广告", "推广", "赞助",
@@ -45,6 +72,18 @@ internal object AdSemanticRules {
     "立即下载", "安全下载", "立即打开", "立即办理", "点击跳转",
     "详情页面", "免费领取", "福利", "优惠", "促销",
     "特惠", "红包", "svip", "低至", "限时", "领券", "折扣",
+  )
+  private val promotionalBenefitSignals = listOf(
+    "大奖", "奖品", "奖金", "奖励", "好运", "福利", "优惠券", "优惠", "折扣", "特惠",
+    "免单", "红包", "礼包", "礼品", "返现", "返利", "立减", "满减", "补贴", "赠品",
+    "免费", "专享", "权益", "低至", "限时", "prize", "reward", "bonus", "gift",
+    "deal", "offer", "discount", "coupon", "cashback", "free",
+  )
+  private val promotionalActionSignals = listOf(
+    "赢", "中奖", "抽奖", "领取", "领券", "免费领", "抢购", "抢红包", "马上抢", "参与",
+    "兑换", "点击", "立即", "马上", "购买", "前往", "下载", "安装", "体验", "开通",
+    "订购", "等你拿", "等你来拿", "win", "enter", "claim", "redeem", "shop", "buy",
+    "join", "download", "install", "playnow", "signup", "subscribe",
   )
   private val sensitiveSignals = listOf(
     "隐私政策", "用户协议", "个人信息", "权限申请", "权限管理",
@@ -91,7 +130,7 @@ internal object AdSemanticRules {
 
   fun isBlockedControlLabel(value: String): Boolean {
     val compact = normalize(value)
-    if (compact in explicitAdClose) return false
+    if (isExplicitAdClose(compact)) return false
     return isBlockedSkipLabel(value) || businessControls.any(compact::contains)
   }
 
@@ -153,7 +192,7 @@ internal object AdSemanticRules {
     "", "按钮", "button", "图片", "image", "imagebutton", "关闭按钮", "closebutton",
   )
 
-  fun isPlainSkip(compact: String): Boolean = compact == "跳过" || compact == "skip"
+  fun isPlainSkip(compact: String): Boolean = plainSkipPhrase.matches(normalize(compact))
 
   fun isCountdownSkip(compact: String): Boolean =
     numericSkip.any { it.matches(compact) }
@@ -168,12 +207,29 @@ internal object AdSemanticRules {
     return patterns.any { pattern -> pattern.matchEntire(compact)?.groupValues?.get(1)?.toIntOrNull() == 0 }
   }
 
-  fun isExplicitSkip(compact: String): Boolean =
-    compact in explicitSkip
+  fun isExplicitSkip(compact: String): Boolean {
+    val text = normalize(compact)
+    return text in explicitSkip || composedExplicitSkip.matches(text)
+  }
 
-  fun isClose(compact: String): Boolean = compact in close
+  fun isClose(compact: String): Boolean {
+    val text = normalize(compact)
+    return text in close || isExplicitAdClose(text) || composedClose.matches(text) ||
+      dramaticDismissal.matches(text) || offerDecline.matches(text) || text in deferredDismissals
+  }
 
-  fun isExplicitAdClose(compact: String): Boolean = compact in explicitAdClose
+  /** Ambiguous refusal/defer phrases need locally verified ad evidence. */
+  fun isContextualAdDismissal(compact: String): Boolean {
+    val text = normalize(compact)
+    return text !in close && (
+      dramaticDismissal.matches(text) || offerDecline.matches(text) || text in deferredDismissals
+    )
+  }
+
+  fun isExplicitAdClose(compact: String): Boolean {
+    val text = normalize(compact)
+    return text in explicitAdClose || explicitAdClosePhrase.matches(text)
+  }
 
   fun isSkipResource(id: String): Boolean =
     !isBusinessControlResource(id) && skipId.containsMatchIn(id)
@@ -189,6 +245,17 @@ internal object AdSemanticRules {
 
   fun hasMediumAdSignal(compact: String): Boolean =
     mediumAdSignals.any(compact::contains)
+
+  /**
+   * Recognizes promotion intent from generic benefit/reward and action semantics,
+   * independent of a campaign title or a single hard-coded ad sentence.
+   */
+  fun hasCommercialOfferIntent(text: String): Boolean {
+    val compact = normalize(text)
+    if (compact.isEmpty()) return false
+    return promotionalBenefitSignals.any(compact::contains) &&
+      promotionalActionSignals.any(compact::contains)
+  }
 
   fun isSensitiveUiContext(text: String): Boolean {
     val compact = normalize(text)

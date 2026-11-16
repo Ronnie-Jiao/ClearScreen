@@ -1,8 +1,13 @@
 package com.clearscreen.prototype.backend
 
-/** Text/geometry evidence only. Callers still require a real, independent clickable node. */
+/** Text/geometry evidence only. Callers still validate a fresh window and an independent target. */
 internal object AdCreativeRules {
   data class Text(val value: String, val bounds: AdGeometryRules.Box)
+
+  data class OcrFloatingCloseEvidence(
+    val creative: AdGeometryRules.Box,
+    val semanticStamp: Int,
+  )
 
   /** The SDK wires this visible X to its ad click-through action, not dismissal. */
   fun isUnsafeCaiyunInterstitialClickId(packageName: String, resourceId: String): Boolean =
@@ -112,9 +117,12 @@ internal object AdCreativeRules {
   private val redirectActions = setOf(
     "点击跳转详情页面", "点击跳转详情页", "点击跳转第三方应用", "点击跳转第三方页面",
   )
-  private val motionActions = setOf("扭动手机开启详情", "扭一扭开启详情", "摇一摇开启详情")
+  private val motionActions = setOf(
+    "扭动手机开启详情", "扭一扭开启详情", "摇一摇开启详情", "翻转手机",
+  )
   private val motionRedirectHints = setOf(
     "互动跳转详情页或第三方应用", "互动跳转至详情页或第三方应用",
+    "跳转详情页或第三方应用",
   )
   private val badges = setOf("广告", "推广", "赞助", "sponsored", "advertisement")
 
@@ -157,6 +165,160 @@ internal object AdCreativeRules {
     val next = belowPoster.firstOrNull { AdSemanticRules.normalize(it.value) == "下一条" } ?: return false
     return previous.bounds.centerX < poster.centerX && next.bounds.centerX > poster.centerX &&
       kotlin.math.abs(previous.bounds.centerY - next.bounds.centerY) <= screen.height * 0.035
+  }
+
+  /** Identifies the observed OPPEIN reward modal from its same-screen copy. */
+  fun hasOppeinRecommendedPopupCopy(
+    texts: List<Text>,
+    screen: AdGeometryRules.Box,
+  ): Boolean = oppeinPopupCopy(texts, screen) != null
+
+  /** Only the labeled refusal button inside that popup can use this exception. */
+  fun hasOppeinRecommendedPopupDismiss(
+    label: String,
+    texts: List<Text>,
+    button: AdGeometryRules.Box,
+    screen: AdGeometryRules.Box,
+  ): Boolean {
+    if (AdSemanticRules.normalize(label) != "残忍离开" || screen.width <= 0 || screen.height <= 0 ||
+      !contains(screen, button)
+    ) return false
+    val width = screen.width
+    val height = screen.height
+    val buttonArea = button.width.toLong().coerceAtLeast(0L) * button.height.toLong().coerceAtLeast(0L)
+    if (button.width > width * 0.42f || button.height > height * 0.10f ||
+      buttonArea.toDouble() / (width.toLong() * height) > 0.045 ||
+      button.centerX !in (screen.left + width * 0.32f).toInt()..(screen.left + width * 0.68f).toInt()
+    ) return false
+
+    val copy = oppeinPopupCopy(texts, screen) ?: return false
+    val action = copy[2]
+    val disclosure = copy[3]
+    return button.centerY > action.bounds.centerY + height * 0.01f &&
+      button.centerY < disclosure.bounds.centerY &&
+      kotlin.math.abs(button.centerX - action.bounds.centerX) <= width * 0.14f
+  }
+
+  private fun oppeinPopupCopy(
+    texts: List<Text>,
+    screen: AdGeometryRules.Box,
+  ): List<Text>? {
+    if (screen.width <= 0 || screen.height <= 0) return null
+    val width = screen.width
+    val height = screen.height
+    val centered = texts.filter { text ->
+      contains(screen, text.bounds) &&
+        text.bounds.centerX in (screen.left + width * 0.18f).toInt()..(screen.left + width * 0.82f).toInt()
+    }
+    fun match(marker: String): Text? = centered.firstOrNull {
+      AdSemanticRules.normalize(it.value).contains(marker)
+    }
+    val title = match("今日专属推荐") ?: return null
+    val brand = match("欧派整装官方") ?: return null
+    val action = match("去微信看看") ?: return null
+    val disclosure = match("实际内容以广告内容为主") ?: return null
+    val rows = listOf(title, brand, action, disclosure)
+    if (rows.any { it.bounds.height > height * 0.12f } ||
+      rows.any { it.bounds.centerY !in (screen.top + height * 0.10f).toInt()..(screen.top + height * 0.92f).toInt() } ||
+      rows.zipWithNext().any { (upper, lower) -> upper.bounds.centerY >= lower.bounds.centerY } ||
+      rows.any { kotlin.math.abs(it.bounds.centerX - (screen.left + width / 2)) > width * 0.24f } ||
+      disclosure.bounds.centerY - title.bounds.centerY > height * 0.72f
+    ) return null
+    return rows
+  }
+
+  /**
+   * The observed KPL finals poster has no readable ad badge and places its X
+   * above the central campaign copy. Require the full campaign signature and
+   * keep the X tied geometrically to that same OCR text cluster.
+   */
+  fun hasKplFinalsPosterClose(
+    texts: List<Text>,
+    close: AdGeometryRules.Box,
+    screen: AdGeometryRules.Box,
+  ): Boolean {
+    val width = screen.width.coerceAtLeast(1)
+    val height = screen.height.coerceAtLeast(1)
+    val screenArea = width.toLong() * height
+    val closeArea = close.width.toLong().coerceAtLeast(0L) * close.height.toLong().coerceAtLeast(0L)
+    if (screen.width <= 0 || screen.height <= 0 || !contains(screen, close) ||
+      close.width > width * 0.14f || close.height > height * 0.09f ||
+      closeArea.toDouble() / screenArea > 0.015 ||
+      close.centerX !in (screen.left + width * 0.70f).toInt()..(screen.left + width * 0.98f).toInt() ||
+      close.centerY !in (screen.top + height * 0.16f).toInt()..(screen.top + height * 0.40f).toInt()
+    ) return false
+
+    val centralCopy = texts.filter { text ->
+      contains(screen, text.bounds) &&
+        text.bounds.centerX in (screen.left + width * 0.10f).toInt()..(screen.left + width * 0.90f).toInt() &&
+        text.bounds.centerY in (screen.top + height * 0.28f).toInt()..(screen.top + height * 0.79f).toInt()
+    }
+    val normalized = centralCopy.map { AdSemanticRules.normalize(it.value) }
+    val requiredCopy = listOf("kpl", "年度总决赛", "纪念皮肤", "韩信", "限时秒杀", "立即前往")
+    if (!requiredCopy.all { marker -> normalized.any { it.contains(marker) } } ||
+      normalized.none { it.contains("2026") || it.contains("十周年") }
+    ) return false
+
+    val signatureMarkers = requiredCopy + listOf("2026", "十周年")
+    val signatureLines = centralCopy.filter { text ->
+      val value = AdSemanticRules.normalize(text.value)
+      signatureMarkers.any(value::contains)
+    }
+    if (signatureLines.isEmpty()) return false
+    val cluster = AdGeometryRules.Box(
+      left = signatureLines.minOf { it.bounds.left },
+      top = signatureLines.minOf { it.bounds.top },
+      right = signatureLines.maxOf { it.bounds.right },
+      bottom = signatureLines.maxOf { it.bounds.bottom },
+    )
+    return cluster.width in (width * 0.18f).toInt()..(width * 0.88f).toInt() &&
+      cluster.height in (height * 0.025f).toInt()..(height * 0.40f).toInt() &&
+      cluster.centerX in (screen.left + width * 0.34f).toInt()..(screen.left + width * 0.66f).toInt() &&
+      cluster.centerY in (screen.top + height * 0.36f).toInt()..(screen.top + height * 0.76f).toInt() &&
+      close.centerX >= cluster.centerX + width * 0.14f &&
+      close.centerY < cluster.top + height * 0.08f &&
+      close.centerY >= cluster.top - height * 0.34f
+  }
+
+  /** Tencent Video's lower-right "免 / 免费看" floating promo with its own X. */
+  fun hasTencentFreeViewingPromoClose(
+    packageName: String,
+    texts: List<Text>,
+    close: AdGeometryRules.Box,
+    screen: AdGeometryRules.Box,
+  ): Boolean {
+    if (packageName != "com.tencent.qqlive" || screen.width <= 0 || screen.height <= 0 ||
+      !contains(screen, close)
+    ) return false
+    val width = screen.width
+    val height = screen.height
+    val screenArea = width.toLong() * height
+    val closeArea = close.width.toLong().coerceAtLeast(0L) * close.height.toLong().coerceAtLeast(0L)
+    if (close.width > width * 0.12f || close.height > height * 0.08f ||
+      closeArea.toDouble() / screenArea > 0.012 ||
+      close.centerX < screen.left + width * 0.82f ||
+      close.centerY !in (screen.top + height * 0.70f).toInt()..(screen.top + height * 0.94f).toInt()
+    ) return false
+
+    val local = texts.filter { text ->
+      contains(screen, text.bounds) &&
+        text.bounds.centerX >= screen.left + width * 0.70f &&
+        text.bounds.centerY in (screen.top + height * 0.70f).toInt()..(screen.top + height * 0.94f).toInt()
+    }
+    val icon = local.firstOrNull { text ->
+      AdSemanticRules.normalize(text.value) == "免" &&
+        text.bounds.width <= width * 0.22f && text.bounds.height <= height * 0.14f
+    } ?: return false
+    val action = local.firstOrNull { text ->
+      AdSemanticRules.normalize(text.value).contains("免费看") &&
+        text.bounds.width <= width * 0.30f && text.bounds.height <= height * 0.09f
+    } ?: return false
+    return kotlin.math.abs(icon.bounds.centerX - action.bounds.centerX) <= width * 0.14f &&
+      action.bounds.centerY >= icon.bounds.centerY - height * 0.04f &&
+      action.bounds.centerY <= icon.bounds.centerY + height * 0.14f &&
+      close.centerX >= action.bounds.centerX + width * 0.035f &&
+      close.centerY >= icon.bounds.top - height * 0.10f &&
+      close.centerY < action.bounds.centerY
   }
 
   /** Explicit upper ad badge + lower redirect CTA on one full-screen splash. */
@@ -379,7 +541,7 @@ internal object AdCreativeRules {
       offer.bounds.centerY > title.bounds.centerY && price.bounds.centerY > offer.bounds.centerY
   }
 
-  /** China Mobile home floating gift ad: exact 20GB offer text and an X at that creative's upper-right edge. */
+  /** China Mobile home floating gift ads: known offer copy and an X at that creative's upper-right edge. */
   fun hasMobileGiftPromoFloatingClose(
     packageName: String,
     texts: List<Text>,
@@ -393,23 +555,31 @@ internal object AdCreativeRules {
     ) return false
 
     val local = texts.filter { contains(screen, it.bounds) }
-    val twentyGb = local.filter { AdSemanticRules.normalize(it.value).contains("20gb") }
-    val specialPackage = local.filter { AdSemanticRules.normalize(it.value).contains("特惠包") }
-    if (twentyGb.isEmpty() || specialPackage.isEmpty()) return false
-
+    val offerPairs = listOf(
+      local.filter { AdSemanticRules.normalize(it.value).contains("20gb") } to
+        local.filter { AdSemanticRules.normalize(it.value).contains("特惠包") },
+      local.filter { AdSemanticRules.normalize(it.value).contains("59元") } to
+        local.filter { AdSemanticRules.normalize(it.value).contains("全家享") },
+    )
+    val offers = mutableListOf<AdGeometryRules.Box>()
     val width = screen.width.coerceAtLeast(1)
     val height = screen.height.coerceAtLeast(1)
-    for (gbText in twentyGb) for (offerText in specialPackage) {
-      if (kotlin.math.abs(gbText.bounds.centerX - offerText.bounds.centerX) > width * 0.12f ||
-        kotlin.math.abs(gbText.bounds.centerY - offerText.bounds.centerY) > height * 0.10f
-      ) continue
+    for ((firstTerms, secondTerms) in offerPairs) {
+      for (first in firstTerms) for (second in secondTerms) {
+        if (kotlin.math.abs(first.bounds.centerX - second.bounds.centerX) > width * 0.12f ||
+          kotlin.math.abs(first.bounds.centerY - second.bounds.centerY) > height * 0.10f
+        ) continue
+        offers += AdGeometryRules.Box(
+          minOf(first.bounds.left, second.bounds.left),
+          minOf(first.bounds.top, second.bounds.top),
+          maxOf(first.bounds.right, second.bounds.right),
+          maxOf(first.bounds.bottom, second.bounds.bottom),
+        )
+      }
+    }
+    if (offers.isEmpty()) return false
 
-      val offer = AdGeometryRules.Box(
-        minOf(gbText.bounds.left, offerText.bounds.left),
-        minOf(gbText.bounds.top, offerText.bounds.top),
-        maxOf(gbText.bounds.right, offerText.bounds.right),
-        maxOf(gbText.bounds.bottom, offerText.bounds.bottom),
-      )
+    for (offer in offers.distinct()) {
       if (close.centerX < offer.centerX || close.centerY >= offer.centerY ||
         close.centerY < offer.top - height * 0.12f
       ) continue
@@ -425,6 +595,80 @@ internal object AdCreativeRules {
       ) return true
     }
     return false
+  }
+
+  /**
+   * Finds compact OCR-backed ad creatives associated with a small X glyph.
+   * Generic copy must either disclose an ad or combine offer and action intent;
+   * the known China Mobile gift tile has an additional local offer-pattern rule.
+   */
+  fun findOcrFloatingCloseEvidence(
+    packageName: String,
+    texts: List<Text>,
+    close: AdGeometryRules.Box,
+    screen: AdGeometryRules.Box,
+  ): List<OcrFloatingCloseEvidence> {
+    val width = screen.width.coerceAtLeast(1)
+    val height = screen.height.coerceAtLeast(1)
+    if (!contains(screen, close) || close.width <= 0 || close.height <= 0 ||
+      close.width > width * 0.12f || close.height > height * 0.08f ||
+      (close.width.toLong() * close.height.toLong()).toDouble() /
+        (width.toLong() * height.toLong()) > 0.012
+    ) return emptyList()
+
+    val local = texts.filter { text ->
+      contains(screen, text.bounds) &&
+        kotlin.math.abs(text.bounds.centerX - close.centerX) <= width * 0.46f &&
+        kotlin.math.abs(text.bounds.centerY - close.centerY) <= height * 0.36f
+    }
+    if (local.isEmpty()) return emptyList()
+
+    return local.mapNotNull { seed ->
+      val group = local.filter { text ->
+        kotlin.math.abs(text.bounds.centerX - seed.bounds.centerX) <= width * 0.32f &&
+          kotlin.math.abs(text.bounds.centerY - seed.bounds.centerY) <= height * 0.22f
+      }.distinctBy { it.value to it.bounds }
+      if (group.none { text ->
+          kotlin.math.abs(text.bounds.centerX - close.centerX) <= width * 0.22f &&
+            kotlin.math.abs(text.bounds.centerY - close.centerY) <= height * 0.22f
+        }
+      ) return@mapNotNull null
+      val combined = AdSemanticRules.normalize(group.joinToString(" ") { it.value })
+      val hasAdDisclosure = AdSemanticRules.hasStrongAdSignal(combined)
+      val hasCommercialIntent = AdSemanticRules.hasCommercialOfferIntent(combined)
+      val isKnownMobileGiftPromo = hasMobileGiftPromoFloatingClose(packageName, group, close, screen)
+      if (!hasAdDisclosure && !hasCommercialIntent && !isKnownMobileGiftPromo) return@mapNotNull null
+
+      val contentLeft = minOf(close.left, group.minOf { it.bounds.left })
+      val contentTop = minOf(close.top, group.minOf { it.bounds.top })
+      val contentRight = maxOf(close.right, group.maxOf { it.bounds.right })
+      val contentBottom = maxOf(close.bottom, group.maxOf { it.bounds.bottom })
+      val padX = (width * 0.025f).toInt()
+      val padY = (height * 0.025f).toInt()
+      val creative = AdGeometryRules.Box(
+        maxOf(screen.left, contentLeft - padX),
+        maxOf(screen.top, contentTop - padY),
+        minOf(screen.right, contentRight + padX),
+        minOf(screen.bottom, contentBottom + padY),
+      )
+      if (!AdGeometryRules.isOcrFloatingCreative(creative, screen) ||
+        !AdGeometryRules.isCompactFloatingCreativeClose(close, creative, screen)
+      ) return@mapNotNull null
+
+      val semanticStamp = (if (hasAdDisclosure) 1 else 0) or
+        (if (hasCommercialIntent) 2 else 0) or (if (isKnownMobileGiftPromo) 4 else 0)
+      OcrFloatingCloseEvidence(creative, semanticStamp)
+    }.distinctBy { it.creative to it.semanticStamp }
+  }
+
+  fun hasOcrFloatingPromoEvidence(packageName: String, texts: List<Text>): Boolean {
+    val combined = AdSemanticRules.normalize(texts.joinToString(" ") { it.value })
+    if (AdSemanticRules.hasStrongAdSignal(combined) || AdSemanticRules.hasCommercialOfferIntent(combined)) {
+      return true
+    }
+    if (packageName != "com.greenpoint.android.mc10086.activity") return false
+    return (combined.contains("20gb") && combined.contains("特惠包")) ||
+      (combined.contains("59元") && combined.contains("全家享"))
   }
 
   private fun contains(outer: AdGeometryRules.Box, inner: AdGeometryRules.Box): Boolean =

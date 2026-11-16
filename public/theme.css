@@ -80,8 +80,6 @@ body{min-height:100vh}
 .toast{position:fixed;z-index:50;bottom:95px;left:50%;transform:translateX(-50%);background:#0b3557;color:#fff;padding:11px 17px;border-radius:999px;box-shadow:0 10px 24px rgba(0,0,0,.18);font-weight:700;max-width:85%;text-align:center}
 .modal-backdrop{position:fixed;z-index:40;inset:0;background:rgba(2,22,45,.35);display:grid;place-items:end center}.sheet{width:min(100%,460px);background:var(--surface);border-radius:24px 24px 0 0;padding:22px 20px 28px;box-shadow:0 -20px 60px rgba(0,0,0,.13)}.sheet h3{margin:0 0 12px;font-size:23px}.sheet p{color:var(--muted);line-height:1.6}.sheet-actions{display:flex;gap:10px;margin-top:18px}.sheet-actions button{flex:1;height:48px;border-radius:14px;font-weight:800;cursor:pointer}.sheet-actions .cancel{background:#eef4f8}.sheet-actions .danger{background:#ef3854;color:white}
 /* Legacy prototype styles removed. */
-.dark{--bg:#08131D;--bg-soft:#10212E;--surface:#10212E;--surface-2:rgba(16,33,46,.92);--text:#F1F7FA;--muted:#91A8B6;--faint:#6f8596;--border:#244354;--brand-navy:#4AA5F0}
-.dark .app-shell{background:linear-gradient(180deg,#091923,#0a161f)}.dark .topbar h1,.dark .logo-name b,.dark .logo-name span,.dark .status-copy h2,.dark .section-head h3,.dark .row-title,.dark .group-title,.dark .app-name,.dark .detail-hero h2,.dark .big-row .row-title{color:#F1F7FA}.dark .card,.dark .search,.dark .chip,.dark .filter-tab{border-color:#244354}.dark .bottom-nav{background:rgba(16,33,46,.96)}.dark .notice,.dark .hero-strip{background:linear-gradient(135deg,#123047,#102c3f);border-color:#244354}
 @media (min-width:600px){
   body{min-height:100vh;display:grid;place-items:center;padding:18px 0}
   #app{min-height:0}

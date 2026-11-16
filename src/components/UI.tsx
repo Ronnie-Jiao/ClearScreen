@@ -1,14 +1,14 @@
-import React, { useContext } from 'react';
-import { Image, ImageBackground, ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useContext, useEffect, useRef } from 'react';
+import { Animated, Easing, Image, ImageBackground, ImageResizeMode, ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { C, COMPACT_UI, R } from '../theme';
 import { LOGO, UI_BACKGROUND } from '../assets';
 import { ScreenInsetsContext, SCREEN_TOP_GAP } from './ScreenInsets';
 
-export function Background({children}:{children:React.ReactNode}){
+export function Background({children,backgroundSource=UI_BACKGROUND,resizeMode='stretch'}:{children:React.ReactNode;backgroundSource?:ImageSourcePropType;resizeMode?:ImageResizeMode}){
   const {top}=useContext(ScreenInsetsContext);
-  return <ImageBackground source={UI_BACKGROUND} resizeMode="stretch" style={[styles.root,{paddingTop:top+SCREEN_TOP_GAP}]} imageStyle={styles.backgroundImage}>
+  return <ImageBackground source={backgroundSource} resizeMode={resizeMode} style={[styles.root,{paddingTop:top+SCREEN_TOP_GAP}]} imageStyle={styles.backgroundImage}>
     {children}
   </ImageBackground>;
 }
@@ -17,16 +17,34 @@ export function Card({children,style,compact=false}:{children:React.ReactNode;st
   return <View style={[styles.card,compact&&styles.cardCompact,style]}>{children}</View>;
 }
 
+/** Drives both the knob travel and the track colour; no static on/off images are swapped. */
+function useSwitchMotion(value:boolean,unknown:boolean,compact:boolean){
+ const travel=compact?16:20;
+ const progress=useRef(new Animated.Value(value&&!unknown?1:0)).current;
+ useEffect(()=>{
+  Animated.timing(progress,{toValue:value&&!unknown?1:0,duration:200,easing:Easing.out(Easing.cubic),useNativeDriver:false}).start();
+ },[value,unknown,progress]);
+ return {
+  progress,
+  travel,
+  trackColor:progress.interpolate({inputRange:[0,1],outputRange:[unknown?'#D8DEE8':C.graySwitch,C.blue]}),
+ };
+}
+
 export function Toggle({value,onChange,compact=false,unknown=false,accessibilityLabel}:{value:boolean;onChange?:()=>void;compact?:boolean;unknown?:boolean;accessibilityLabel?:string}){
-  return <Pressable accessibilityRole="switch" accessibilityLabel={accessibilityLabel} accessibilityState={{checked:value}} accessibilityValue={unknown?{text:'未知'}:undefined} hitSlop={compact?{top:11,bottom:11,left:3,right:3}:undefined} onPress={onChange} style={[styles.toggle,compact&&styles.toggleCompact,value&&styles.toggleOn,unknown&&styles.toggleUnknown]}>
-    <View style={[styles.knob,compact&&styles.knobCompact,value&&styles.knobOn,unknown&&styles.knobUnknown]}/>
-  </Pressable>;
+ const {progress,travel,trackColor}=useSwitchMotion(value,unknown,compact);
+ return <Pressable accessibilityRole="switch" accessibilityLabel={accessibilityLabel} accessibilityState={{checked:value}} accessibilityValue={unknown?{text:'未知'}:undefined} hitSlop={compact?{top:11,bottom:11,left:3,right:3}:undefined} onPress={onChange}>
+  <Animated.View style={[styles.toggle,compact&&styles.toggleCompact,unknown&&styles.toggleUnknown,{backgroundColor:trackColor}]}>
+   <Animated.View style={[styles.knob,compact&&styles.knobCompact,unknown&&styles.knobUnknown,{transform:[{translateX:progress.interpolate({inputRange:[0,1],outputRange:[0,travel]})}]}]}/>
+  </Animated.View>
+ </Pressable>;
 }
 
 export function SwitchIndicator({value,compact=false}:{value:boolean;compact?:boolean}){
-  return <View pointerEvents="none" accessible={false} style={[styles.toggle,compact&&styles.toggleCompact,value&&styles.toggleOn]}>
-    <View style={[styles.knob,compact&&styles.knobCompact,value&&styles.knobOn]}/>
-  </View>;
+ const {progress,travel,trackColor}=useSwitchMotion(value,false,compact);
+ return <Animated.View pointerEvents="none" accessible={false} style={[styles.toggle,compact&&styles.toggleCompact,{backgroundColor:trackColor}]}>
+  <Animated.View style={[styles.knob,compact&&styles.knobCompact,{transform:[{translateX:progress.interpolate({inputRange:[0,1],outputRange:[0,travel]})}]}]}/>
+ </Animated.View>;
 }
 
 export function Badge({children,green=true,compact=false}:{children:React.ReactNode;green?:boolean;compact?:boolean}){
@@ -51,7 +69,7 @@ export function BrandHeader({title='净屏',tagline=false,action,compact=false,s
     <Image source={LOGO} style={[styles.brandLogo,compact&&styles.brandLogoCompact]}/>
     <View style={{flex:1}}><Text style={[styles.brandTitle,compact&&styles.brandTitleCompact,smallText&&styles.brandTitleSmall]}>{title}</Text><Text style={[styles.brandEnglish,compact&&styles.brandEnglishCompact,smallText&&styles.brandEnglishSmall]}>Clear<Text style={{color:C.teal}}>Screen</Text></Text></View>
     {action}
-    {tagline?<Text style={styles.tagline}>净化屏幕{`\n`}专注生活</Text>:null}
+    {tagline?<Text style={styles.tagline}>净化屏幕{`\n`}畅享生活</Text>:null}
   </View>;
 }
 
@@ -74,11 +92,9 @@ const styles=StyleSheet.create({
   card:{backgroundColor:'rgba(255,255,255,0.96)',borderRadius:R.lg,borderWidth:1,borderColor:'rgba(255,255,255,0.98)',shadowColor:'#4A7EA2',shadowOpacity:.10,shadowRadius:18,shadowOffset:{width:0,height:8},elevation:3},
   cardCompact:{borderRadius:COMPACT_UI.cardRadius},
   toggle:{width:50,height:30,borderRadius:16,backgroundColor:C.graySwitch,padding:3,justifyContent:'center'},toggleCompact:{width:42,height:26,borderRadius:14},
-  toggleOn:{backgroundColor:C.blue},
-  toggleUnknown:{backgroundColor:'#D8DEE8',borderWidth:1,borderColor:'#B9C4D2'},
+  toggleUnknown:{borderWidth:1,borderColor:'#B9C4D2'},
   knob:{width:24,height:24,borderRadius:12,alignSelf:'flex-start',backgroundColor:'#fff',shadowColor:'#243B55',shadowOpacity:.14,shadowRadius:4,shadowOffset:{width:0,height:1}},knobCompact:{width:20,height:20,borderRadius:10},
-  knobOn:{alignSelf:'flex-end'},
-  knobUnknown:{alignSelf:'flex-start',backgroundColor:'#F4F7FB',borderWidth:1,borderColor:'#C7D1DD'},
+  knobUnknown:{backgroundColor:'#F4F7FB',borderWidth:1,borderColor:'#C7D1DD'},
   badge:{alignSelf:'flex-start',backgroundColor:C.greenBg,borderRadius:20,paddingHorizontal:13,paddingVertical:6},
   badgeText:{fontSize:14,fontWeight:'800',color:C.green},
   badgeCompact:{paddingHorizontal:8,paddingVertical:3,borderRadius:12},badgeTextCompact:{fontSize:COMPACT_UI.caption,lineHeight:16},

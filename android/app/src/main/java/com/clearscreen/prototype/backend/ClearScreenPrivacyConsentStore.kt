@@ -7,25 +7,17 @@ import java.io.File
 import java.nio.charset.StandardCharsets
 
 /**
- * A tiny, uncached consent record checked by both the UI and accessibility
- * service. It stays separate from rules/log preferences so those are not
- * opened before consent, and remains safe if the service is later isolated.
+ * The first-run consent screen has been removed. Local capabilities are
+ * available immediately after installation; the policy stays as a reference
+ * document in the repository. The record helpers are kept so existing call
+ * sites (and older installs) keep working without a migration.
  */
 class ClearScreenPrivacyConsentStore(context: Context) {
   private val baseFile = File(context.filesDir, FILE_NAME)
   private val atomicFile = AtomicFile(baseFile)
 
   @Synchronized
-  fun hasCurrentConsent(): Boolean {
-    if (!baseFile.exists()) return false
-    return runCatching {
-      atomicFile.openRead().bufferedReader(StandardCharsets.UTF_8).use { reader ->
-        val record = JSONObject(reader.readText())
-        record.optString(KEY_POLICY_VERSION) == POLICY_VERSION &&
-          record.optLong(KEY_ACCEPTED_AT, 0L) > 0L
-      }
-    }.getOrDefault(false)
-  }
+  fun hasCurrentConsent(): Boolean = true
 
   @Synchronized
   fun acceptCurrentPolicy() {
@@ -53,7 +45,7 @@ class ClearScreenPrivacyConsentStore(context: Context) {
 
   companion object {
     internal val operationLock = Any()
-    const val POLICY_VERSION = "2026-11-03-v3"
+    const val POLICY_VERSION = "2026-11-14-v1"
     private const val FILE_NAME = "clearscreen_privacy_consent.json"
     private const val KEY_POLICY_VERSION = "policyVersion"
     private const val KEY_ACCEPTED_AT = "acceptedAt"

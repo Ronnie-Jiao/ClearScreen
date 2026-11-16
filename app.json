@@ -2,21 +2,19 @@
   "expo": {
     "name": "净屏",
     "slug": "clearscreen-high-fidelity-ui",
-    "version": "1.0.100",
+    "version": "1.0.116",
     "orientation": "portrait",
-    "icon": "./assets/logo.png",
+    "icon": "./assets/logo-icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/logo.png",
-      "resizeMode": "contain",
       "backgroundColor": "#F4FCFF"
     },
     "android": {
       "package": "com.clearscreen.prototype",
-      "versionCode": 106,
+      "versionCode": 122,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/logo.png",
-        "backgroundColor": "#EAF9FF"
+        "foregroundImage": "./assets/logo-foreground.png",
+        "backgroundColor": "#FFFFFF"
       }
     },
     "ios": {

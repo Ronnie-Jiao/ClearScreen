@@ -2,27 +2,28 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Image, ImageSourcePropType, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Background, Card, SwitchIndicator, TopBar } from '../components/UI';
 import { useAppAlert } from '../components/AppDialog';
-import { ClearScreenNative, type AdbAccessStatus, type AdbActionResult, type BackendPermissions } from '../native/ClearScreenNative';
+import { ClearScreenNative, type AdbAccessStatus, type BackendPermissions } from '../native/ClearScreenNative';
 import { C, COMPACT_UI } from '../theme';
 import { PERM_AUTO_SKIP, PERM_STARTUP, PERM_BACKGROUND, PERM_BATTERY, PERM_SYSTEM_SETTINGS } from '../assets';
 
-type PermissionState=Pick<BackendPermissions,'skipRunning'|'accessibilityHealth'|'accessibilitySettingEnabled'|'isVivoFamily'|'vendorStartupSettingsAvailable'|'batteryOptimizationIgnored'|'backgroundRestricted'|'startupAllowed'|'backgroundAllowed'>;
+type PermissionState=Pick<BackendPermissions,'skipRunning'|'accessibilityHealth'|'accessibilitySettingEnabled'|'isVivoFamily'|'vendorStartupSettingsAvailable'|'batteryOptimizationIgnored'|'backgroundRestricted'|'startupAllowed'|'startupManagement'|'backgroundAllowed'>;
 const AUTO_PAIR_STAGES=new Set(['waiting-code','pairing','waiting-port','connecting']);
 const ROW_ICONS:Record<string,ImageSourcePropType>={
-  '自动跳过服务':PERM_AUTO_SKIP,
+  '自动跳过广告':PERM_AUTO_SKIP,
   '开机自启动':PERM_STARTUP,
+  '休眠管理':PERM_STARTUP,
   '后台运行':PERM_BACKGROUND,
   '电池优化':PERM_BATTERY,
   '系统设置权限':PERM_SYSTEM_SETTINGS,
 };
 
-export default function ServicePermissionsScreen({permissions,checking=false,verificationFailed=false,accessibilityChecking=false,onBack,onOpenAccessibility,onStartup,onBackground,onBatteryOptimization}:{
+export default function ServicePermissionsScreen({permissions,checking=false,verificationFailed=false,accessibilityChecking=false,onBack,onRequestAccessibilityEnable,onStartup,onBackground,onBatteryOptimization}:{
   permissions:PermissionState;
   checking?:boolean;
   verificationFailed?:boolean;
   accessibilityChecking?:boolean;
   onBack:()=>void;
-  onOpenAccessibility:()=>void;
+  onRequestAccessibilityEnable:()=>void;
   onStartup:()=>void;
   onBackground:()=>void;
   onBatteryOptimization:()=>void;
@@ -39,8 +40,9 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
   const skipUnknown=permissions.accessibilitySettingEnabled&&permissions.accessibilityHealth==='unknown';
   const skipNeedsRepair=!skipEnabled&&!skipPending&&permissions.accessibilitySettingEnabled&&permissions.accessibilityHealth==='unavailable';
   const startupEnabled=verified&&permissions.startupAllowed===true;
+  const sleepingManagement=permissions.startupManagement==='sleeping';
   const startupUnreadable=verified&&permissions.startupAllowed===null;
-  const startupReadable=verified&&permissions.startupAllowed!==null;
+  const startupReadable=!sleepingManagement&&verified&&permissions.startupAllowed!==null;
   const backgroundReadable=verified&&(permissions.backgroundRestricted!==null||permissions.backgroundAllowed!==null);
   const backgroundEnabled=verified&&permissions.backgroundRestricted!==true&&(permissions.backgroundAllowed===true||(permissions.backgroundAllowed===null&&permissions.backgroundRestricted===false));
   const batteryReadable=verified&&permissions.batteryOptimizationIgnored!==null;
@@ -64,7 +66,7 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
   const refreshAccessibility=useCallback(async()=>{
     try{
       const health=await ClearScreenNative.getAccessibilityHealth();
-      setAccessibilityReady(Boolean(health.permissions.skip));
+      setAccessibilityReady(health.permissions.accessibilityHealth==='unknown'?null:health.permissions.skipRunning);
     }catch{setAccessibilityReady(null)}
   },[]);
 
@@ -101,7 +103,9 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
   };
   const startAutoPair=async()=>{
     if(accessibilityReady===false){
-      showAlert('先开启自动跳过服务','净屏要靠它在配对弹窗出现时读出配对码；不开启的话，自动配对会一直等不到配对码。',[
+      showAlert('先开启自动跳过广告',permissions.accessibilitySettingEnabled
+        ? '系统开关仍显示开启，但服务尚未就绪。请在无障碍设置中将「净屏」关闭一次后重新开启，再返回配对。'
+        : '净屏要靠它在配对弹窗出现时读出配对码；不开启的话，自动配对会一直等不到配对码。',[
         {text:'取消',style:'cancel'},
         {text:'去开启',onPress:openAccessibility},
       ],{tone:'warning'});
@@ -121,21 +125,22 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
     }catch(error){fail('停止失败',error)}
     finally{setAdbBusy('')}
   };
-  const runConnection=async(label:string,action:()=>Promise<AdbActionResult>)=>{
-    setAdbBusy(label);
-    try{
-      const result=await action();
-      await refreshAdbStatus();
-      if(!result.ok){
-        showAlert('未连接',result.message,[
-          {text:'关闭',style:'cancel'},
-          {text:'重试',onPress:()=>{void runConnection(label,action)}},
-        ],{tone:'warning'});
-      }
-    }catch(error){
-      fail('操作失败',error);
-    }finally{setAdbBusy('')}
+  const openAdbSettings=async()=>{
+    // 已配对只需开启无线调试：后台重连一次并跳转设置页，回前台后自动连上。
+    if(adbStatus?.paired&&adbStatus.autoPairStage!=='failed'){
+      void ClearScreenNative.autoConnectAdb().catch(()=>{});
+      try{await ClearScreenNative.openDeveloperOptions()}
+      catch(error){fail('无法打开系统设置',error)}
+      return;
+    }
+    await startPairingAndOpenSettings();
   };
+  const showAdbSettingsGuide=()=>showAlert('开启无线调试',`1. 在开发者选项中打开「无线调试」
+2. 未配对时点「使用配对码配对设备」，保持窗口打开
+3. 返回本页，开关会自动开启`,[
+    {text:'取消',style:'cancel'},
+    {text:'去设置',onPress:()=>{void openAdbSettings()}},
+  ],{tone:'warning'});
   const disconnect=async()=>{
     setAdbBusy('disconnect');
     try{
@@ -153,20 +158,6 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
       fail('无法打开系统设置',error);
     }
   };
-  const connectAutomatically=async(status:AdbAccessStatus)=>{
-    if(!status.supported){
-      showAlert('无法连接','这台手机不支持无线调试。',undefined,{tone:'warning'});
-      return;
-    }
-    if(status.paired){
-      await runConnection('auto',()=>ClearScreenNative.autoConnectAdb());
-      return;
-    }
-    showAlert('请开启无线调试','请在开发者选项中开启「无线调试」，再点「使用配对码配对设备」。配对窗口保持打开，净屏会自动完成连接。',[
-      {text:'取消',style:'cancel'},
-      {text:'去设置',onPress:()=>{void startPairingAndOpenSettings()}},
-    ],{tone:'warning'});
-  };
   const toggleAdb=async()=>{
     if(adbBusy)return;
     let status=adbStatus;
@@ -178,17 +169,17 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
     if(!status){showAlert('无法读取连接状态','请稍后再试。',undefined,{tone:'error'});return}
     if(status.connected){await disconnect();return}
     if(AUTO_PAIR_STAGES.has(status.autoPairStage??'')){await stopAutoPair();return}
-    // A failed attempt starts over from the pairing dialog instead of retrying
-    // a connection whose pairing may never have completed.
-    await connectAutomatically(status.autoPairStage==='failed'?{...status,paired:false}:status);
+    if(!status.supported){showAlert('无法连接','这台手机不支持无线调试。',undefined,{tone:'warning'});return}
+    // 开启开关时给出操作提示并跳转设置页，不再静默重试。
+    showAdbSettingsGuide();
   };
-  const retryRef=useRef<()=>void>(()=>{});
-  retryRef.current=()=>{void toggleAdb()};
+  const guideRef=useRef<()=>void>(()=>{});
+  guideRef.current=()=>{void openAdbSettings()};
   useEffect(()=>{
     if(!adbFailText)return;
     showAlert('连接失败',adbFailText,[
       {text:'关闭',style:'cancel'},
-      {text:'重试连接',onPress:()=>retryRef.current()},
+      {text:'去设置',onPress:()=>guideRef.current()},
     ],{tone:'error'});
   },[adbFailText]);
   useEffect(()=>{
@@ -197,9 +188,9 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
     const timer=setTimeout(()=>{
       setAdbBusy('');
       void refreshAdbStatus();
-      showAlert('连接没有完成','等了很久仍没有结果，请确认无线调试已开启，再点按开关重试。',[
+      showAlert('连接没有完成','等了很久仍没有结果，请确认无线调试已开启。',[
         {text:'关闭',style:'cancel'},
-        {text:'重试连接',onPress:()=>retryRef.current()},
+        {text:'去设置',onPress:()=>guideRef.current()},
       ],{tone:'warning'});
     },150000);
     return()=>clearTimeout(timer);
@@ -208,10 +199,11 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
       {text:'取消',style:'cancel'},
       {text:'去设置',onPress:onOpen},
     ],{tone:'warning'});
-  const openAccessibilityGuide=()=>showSettingsGuide('开启自动跳过服务','在无障碍服务列表中找到「净屏」，开启服务并允许系统确认提示。',onOpenAccessibility);
-  const openStartupGuide=()=>showSettingsGuide('开启开机自启动',permissions.isVivoFamily&&permissions.vendorStartupSettingsAvailable
-    ? '在 vivo「自启动管理」中找到「净屏」，开启「自启动」。'
-    : '在系统设置中找到「净屏」，允许应用开机自启动。',onStartup);
+  const openStartupGuide=()=>showSettingsGuide(sleepingManagement?'设置休眠管理':'开启开机自启动',sleepingManagement
+    ? '在「电池 → 后台使用限制 → 从不休眠的应用」中添加「净屏」。这项设置由三星系统管理。'
+    : permissions.isVivoFamily&&permissions.vendorStartupSettingsAvailable
+      ? '在 vivo「自启动管理」中找到「净屏」，开启「自启动」。'
+      : '在系统设置中找到「净屏」，允许应用开机自启动。',onStartup);
   const openBackgroundGuide=()=>showSettingsGuide('允许后台运行','在打开的系统页面中允许「净屏」后台运行，或移除对净屏的后台限制。',onBackground);
   const openBatteryGuide=()=>showSettingsGuide('设置电池优化','在电池优化列表中找到「净屏」，设置为「不优化」或「不受限制」。',onBatteryOptimization);
   const rowLead=(title:string)=><>
@@ -248,11 +240,11 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
   return <Background><ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
     <TopBar compact title="服务与权限" onBack={onBack}/>
     {verified
-      ? switchRow('自动跳过服务',permissions.accessibilitySettingEnabled,openAccessibilityGuide,false,skipStatusText,skipUnknown||skipNeedsRepair,skipPending)
-      : settingsRow('自动跳过服务',verificationStatus,openAccessibilityGuide,checking)}
+      ? switchRow('自动跳过广告',permissions.accessibilitySettingEnabled,onRequestAccessibilityEnable,false,skipStatusText,skipUnknown||skipNeedsRepair,skipPending)
+      : settingsRow('自动跳过广告',verificationStatus,onRequestAccessibilityEnable,checking)}
     {startupReadable
       ? switchRow('开机自启动',startupEnabled,openStartupGuide,false,startupStatusText,false,false)
-      : settingsRow('开机自启动',startupStatusText,openStartupGuide,checking)}
+      : settingsRow(sleepingManagement?'休眠管理':'开机自启动',sleepingManagement?'由系统管理':startupStatusText,openStartupGuide,checking)}
     {backgroundReadable
       ? switchRow('后台运行',backgroundEnabled,openBackgroundGuide,false,backgroundStatusText,false,false)
       : settingsRow('后台运行',backgroundStatusText,openBackgroundGuide,checking)}
@@ -263,8 +255,8 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
       (!adbStatus&&!adbReadFailed)||!!adbBusy||(!!adbConnecting&&!autoRunning),adbStateText,!adbStatus&&adbReadFailed,adbPending,
       adbFailed?<View style={s.failBox}>
         <Text style={s.failText}>{adbFailText||'连接没有完成'}</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="重试连接" onPress={()=>{void toggleAdb()}} hitSlop={8}>
-          <Text style={s.retryText}>重试连接</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="去设置" onPress={()=>{void openAdbSettings()}} hitSlop={8}>
+          <Text style={s.retryText}>去设置</Text>
         </Pressable>
       </View>:null):null}
   </ScrollView></Background>;

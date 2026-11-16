@@ -128,6 +128,7 @@ internal object ClearScreenAdbOperations {
         rememberEndpoint(context, host, port)
         synchronized(lock) { this.host = host; this.port = port; state = State.CONNECTED; message = "已连接" }
       }
+      grantSecureSettings(context, active)
       result(true, "已连接")
     } catch (error: AdbAuthenticationFailedException) {
       manager?.let(::dropConnection)
@@ -206,6 +207,7 @@ internal object ClearScreenAdbOperations {
         markPaired(context)
         synchronized(lock) { state = State.CONNECTED; message = "已连接" }
       }
+      grantSecureSettings(context, active)
       result(true, "已连接")
     } catch (error: Exception) {
       manager?.let(::dropConnection)
@@ -225,6 +227,44 @@ internal object ClearScreenAdbOperations {
 
   fun isVerifiedConnected(): Boolean = synchronized(lock) {
     state == State.CONNECTED && runCatching { client?.isConnected() == true }.getOrDefault(false)
+  }
+
+  /**
+   * Cheap liveness probe. Wireless debugging reaps idle sockets while the UI
+   * still claims "connected"; probing keeps the channel warm and a dead socket
+   * is dropped immediately so the next restore can replace it.
+   */
+  fun keepAlive(): Boolean {
+    val active = synchronized(lock) {
+      if (state != State.CONNECTED) return false
+      client
+    } ?: return false
+    return try {
+      executeInternal(active, "echo", 5L, 1_000L, null)
+      true
+    } catch (error: Exception) {
+      synchronized(lock) {
+        if (state == State.CONNECTED) { state = State.ERROR; message = "连接已断开，请重新连一次" }
+      }
+      false
+    }
+  }
+
+  /**
+   * Best effort: once the shell channel is verified, let the app re-enable the
+   * wireless debugging toggle itself when the system/OEM turns it off, instead
+   * of leaving the "系统设置权限" row permanently closed.
+   */
+  private fun grantSecureSettings(context: Context, manager: ClearScreenAdbClient) {
+    runCatching {
+      executeInternal(
+        manager,
+        "pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS",
+        10L,
+        4_000L,
+        null,
+      )
+    }
   }
 
   /** Used by ClearScreenShellOps through the shared runner interface. */

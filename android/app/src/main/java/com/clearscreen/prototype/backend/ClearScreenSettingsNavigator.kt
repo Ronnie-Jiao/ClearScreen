@@ -5,8 +5,11 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.widget.Toast
 
@@ -14,15 +17,24 @@ import android.widget.Toast
 internal class ClearScreenSettingsNavigator(private val context: Context) {
   private val family = ClearScreenOemProfile.current()
 
-  fun hasStartupSettings(): Boolean = startupCandidates().any(::canOpen)
+  val startupManagement: String get() = if (family == ClearScreenOemProfile.SAMSUNG) "sleeping" else "autostart"
 
-  fun openStartupSettings() = openFirst(startupCandidates() + appSettingsFallbacks())
+  fun hasStartupSettings(): Boolean = startupCandidates().any { canOpen(it) && trustedSettings(it) }
 
-  fun openBackgroundSettings() = openFirst(backgroundCandidates() + appSettingsFallbacks())
+  fun openStartupSettings() = openPermissionSettings(startupCandidates(), if (startupManagement == "sleeping") "休眠管理" else "开机自启动")
 
-  fun openBatteryOptimizationSettings() = openFirst(
-    listOf(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) + appSettingsFallbacks(),
-  )
+  fun openBackgroundSettings() = openPermissionSettings(backgroundCandidates(), "后台运行")
+
+  fun openBatteryOptimizationSettings() = openPermissionSettings(
+    listOf(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)), "电池优化")
+
+  private fun openPermissionSettings(candidates: List<Intent>, title: String) {
+    if (tryOpen(candidates, systemOnly = true)) return
+    if (!tryOpen(appSettingsFallbacks(), systemOnly = true)) throw ActivityNotFoundException("No available system settings screen")
+    Handler(Looper.getMainLooper()).post {
+      Toast.makeText(context, "未找到${title}专用页面，已打开通用设置", Toast.LENGTH_LONG).show()
+    }
+  }
 
   fun openSystemPrivacySettings() = openFirst(
     listOf(Intent(Settings.ACTION_PRIVACY_SETTINGS), Intent(Settings.ACTION_SETTINGS)),
@@ -178,9 +190,10 @@ internal class ClearScreenSettingsNavigator(private val context: Context) {
     notifySettingsFallback(notice)
   }
 
-  private fun tryOpen(candidates: List<Intent>): Boolean {
+  private fun tryOpen(candidates: List<Intent>, systemOnly: Boolean = false): Boolean {
     for (candidate in candidates) {
       if (!canOpen(candidate)) continue
+      if (systemOnly && !trustedSettings(candidate)) continue
       try {
         context.startActivity(Intent(candidate).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         return true
@@ -213,6 +226,12 @@ internal class ClearScreenSettingsNavigator(private val context: Context) {
     ClearScreenOemProfile.ONEPLUS -> listOf(
       component("com.oneplus.security", "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity"),
     ) + colorOsStartupCandidates()
+    // Samsung publishes this action for Never sleeping apps; it is not an
+    // autostart grant. Keep the UI and observer semantics distinct.
+    ClearScreenOemProfile.SAMSUNG -> listOf(
+      Intent("com.samsung.android.sm.ACTION_OPEN_CHECKABLE_LISTACTIVITY")
+        .setPackage("com.samsung.android.lool").putExtra("activity_type", 2),
+    ) + backgroundCandidates()
     ClearScreenOemProfile.ASUS -> listOf(
       component("com.asus.mobilemanager", "com.asus.mobilemanager.autostart.AutoStartActivity"),
       component("com.asus.mobilemanager", "com.asus.mobilemanager.powersaver.PowerSaverSettings"),
@@ -281,6 +300,12 @@ internal class ClearScreenSettingsNavigator(private val context: Context) {
     activity.enabled && activity.applicationInfo.enabled && activity.exported &&
       (activity.permission.isNullOrEmpty() ||
         context.checkSelfPermission(activity.permission) == PackageManager.PERMISSION_GRANTED)
+  }.getOrDefault(false)
+
+  private fun trustedSettings(intent: Intent): Boolean = runCatching {
+    val activity = intent.resolveActivityInfo(context.packageManager, 0) ?: return@runCatching false
+    activity.packageName in family.readableSettingsPackages &&
+      activity.applicationInfo.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
   }.getOrDefault(false)
 
   private fun openFirst(candidates: List<Intent>) {

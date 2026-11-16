@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, BackHandler, Platform, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
 import { initialWindowMetrics, SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FONT_TAGLINE, FONT_TAGLINE_SOURCE } from './src/assets';
 import { ScreenInsetsContext } from './src/components/ScreenInsets';
 import { AppDialogProvider, useAppAlert } from './src/components/AppDialog';
-import PermissionsScreen from './src/screens/PermissionsScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import AppsScreen from './src/screens/AppsScreen';
 import AdsScreen from './src/screens/AdsScreen';
@@ -23,12 +24,13 @@ import IOSSafariScreen from './src/screens/IOSSafariScreen';
 import { AppItem, LogItem, LearnedCloseRecord } from './src/data';
 import { BackendSnapshot, ClearScreenNative, pickAccessibilityPermissions, type BackendPermissions, type AdLearningState } from './src/native/ClearScreenNative';
 
-type Page='permissions'|'home'|'apps'|'appManagement'|'appDetail'|'records'|'recordDetail'|'learnedRecords'|'settings'|'servicePermissions'|'systemRecommend'|'appNotifications'|'marketingChannels'|'whitelist'|SettingsSection;
+type Page='home'|'apps'|'appManagement'|'appDetail'|'records'|'recordDetail'|'learnedRecords'|'settings'|'servicePermissions'|'systemRecommend'|'appNotifications'|'marketingChannels'|'whitelist'|SettingsSection;
 type MainTab='home'|'apps'|'settings';
-type SettingsHandoff='accessibility'|'appInfo'|'startup'|'background'|'battery'|null;
+type SettingsHandoff='accessibility'|'startup'|'background'|'battery'|null;
 type RecordsQuery={appId?:string;todayOnly?:boolean};
 export default function App(){
- return <SafeAreaProvider initialMetrics={initialWindowMetrics}><AppDialogProvider><AppContent/></AppDialogProvider></SafeAreaProvider>;
+ const [fontsLoaded]=useFonts({[FONT_TAGLINE]:FONT_TAGLINE_SOURCE});
+ return <SafeAreaProvider initialMetrics={initialWindowMetrics}>{fontsLoaded?<AppDialogProvider><AppContent/></AppDialogProvider>:null}</SafeAreaProvider>;
 }
 function AppContent(){
  const showAlert=useAppAlert();
@@ -43,7 +45,6 @@ function AppContent(){
  const [recordsQuery,setRecordsQuery]=useState<RecordsQuery>({});
  const [accessibilityChecking,setAccessibilityChecking]=useState(false);
  const [permissionVerification,setPermissionVerification]=useState<'idle'|'checking'|'failed'>('idle');
- const [onboardingCompleted,setOnboardingCompleted]=useState(false);
  const [master,setMaster]=useState(false);
  const [learning,setLearning]=useState<AdLearningState>({active:false,count:0,message:'',records:[]});
  const learningBusy=useRef(false);
@@ -64,7 +65,6 @@ function AppContent(){
  const appRuleSaveQueue=useRef<Promise<void>>(Promise.resolve());
  const applySnapshot=useCallback((snapshot:BackendSnapshot,includePermissions=true)=>{
    setVersionName(snapshot.versionName);
-   setOnboardingCompleted(snapshot.onboardingCompleted);
    setApps(snapshot.apps);
    setLogs(snapshot.logs);
    setMaster(snapshot.masterEnabled);
@@ -106,7 +106,7 @@ function AppContent(){
    permissionRefreshVersion.current+=1;
    settingsHandoff.current=destination;
    setPermissionVerification('idle');
-   setAccessibilityChecking(destination==='accessibility'||destination==='appInfo');
+   setAccessibilityChecking(destination==='accessibility');
    try{await open()}catch(error){
      settingsHandoff.current=null;
      setAccessibilityChecking(false);
@@ -117,24 +117,25 @@ function AppContent(){
  const openAccessibilitySettings=useCallback(()=>{
    void openSystemSettings('accessibility',ClearScreenNative.openAccessibilitySettings);
  },[openSystemSettings]);
- const openAppDetailsSettings=useCallback(()=>{
-   void openSystemSettings('appInfo',ClearScreenNative.openAppDetailsSettings);
- },[openSystemSettings]);
- const showRestrictedSettingsGuide=useCallback(()=>{
-   showAlert(
-     '先允许受限设置',
-     '这次安装来自 USB 或本地侧载，Android 可能暂时拦截无障碍服务。请在“应用信息”右上角菜单中选择“允许受限设置”，然后回到这里重新打开无障碍。若应用信息里没有这个入口，请通过 vivo EasyShare 或可信应用商店重新安装。',
-     [
-       {text:'取消',style:'cancel'},
-       {text:'打开应用信息',onPress:openAppDetailsSettings},
-       {text:'直接去无障碍',onPress:openAccessibilitySettings},
-     ],
-   );
- },[openAccessibilitySettings,openAppDetailsSettings,showAlert]);
+ const openPermission=useCallback(async(key:'skip'|'startup'|'bg'|'battery')=>{
+   if(key==='skip')openAccessibilitySettings();
+   else if(key==='startup')await openSystemSettings('startup',ClearScreenNative.openStartupSettings);
+   else if(key==='bg')await openSystemSettings('background',ClearScreenNative.openBackgroundSettings);
+   else await openSystemSettings('battery',ClearScreenNative.openBatterySettings);
+ },[openAccessibilitySettings,openSystemSettings]);
+ const requestAccessibilityEnable=useCallback(()=>{
+   const reconnect=permissions.accessibilitySettingEnabled&&(!permissions.accessibilityServiceBound||permissions.accessibilityHealth==='unavailable');
+   showAlert(reconnect?'重新开启无障碍服务':'开启无障碍服务',reconnect
+     ? '系统保留了开启状态，但净屏服务未连接或未通过可用性检查。请在系统无障碍设置中将「净屏」关闭一次后重新开启；再检查自启动、后台运行和电池限制。返回后会自动核验。'
+     : '请在系统无障碍设置中找到「净屏」，开启服务并允许系统确认提示。返回净屏后会自动检查状态。',[
+     {text:'取消',style:'cancel'},
+     {text:'去开启',onPress:()=>{void openPermission('skip')}},
+   ],{tone:'warning'});
+ },[openPermission,showAlert,permissions.accessibilitySettingEnabled,permissions.accessibilityServiceBound,permissions.accessibilityHealth]);
  useEffect(()=>{
    let alive=true;
    let previousState=AppState.currentState;
-   refresh(()=>alive).then(snapshot=>{if(alive)setPage(Platform.OS==='ios'||snapshot?.onboardingCompleted?'home':'permissions')});
+   void refresh(()=>alive);
    const subscription=AppState.addEventListener('change',state=>{
      if(state===previousState)return;
      previousState=state;
@@ -143,7 +144,7 @@ function AppContent(){
      const current=()=>alive&&version===permissionRefreshVersion.current&&AppState.currentState==='active';
      const handoff=settingsHandoff.current;
      settingsHandoff.current=null;
-     const accessibilityReturn=handoff==='accessibility'||handoff==='appInfo';
+         const accessibilityReturn=handoff==='accessibility';
      setPermissionVerification('checking');
      if(accessibilityReturn)setAccessibilityChecking(true);
      void (async()=>{
@@ -196,10 +197,6 @@ function AppContent(){
    let focused=true;
    let timer:ReturnType<typeof setTimeout>|undefined;
    const current=(version:number)=>alive&&version===generation&&focused&&AppState.currentState==='active';
-   const clearHealth=()=>{
-     permissionStateRevision.current+=1;
-     setPermissions(value=>({...value,skipRunning:false,accessibilityHealth:'unknown'}));
-   };
    const check=async(version:number)=>{
      if(!current(version))return;
      if(inFlight){timer=setTimeout(()=>{void check(version)},500);return}
@@ -209,9 +206,12 @@ function AppContent(){
        if(!current(version))return;
        permissionStateRevision.current+=1;
        setPermissions(value=>({...value,...snapshot.permissions}));
-     }catch{
-       if(current(version))clearHealth();
-     }finally{
+    }catch{
+      // A transient binder/read failure is not proof that the accessibility
+      // service died. Keep the last confirmed switch state and only mark the
+      // health probe unknown; the next 3s poll corrects a real disconnect.
+      if(current(version))setPermissions(value=>({...value,accessibilityHealth:'unknown'}));
+    }finally{
        inFlight=false;
        if(current(version)){
          setAccessibilityChecking(false);
@@ -219,10 +219,12 @@ function AppContent(){
        }
      }
    };
-   const restart=()=>{
-     generation+=1;
-     if(timer)clearTimeout(timer);
-     clearHealth();
+  const restart=()=>{
+    generation+=1;
+    if(timer)clearTimeout(timer);
+    // Keep the last confirmed switch state while re-checking; otherwise a
+    // short read delay on every foreground return looks like the service died.
+    setPermissions(value=>({...value,accessibilityHealth:'unknown'}));
      if(focused&&AppState.currentState==='active'){
        setAccessibilityChecking(true);
        void check(generation);
@@ -234,16 +236,12 @@ function AppContent(){
    const blurSubscription=AppState.addEventListener('blur',()=>{focused=false;restart()});
    return()=>{alive=false;generation+=1;if(timer)clearTimeout(timer);subscription.remove();focusSubscription.remove();blurSubscription.remove()};
  },[page]);
- const completeOnboarding=useCallback(()=>{
-   setOnboardingCompleted(true);
-   ClearScreenNative.setOnboardingCompleted(true).catch(error=>console.warn('ClearScreen onboarding update failed',error));
- },[]);
  const go=(p:Page)=>{setHistory(h=>[...h,page]);setPage(p)};
  const back=()=>{setHistory(h=>{const copy=[...h];const p=copy.pop()||'home';setPage(p);return copy})};
  const tab=(t:MainTab)=>{setHistory([]);setPage(t)};
  useEffect(()=>{
    const settingsDetail=page==='privacyData'||page==='helpFeedback'||page==='about';
-   const settingsChild=(page==='servicePermissions'||page==='systemRecommend'||page==='appNotifications'||page==='marketingChannels'||page==='permissions')&&history.includes('settings');
+   const settingsChild=(page==='servicePermissions'||page==='systemRecommend'||page==='appNotifications'||page==='marketingChannels')&&history.includes('settings');
    if(!settingsDetail&&!settingsChild)return;
    const subscription=BackHandler.addEventListener('hardwareBackPress',()=>{
      setHistory(history.slice(0,-1));
@@ -292,10 +290,12 @@ function AppContent(){
  useEffect(()=>{
    if(Platform.OS!=='android'||(page!=='home'&&page!=='learnedRecords'))return;
    let alive=true;
+   let reading=false;
    const update=()=>{
-     if(AppState.currentState==='active'&&!learningBusy.current){
+     if(AppState.currentState==='active'&&!learningBusy.current&&!reading){
+       reading=true;
        const revision=learningRevision.current;
-       void ClearScreenNative.getAdLearningState().then(value=>{if(alive&&!learningBusy.current&&revision===learningRevision.current)setLearning(value)}).catch(()=>{});
+       void ClearScreenNative.getAdLearningState().then(value=>{if(alive&&!learningBusy.current&&revision===learningRevision.current)setLearning(value)}).catch(()=>{}).finally(()=>{reading=false});
      }
    };
    update();const timer=setInterval(update,1000);
@@ -303,8 +303,8 @@ function AppContent(){
  },[page]);
  const handleLearn=async()=>{
    if(learningBusy.current)return;
-   if(learning.active){learningBusy.current=true;learningRevision.current+=1;try{setLearning(await ClearScreenNative.stopAdLearning())}finally{learningBusy.current=false}return}
-   if(!permissions.skip||!permissions.skipRunning){go('permissions');return}
+   if(learning.active){learningBusy.current=true;learningRevision.current+=1;try{setLearning(await ClearScreenNative.stopAdLearning())}catch(error){showAlert('操作失败',error instanceof Error?error.message:String(error),undefined,{tone:'error'})}finally{learningBusy.current=false}return}
+   if(!permissions.skip||!permissions.skipRunning){requestAccessibilityEnable();return}
    if(!master){showAlert('请先开启净屏');return}
    learningBusy.current=true;learningRevision.current+=1;
    try{setLearning(await ClearScreenNative.startAdLearning())}
@@ -324,18 +324,6 @@ function AppContent(){
      }},
    ]);
  };
-  const openPermission=useCallback(async(key:'skip'|'startup'|'bg'|'battery')=>{
-    if(key==='skip'){
-      if(permissions.restrictedSettingsLikely&&!permissions.accessibilitySettingEnabled){
-        showRestrictedSettingsGuide();
-        return;
-      }
-      openAccessibilitySettings();
-    }
-   else if(key==='startup')await openSystemSettings('startup',ClearScreenNative.openStartupSettings);
-   else if(key==='bg')await openSystemSettings('background',ClearScreenNative.openBackgroundSettings);
-   else await openSystemSettings('battery',ClearScreenNative.openBatterySettings);
- },[openAccessibilitySettings,openSystemSettings,permissions,showRestrictedSettingsGuide]);
  const enabledAppCount=apps.filter(app=>app.skip).length;
  const handleRetentionChange=async(days:number)=>{
    const revision=++retentionChangeRevision.current;
@@ -364,37 +352,23 @@ function AppContent(){
    {text:'清空',style:'destructive',onPress:()=>{ClearScreenNative.clearLogs().then(applySnapshot).catch(error=>showAlert('清空失败',String(error),undefined,{tone:'error'}))}}
  ]);
  const handleHomeAction=()=>{
-   if(!permissions.skip){go('permissions');return}
-   if(!permissions.skipRunning){go('permissions');return}
+   if(!permissions.skip||!permissions.skipRunning){requestAccessibilityEnable();return}
    if(enabledAppCount===0){go('appManagement');return}
    if(!master){void toggleMaster();return}
    void toggleMaster();
  };
  const goApp=(id:string)=>{setSelectedId(id);go('appDetail')};
  const stopApp=(id:string)=>updateApps(apps.map(app=>app.id===id?{...app,skip:false,whitelist:true}:app));
- const permissionsProps={
-   skip:permissions.skip,
-   skipRunning:permissions.skipRunning,
-   accessibilityHealth:permissions.accessibilityHealth,
-   checking:accessibilityChecking,
-   restrictedSettingsLikely:permissions.restrictedSettingsLikely,
- };
  const isMainTab=page==='home'||page==='apps'||page==='settings';
  let overlay:React.ReactNode=null;
- if(page==='permissions')overlay=<PermissionsScreen onBack={back} onContinue={async()=>{
-   completeOnboarding();
-   const snapshot=await refresh();
-   if(snapshot?.permissions.skip&&snapshot.permissions.skipRunning){setHistory([]);setPage('appManagement')}
-   else tab('home');
- }} onLater={()=>{completeOnboarding();tab('home')}} permissions={permissionsProps} onOpenAccessibility={()=>openPermission('skip')} onOpenAppInfo={openAppDetailsSettings} onHelp={()=>showAlert('开启方法','在系统设置中找到“净屏”，打开无障碍服务后返回此页。')}/>;
- else if(page==='appDetail'&&selected)overlay=<AppDetailScreen app={selected} logs={logs} onBack={back} onChange={a=>updateApps(apps.map(x=>x.id===a.id?a:x))} onRecords={()=>goRecords({appId:selected.id})} onOpenRecord={openRecord}/>;
+ if(page==='appDetail'&&selected)overlay=<AppDetailScreen app={selected} logs={logs} onBack={back} onChange={a=>updateApps(apps.map(x=>x.id===a.id?a:x))} onRecords={()=>goRecords({appId:selected.id})} onOpenRecord={openRecord}/>;
  else if(page==='recordDetail'&&selectedLog){
    const logApp=apps.find(app=>app.id===selectedLog.appId);
    overlay=<RecordDetailScreen log={selectedLog} app={logApp} onBack={back} onOpenApp={()=>logApp&&goApp(logApp.id)} onStopApp={()=>logApp&&stopApp(logApp.id)}/>;
  }
  else if(page==='whitelist')overlay=<WhitelistScreen apps={apps} onChangeApps={updateApps} onBack={back}/>;
  else if(page==='learnedRecords')overlay=<LearnedCloseRecords records={learning.records} apps={apps} onBack={back} onDelete={deleteLearned}/>;
- else if(page==='servicePermissions')overlay=<ServicePermissionsScreen permissions={permissions} checking={permissionVerification==='checking'} verificationFailed={permissionVerification==='failed'} accessibilityChecking={accessibilityChecking} onBack={back} onOpenAccessibility={()=>openPermission('skip')} onStartup={()=>openPermission('startup')} onBackground={()=>openPermission('bg')} onBatteryOptimization={()=>openPermission('battery')}/>;
+ else if(page==='servicePermissions')overlay=<ServicePermissionsScreen permissions={permissions} checking={permissionVerification==='checking'} verificationFailed={permissionVerification==='failed'} accessibilityChecking={accessibilityChecking} onBack={back} onRequestAccessibilityEnable={requestAccessibilityEnable} onStartup={()=>openPermission('startup')} onBackground={()=>openPermission('bg')} onBatteryOptimization={()=>openPermission('battery')}/>;
  else if(page==='appManagement')overlay=<AppsScreen apps={apps} onChangeApps={updateApps} onOpen={goApp} onBack={back}/>;
  else if(page==='systemRecommend')overlay=<SystemRecommendScreen manufacturer={permissions.deviceManufacturer} onBack={back} onOpenSystemPrivacy={()=>{void ClearScreenNative.openSystemAdPrivacySettings().catch(()=>showAlert('无法打开系统设置','请在手机系统设置中搜索“广告”或“个性化推荐”。',undefined,{tone:'error'}))}} onOpenServicePermissions={()=>go('servicePermissions')}/>;
  else if(page==='appNotifications')overlay=<AppNotificationsScreen apps={apps} onBack={back} onOpenAccess={()=>go('servicePermissions')}/>;
@@ -402,7 +376,7 @@ function AppContent(){
  else if(page==='privacyData'||page==='helpFeedback'||page==='about')overlay=<SettingsDetailScreen key={page} section={page} logRetentionDays={settings.logRetentionDays} versionName={versionName} onBack={back} onClear={handleClearLogs} onRetentionChange={days=>handleRetentionChange(days).catch(error=>showAlert('保存失败',String(error),undefined,{tone:'error'}))} onHelpNavigate={openHelpDestination} helpSearchInput={helpSearchInput} helpSearchTerm={helpSearchTerm} onHelpSearchInputChange={setHelpSearchInput} onHelpSearchSubmit={setHelpSearchTerm}/>;
  const homeScreen=Platform.OS==='ios'
    ? <IOSSafariScreen/>
-   : <HomeScreen master={master} onAction={handleHomeAction} checking={accessibilityChecking} onTab={tab} onPermissions={()=>go('permissions')} onRecords={()=>goRecords()} onOpenRecord={openRecord} onOpenApp={goApp} apps={apps} logs={logs} permissions={permissions} enabledAppCount={enabledAppCount} onLearn={Platform.OS==='android'?()=>{void handleLearn().catch(error=>showAlert('操作失败',String(error)))}:undefined} learning={learning.active} learnedRecords={learning.records} onLearnedRecords={Platform.OS==='android'?()=>go('learnedRecords'):undefined} onDeleteLearned={Platform.OS==='android'?deleteLearned:undefined}/>;
+   : <HomeScreen master={master} onAction={handleHomeAction} checking={accessibilityChecking} onTab={tab} onEnableAccessibility={requestAccessibilityEnable} onRecords={()=>goRecords()} onOpenRecord={openRecord} onOpenApp={goApp} apps={apps} logs={logs} permissions={permissions} enabledAppCount={enabledAppCount} onLearn={Platform.OS==='android'?()=>{void handleLearn().catch(error=>showAlert('操作失败',String(error)))}:undefined} learning={learning.active}/>;
  const appsScreen=<AdsScreen onTab={tab} onOpen={page=>go(page)} onOpenAppManagement={()=>go('appManagement')}/>;
  const settingsScreen=<SettingsScreen onTab={tab} onServicePermissions={()=>go('servicePermissions')} onOpenSection={go} onRestoreDefaults={Platform.OS==='android'?handleRestoreDefaults:undefined}/>;
  const recordsScreen=<RecordsScreen apps={apps} logs={logs} onBack={back} onOpenRecord={openRecord} filterAppId={recordsQuery.appId} todayOnly={recordsQuery.todayOnly}/>;

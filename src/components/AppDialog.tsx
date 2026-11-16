@@ -1,13 +1,15 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image, ImageSourcePropType, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { C } from '../theme';
+import { DIALOG_TONE_ERROR, DIALOG_TONE_INFO, DIALOG_TONE_SUCCESS, DIALOG_TONE_WARNING } from '../assets';
 
 type DialogTone = 'info' | 'success' | 'warning' | 'error';
 export type DialogButton = {
   text?: string;
   style?: 'default' | 'cancel' | 'destructive';
+  icon?: keyof typeof Ionicons.glyphMap;
   onPress?: () => void;
 };
 type DialogOptions = { cancelable?: boolean; onDismiss?: () => void; tone?: DialogTone };
@@ -15,12 +17,26 @@ type ShowAlert = (title: string, message?: string, buttons?: DialogButton[], opt
 type DialogRequest = { id: number; title: string; message?: string; buttons: DialogButton[]; options?: DialogOptions };
 
 const AlertContext = createContext<ShowAlert | null>(null);
-const TONES: Record<DialogTone, { icon: keyof typeof Ionicons.glyphMap; color: string; background: string }> = {
-  info: { icon: 'information-circle-outline', color: C.blue, background: '#EAF4FF' },
-  success: { icon: 'checkmark-circle-outline', color: '#079E72', background: '#E5F8F1' },
-  warning: { icon: 'alert-circle-outline', color: '#CF7520', background: '#FFF3E4' },
-  error: { icon: 'close-circle-outline', color: '#DF1645', background: '#FFF0F3' },
+const TONE_ICONS: Record<DialogTone, ImageSourcePropType> = {
+  info: DIALOG_TONE_INFO,
+  success: DIALOG_TONE_SUCCESS,
+  warning: DIALOG_TONE_WARNING,
+  error: DIALOG_TONE_ERROR,
 };
+
+/** 按按钮文案推断图标；没有把握的文案不加图标。 */
+function iconForButton(button: DialogButton): keyof typeof Ionicons.glyphMap | undefined {
+  const text = button.text || '确定';
+  if (/取消|关闭|返回/.test(text)) return 'close-outline';
+  if (/稍后|以后|暂不/.test(text)) return 'time-outline';
+  if (/重试|重新|刷新|恢复|重置/.test(text)) return 'refresh-outline';
+  if (/删除|清除|清空|移除|卸载/.test(text)) return 'trash-outline';
+  if (/连接|连上|配对/.test(text)) return 'link-outline';
+  if (/授权|授予|允许/.test(text)) return 'shield-checkmark-outline';
+  if (/去|前往|打开|开启|设置/.test(text)) return 'open-outline';
+  if (/确定|完成|好的|知道了|继续|应用|保存/.test(text)) return 'checkmark-outline';
+  return undefined;
+}
 
 export function AppDialog({ visible, title, message, children, buttons, tone = 'info', cancelable = false, onRequestClose }: {
   visible: boolean;
@@ -34,7 +50,6 @@ export function AppDialog({ visible, title, message, children, buttons, tone = '
 }) {
   const { height, width, fontScale } = useWindowDimensions();
   const stacked = buttons.length > 2 || fontScale > 1.25 || buttons.some(button => (button.text?.length || 0) > 6) || width < 340;
-  const palette = TONES[tone];
   const dismiss = () => { if (cancelable) onRequestClose(); };
 
   return <Modal visible={visible} transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={dismiss}>
@@ -43,8 +58,8 @@ export function AppDialog({ visible, title, message, children, buttons, tone = '
       <View accessibilityViewIsModal onAccessibilityEscape={dismiss} style={[s.card, { maxHeight: height - 64 }]}>
         <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false} bounces={false}>
           <View style={s.heading}>
-            <View importantForAccessibility="no-hide-descendants" style={[s.icon, { backgroundColor: palette.background }]}>
-              <Ionicons name={palette.icon} size={27} color={palette.color}/>
+            <View importantForAccessibility="no-hide-descendants" style={s.icon}>
+              <Image source={TONE_ICONS[tone]} style={s.iconImg} accessibilityIgnoresInvertColors/>
             </View>
             <Text accessibilityRole="header" style={s.title}>{title}</Text>
           </View>
@@ -56,11 +71,12 @@ export function AppDialog({ visible, title, message, children, buttons, tone = '
         <View style={[s.actions, stacked && s.actionsStacked]}>
           {buttons.map((button, index) => {
             const secondary = button.style === 'cancel' || (buttons.length > 1 && index < buttons.length - 1 && button.style !== 'destructive');
-            const colors = button.style === 'destructive' ? ['#E62050', '#CC1642'] as const : ['#0A69DD', '#0877CC'] as const;
+            const colors = ['#0A69DD', '#0877CC'] as const;
             const label = button.text || '确定';
+            const icon = button.icon ?? iconForButton(button);
             return <Pressable key={`${index}-${label}`} accessibilityRole="button" onPress={button.onPress} style={({ pressed }) => [s.button, !stacked && s.buttonRow, pressed && s.pressed]}>
-              {secondary ? <View style={[s.buttonFill, s.secondary]}><Text style={[s.buttonText, s.secondaryText]}>{label}</Text></View> :
-                <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.buttonFill}><Text style={s.buttonText}>{label}</Text></LinearGradient>}
+              {secondary ? <View style={[s.buttonFill, s.secondary]}>{icon ? <Ionicons name={icon} size={15} color={C.text2}/> : null}<Text style={[s.buttonText, s.secondaryText]}>{label}</Text></View> :
+                <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.buttonFill}>{icon ? <Ionicons name={icon} size={15} color="#FFFFFF"/> : null}<Text style={s.buttonText}>{label}</Text></LinearGradient>}
             </Pressable>;
           })}
         </View>
@@ -112,21 +128,22 @@ export function useAppAlert(): ShowAlert {
 const s = StyleSheet.create({
   root: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 32 },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(8,26,52,0.42)' },
-  card: { width: '100%', maxWidth: 400, backgroundColor: C.surface, borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,0.9)', shadowColor: '#092868', shadowOpacity: 0.18, shadowRadius: 28, shadowOffset: { width: 0, height: 14 }, elevation: 20 },
+  card: { width: '100%', maxWidth: 400, backgroundColor: C.surface, borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.9)', shadowColor: '#092868', shadowOpacity: 0.18, shadowRadius: 28, shadowOffset: { width: 0, height: 14 }, elevation: 20 },
   scroll: { flexGrow: 0, flexShrink: 1 },
-  content: { padding: 22 },
-  heading: { flexDirection: 'row', alignItems: 'center', gap: 13 },
-  icon: { width: 46, height: 46, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  title: { flex: 1, fontSize: 20, lineHeight: 28, fontWeight: '900', color: C.navy },
-  body: { marginTop: 16 },
-  message: { fontSize: 15, lineHeight: 24, fontWeight: '500', color: C.text2 },
-  actions: { flexDirection: 'row', gap: 10, paddingHorizontal: 22, paddingBottom: 22 },
+  content: { padding: 18 },
+  heading: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  icon: { width: 38, height: 38 },
+  iconImg: { width: 38, height: 38 },
+  title: { flex: 1, fontSize: 17, lineHeight: 24, fontWeight: '800', color: C.navy },
+  body: { marginTop: 11 },
+  message: { fontSize: 13, lineHeight: 20, fontWeight: '500', color: C.text2 },
+  actions: { flexDirection: 'row', gap: 10, paddingHorizontal: 18, paddingBottom: 18 },
   actionsStacked: { flexDirection: 'column' },
-  button: { borderRadius: 15, overflow: 'hidden' },
+  button: { borderRadius: 13, overflow: 'hidden' },
   buttonRow: { flex: 1 },
-  buttonFill: { minHeight: 48, paddingVertical: 13, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
-  buttonText: { fontSize: 15, lineHeight: 22, fontWeight: '800', color: '#FFFFFF', textAlign: 'center' },
-  secondary: { backgroundColor: '#EDF4FA' },
+  buttonFill: { minHeight: 42, paddingVertical: 10, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
+  buttonText: { fontSize: 13, lineHeight: 19, fontWeight: '700', color: '#FFFFFF', textAlign: 'center' },
+  secondary: { backgroundColor: '#EDF4FA', borderWidth: 1, borderColor: 'rgba(11,120,242,0.10)' },
   secondaryText: { color: C.text2 },
   pressed: { opacity: 0.78 },
 });

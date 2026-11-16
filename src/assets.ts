@@ -4,6 +4,13 @@ export const LOGO: ImageSourcePropType = require('../assets/logo.png');
 export const UI_BACKGROUND: ImageSourcePropType = require('../assets/ui-background.png');
 export const SPLASH_BACKGROUND: ImageSourcePropType = require('../assets/splash-background.png');
 
+// Handwritten signature-style brand tagline font (ZhiMangXing 志莽行书 subset, 2026-11-16;
+// replaces the earlier MaShanZheng subset per user feedback — user wanted a "signature" look).
+// NOTE: subset only contains the slogan glyphs 「净化屏幕 畅享生活」(+「净屏ClearScreen」、punctuation).
+// If the tagline copy changes, re-subset the font to include the new characters.
+export const FONT_TAGLINE = 'BrandTaglineHand';
+export const FONT_TAGLINE_SOURCE = require('../assets/fonts/brand-tagline-zhimangxing.ttf');
+
 // Transparent PNG art supplied with the 2026-11-15 home screen design.
 export const HOME_PAUSE: ImageSourcePropType = require('../assets/home/pause-circle.png');
 export const HOME_PLAY: ImageSourcePropType = require('../assets/home/play-circle.png');
@@ -18,7 +25,14 @@ export const ADS_APP_MANAGEMENT: ImageSourcePropType = require('../assets/ads/ap
 export const ADS_SYSTEM_RECOMMEND: ImageSourcePropType = require('../assets/ads/system-recommendations.png');
 export const ADS_APP_NOTIFICATIONS: ImageSourcePropType = require('../assets/ads/app-notifications.png');
 export const ADS_MARKETING_NOTIFICATIONS: ImageSourcePropType = require('../assets/ads/marketing-notifications.png');
+export const ADS_LEARNED_CLOSE: ImageSourcePropType = require('../assets/ads/learned-close.png');
 export const ADS_SHIELD: ImageSourcePropType = require('../assets/ads/shield-hologram.png');
+
+// Dialog tone icons in the same rounded-square style as the ads icons (2026-11-16).
+export const DIALOG_TONE_INFO: ImageSourcePropType = require('../assets/dialog/tone-info.png');
+export const DIALOG_TONE_SUCCESS: ImageSourcePropType = require('../assets/dialog/tone-success.png');
+export const DIALOG_TONE_WARNING: ImageSourcePropType = require('../assets/dialog/tone-warning.png');
+export const DIALOG_TONE_ERROR: ImageSourcePropType = require('../assets/dialog/tone-error.png');
 
 // Rounded transparent row icons supplied with the 2026-11-15 service & permissions design.
 export const PERM_AUTO_SKIP: ImageSourcePropType = require('../assets/permissions/auto-skip.png');

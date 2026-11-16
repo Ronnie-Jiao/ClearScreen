@@ -34,6 +34,7 @@ export type BackendPermissions = {
   batteryOptimizationIgnored: boolean | null;
   backgroundRestricted: boolean | null;
   startupAllowed: boolean | null;
+  startupManagement?: 'autostart' | 'sleeping';
   backgroundAllowed: boolean | null;
   isVivoFamily: boolean;
   vendorStartupSettingsAvailable: boolean;
@@ -66,7 +67,7 @@ export type InstallSourceDiagnostics = {
 };
 
 export type CleanupAccess = { running: boolean; granted: boolean; adbSupported?: boolean; adbConnected?: boolean; adbState?: string };
-export type AppNotificationState = { packageName: string; enabled: boolean };
+export type AppNotificationState = { packageName: string; enabled: boolean | null };
 export type AppNotificationResult = 'enabled' | 'disabled' | 'already_enabled' | 'already_disabled';
 export type AdbAccessStatus = {
   supported: boolean;
@@ -144,7 +145,7 @@ const native = Platform.OS === 'android' ? NativeModules.ClearScreenBackend : un
 
 type SettingsMethod='openAccessibilitySettings'|'openAppDetailsSettings'|'openStartupSettings'|'openBackgroundSettings'|'openBatterySettings'|'openSystemPrivacySettings'|'openSystemAdPrivacySettings'|'openSystemHomeSettings'|'openAppNotificationSettings'|'openVendorStore'|'openMarketingChannel'|'openDeveloperOptions'|'openNotificationAccessSettings';
 async function openNativeSettings(method: SettingsMethod, ...args: string[]): Promise<void> {
-  if (typeof native?.[method] !== 'function' || await native[method](...args) !== true) {
+  if (typeof native?.[method] !== 'function' || await withNativeTimeout<any>(native[method](...args), 8000, '系统设置打开超时，请重试') !== true) {
     throw new Error('系统设置入口不可用');
   }
 }
@@ -280,6 +281,7 @@ export function normalizeSnapshot(raw: any): BackendSnapshot {
       batteryOptimizationIgnored: typeof raw.batteryOptimizationIgnored === 'boolean' ? raw.batteryOptimizationIgnored : null,
       backgroundRestricted: typeof raw.backgroundRestricted === 'boolean' ? raw.backgroundRestricted : null,
       startupAllowed: typeof raw.startupAllowed === 'boolean' ? raw.startupAllowed : null,
+      startupManagement: raw.startupManagement === 'sleeping' ? 'sleeping' : 'autostart',
       backgroundAllowed: typeof raw.backgroundAllowed === 'boolean' ? raw.backgroundAllowed : null,
       isVivoFamily: Boolean(raw.isVivoFamily),
       vendorStartupSettingsAvailable: Boolean(raw.vendorStartupSettingsAvailable),
@@ -309,32 +311,32 @@ export const ClearScreenNative = {
   available: Boolean(native),
   getAdLearningState: async (): Promise<AdLearningState> => {
     if (!native?.getAdLearningState) return {active:false,count:0,message:'',records:[]};
-    const state = await native.getAdLearningState();
+    const state = await withNativeTimeout<any>(native.getAdLearningState(), 4000, '学习状态读取超时，请重试');
     return {...state, records: Array.isArray(state.records) ? state.records : []};
   },
   startAdLearning: async (): Promise<AdLearningState> => {
     if (!native?.startAdLearning) throw new Error('当前客户端尚未接入学习关闭');
-    const state = await native.startAdLearning();
+    const state = await withNativeTimeout<any>(native.startAdLearning(), 8000, '学习关闭启动超时，请重试');
     return {...state, records: Array.isArray(state.records) ? state.records : []};
   },
   stopAdLearning: async (): Promise<AdLearningState> => {
     if (!native?.stopAdLearning) throw new Error('学习关闭不可用');
-    const state = await native.stopAdLearning();
+    const state = await withNativeTimeout<any>(native.stopAdLearning(), 8000, '学习关闭停止超时，请重试');
     return {...state, records: Array.isArray(state.records) ? state.records : []};
   },
   clearAdLearning: async (): Promise<AdLearningState> => {
     if (!native?.clearAdLearning) throw new Error('学习关闭不可用');
-    const state = await native.clearAdLearning();
+    const state = await withNativeTimeout<any>(native.clearAdLearning(), 8000, '学习规则清除超时，请重新检查');
     return {...state, records: Array.isArray(state.records) ? state.records : []};
   },
   deleteAdLearningRule: async (id: string): Promise<AdLearningState> => {
     if (!native?.deleteAdLearningRule) throw new Error('当前客户端尚未接入单条删除');
-    const state = await native.deleteAdLearningRule(id);
+    const state = await withNativeTimeout<any>(native.deleteAdLearningRule(id), 8000, '学习规则删除超时，请重新检查');
     return {...state, records: Array.isArray(state.records) ? state.records : []};
   },
   getSnapshot: async (): Promise<BackendSnapshot> => {
     if (!native?.getSnapshot) return fallbackSnapshot();
-    return normalizeSnapshot(await native.getSnapshot());
+    return normalizeSnapshot(await withNativeTimeout(native.getSnapshot(), 15_000, '数据读取超时，请重试'));
   },
   getPermissionSnapshot: async (): Promise<Pick<BackendSnapshot,'privacyConsentAccepted'|'permissions'>> => {
     if (native?.getPermissionSnapshot) return normalizeSnapshot(await withPermissionTimeout(native.getPermissionSnapshot()));
@@ -351,53 +353,53 @@ export const ClearScreenNative = {
     if (!native?.acceptPrivacyPolicy) {
       return { ...fallbackSnapshot(), backendReady: true, privacyConsentAccepted: true };
     }
-    return normalizeSnapshot(await native.acceptPrivacyPolicy());
+    return normalizeSnapshot(await withNativeTimeout<any>(native.acceptPrivacyPolicy(), 20000, '初始化超时，请重试'));
   },
   withdrawPrivacyConsent: async (): Promise<BackendSnapshot> => {
     if (!native?.withdrawPrivacyConsent) return fallbackSnapshot();
-    return normalizeSnapshot(await native.withdrawPrivacyConsent());
+    return normalizeSnapshot(await withNativeTimeout<any>(native.withdrawPrivacyConsent(), 20000, '数据清理超时，请重新检查'));
   },
   setOnboardingCompleted: async (completed: boolean) => {
-    if (native?.setOnboardingCompleted) await native.setOnboardingCompleted(completed);
+    if (native?.setOnboardingCompleted) await withNativeTimeout<any>(native.setOnboardingCompleted(completed), 6000, '设置保存超时，请重试');
   },
   setMasterEnabled: async (enabled: boolean) => {
-    if (native?.setMasterEnabled) await native.setMasterEnabled(enabled);
+    if (native?.setMasterEnabled) await withNativeTimeout<any>(native.setMasterEnabled(enabled), 6000, '开关操作超时，请重新检查');
   },
   setAppRule: async (app: AppItem) => {
     if (native?.setAppRule) {
-      await native.setAppRule(app.packageName || app.id, app.skip, false, !app.skip);
+      await withNativeTimeout<any>(native.setAppRule(app.packageName || app.id, app.skip, false, !app.skip), 6000, '应用规则保存超时，请重新检查');
     }
   },
   setAppRules: async (apps: AppItem[]) => {
     if (native?.setAppRules) {
-      await native.setAppRules(apps.map(app => ({
+      await withNativeTimeout(native.setAppRules(apps.map(app => ({
         packageName: app.packageName || app.id,
         skipEnabled: app.skip,
-      })));
+      }))), 8000, '应用规则保存超时，请重新检查');
     } else if (native?.setAppRule) {
       // Keep development clients using an older native module compatible.
       await Promise.all(apps.map(app =>
-        native.setAppRule(app.packageName || app.id, app.skip, false, !app.skip),
+        withNativeTimeout<any>(native.setAppRule(app.packageName || app.id, app.skip, false, !app.skip), 6000, '应用规则保存超时，请重新检查'),
       ));
     }
   },
   setLogRetentionDays: async (days: number) => {
     if (!native?.setLogRetentionDays) return;
-    await native.setLogRetentionDays(days);
+    await withNativeTimeout<any>(native.setLogRetentionDays(days), 6000, '设置保存超时，请重试');
   },
   setSetting: async (
     key: 'startup' | 'autoUpdate' | 'debug' | 'skipSplashVideo' | 'closePopupAds' | 'closeFeedAds',
     enabled: boolean,
   ) => {
-    if (native?.setSetting) await native.setSetting(key, enabled);
+    if (native?.setSetting) await withNativeTimeout<any>(native.setSetting(key, enabled), 6000, '设置保存超时，请重试');
   },
   restoreDefaults: async (): Promise<BackendSnapshot> => {
     if (!native?.restoreDefaults) throw new Error('Restoring settings is unavailable');
-    return normalizeSnapshot(await native.restoreDefaults());
+    return normalizeSnapshot(await withNativeTimeout<any>(native.restoreDefaults(), 20000, '恢复默认超时，请重新检查'));
   },
   clearLogs: async () => {
     if (!native?.clearLogs) return fallbackSnapshot();
-    return normalizeSnapshot(await native.clearLogs());
+    return normalizeSnapshot(await withNativeTimeout<any>(native.clearLogs(), 20000, '记录清除超时，请重新检查'));
   },
   openAccessibilitySettings: () => openNativeSettings('openAccessibilitySettings'),
   openAppDetailsSettings: () => openNativeSettings('openAppDetailsSettings'),
@@ -409,7 +411,7 @@ export const ClearScreenNative = {
   openSystemHomeSettings: () => openNativeSettings('openSystemHomeSettings'),
   openRecommendRoute: async (route: string): Promise<RecommendRouteResult> => {
     if (typeof native?.openRecommendRoute !== 'function') throw new Error('系统设置入口不可用');
-    const landed = await native.openRecommendRoute(route);
+    const landed = await withNativeTimeout<any>(native.openRecommendRoute(route), 8000, '系统设置打开超时，请重试');
     const level = landed?.level;
     return {
       level: level === 'vendor' || level === 'system' ? level : 'appDetails',
@@ -423,7 +425,7 @@ export const ClearScreenNative = {
   openNotificationAccessSettings: () => openNativeSettings('openNotificationAccessSettings'),
   openDeveloperOptions: async (): Promise<'developer' | 'settingsHome'> => {
     if (typeof native?.openDeveloperOptions !== 'function') throw new Error('系统设置入口不可用');
-    return await native.openDeveloperOptions() === 'settingsHome' ? 'settingsHome' : 'developer';
+    return await withNativeTimeout<any>(native.openDeveloperOptions(), 8000, '系统设置打开超时，请重试') === 'settingsHome' ? 'settingsHome' : 'developer';
   },
   getAdbAccessStatus: async (): Promise<AdbAccessStatus> => {
     if (!native?.getAdbAccessStatus) throw new Error('此设备不支持直接改系统设置');
@@ -451,83 +453,87 @@ export const ClearScreenNative = {
   },
   disconnectAdb: async (): Promise<void> => {
     if (!native?.disconnectAdb) throw new Error('此设备不支持直接改系统设置');
-    await native.disconnectAdb();
+    await withNativeTimeout(native.disconnectAdb(), 10_000, '断开连接超时，请重试');
   },
   getCleanupAccessStatus: async (): Promise<CleanupAccess> => {
     if (!native?.getCleanupAccessStatus) throw new Error('此设备不支持系统清理');
-    return native.getCleanupAccessStatus();
+    return withNativeTimeout(native.getCleanupAccessStatus(), 8_000, '权限状态读取超时');
   },
   requestCleanupAccess: async (): Promise<boolean> => {
     if (!native?.requestCleanupAccess) throw new Error('此设备不支持系统清理');
-    return native.requestCleanupAccess();
+    return withNativeTimeout<any>(native.requestCleanupAccess(), 10000, '授权请求超时，请重新检查');
   },
   inspectCleanupTargets: async (): Promise<CleanupTarget[]> => {
     if (!native?.inspectCleanupTargets) throw new Error('此设备不支持系统清理');
-    return native.inspectCleanupTargets();
+    return withNativeTimeout(native.inspectCleanupTargets(), 30_000, '清理项扫描超时，请重试');
   },
   changeCleanupTarget: async (id: string, restore: boolean): Promise<{ result: string }> => {
     if (!native?.changeCleanupTarget) throw new Error('此设备不支持系统清理');
-    return native.changeCleanupTarget(id, restore);
+    return withNativeTimeout(native.changeCleanupTarget(id, restore), 30_000, '系统命令超时，请重试');
   },
   readAppNotificationStates: async (packageNames: string[]): Promise<AppNotificationState[]> => {
     if (!native?.readAppNotificationStates) throw new Error('此设备不支持读取应用通知状态');
-    const list = await native.readAppNotificationStates(packageNames);
+    const list = await withNativeTimeout(native.readAppNotificationStates(packageNames), 30_000, '通知状态读取超时，请重试');
     return Array.isArray(list)
-      ? list.map((item: any) => ({ packageName: String(item?.packageName || ''), enabled: Boolean(item?.enabled) }))
+      ? list.map((item: any) => ({
+          packageName: String(item?.packageName || ''),
+          enabled: typeof item?.enabled === 'boolean' ? item.enabled : null,
+        }))
           .filter((item: AppNotificationState) => item.packageName)
       : [];
   },
   setAppNotificationEnabled: async (packageName: string, enabled: boolean): Promise<AppNotificationResult> => {
     if (!native?.setAppNotificationEnabled) throw new Error('此设备不支持修改应用通知状态');
-    const response = await native.setAppNotificationEnabled(packageName, enabled);
+    const response = await withNativeTimeout<any>(native.setAppNotificationEnabled(packageName, enabled), 30_000, '系统命令超时，请重试');
     const result = typeof response === 'string' ? response : String(response?.result ?? '');
     if (result === 'enabled' || result === 'disabled' || result === 'already_enabled' || result === 'already_disabled') return result;
     throw new Error('系统没有确认这次修改');
   },
   isQuickComponentsGuideSeen: async (): Promise<boolean> => {
     if (!native?.isQuickComponentsGuideSeen) return true;
-    return native.isQuickComponentsGuideSeen();
+    return withNativeTimeout<any>(native.isQuickComponentsGuideSeen(), 6000, '设置读取超时，请重试');
   },
   setQuickComponentsGuideSeen: async (): Promise<void> => {
     if (!native?.setQuickComponentsGuideSeen) return;
-    await native.setQuickComponentsGuideSeen();
+    await withNativeTimeout<any>(native.setQuickComponentsGuideSeen(), 6000, '设置保存超时，请重试');
   },
   readAdbGuideSeen: async (): Promise<string[]> => {
     if (!native?.readAdbGuideSeen) return [];
-    const seen = await native.readAdbGuideSeen();
+    const seen = await withNativeTimeout<any>(native.readAdbGuideSeen(), 6000, '设置读取超时，请重试');
     return Array.isArray(seen) ? seen.map(String) : [];
   },
   markAdbGuideSeen: async (key: string): Promise<void> => {
-    if (native?.markAdbGuideSeen) await native.markAdbGuideSeen(key);
+    if (native?.markAdbGuideSeen) await withNativeTimeout<any>(native.markAdbGuideSeen(key), 6000, '设置保存超时，请重试');
   },
   scanMarketingChannels: async (): Promise<MarketingChannel[]> => {
     if (!native?.scanMarketingChannels) throw new Error('此设备不支持通知渠道扫描');
-    return native.scanMarketingChannels();
+    // Privileged dumpsys reads can take up to 35s on the native side.
+    return withNativeTimeout(native.scanMarketingChannels(), 40_000, '渠道扫描超时，请重试');
   },
   getNotificationAccessStatus: async (): Promise<NotificationAccessStatus> => {
     if (!native?.getNotificationAccessStatus) return { supported: false, granted: false };
-    const status = await native.getNotificationAccessStatus();
+    const status = await withNativeTimeout<NotificationAccessStatus>(native.getNotificationAccessStatus(), 8_000, '权限状态读取超时');
     return { supported: Boolean(status?.supported), granted: Boolean(status?.granted) };
   },
   getUiCleanupTargets: async (): Promise<UiCleanupTarget[]> => {
     if (!native?.getUiCleanupTargets) return [];
-    return native.getUiCleanupTargets();
+    return withNativeTimeout(native.getUiCleanupTargets(), 10_000, '推荐项读取超时，请重试');
   },
   /** Rewrites a vendor switch inside the Android settings tables and verifies the new value. */
   applyUiCleanupDirect: async (id: string, desired: 'on' | 'off'): Promise<UiCleanupDirectResult> => {
     if (!native?.applyUiCleanupDirect) throw new Error('此设备不支持直接改写系统设置');
-    const result = String(await native.applyUiCleanupDirect(id, desired));
+    const result = String(await withNativeTimeout(native.applyUiCleanupDirect(id, desired), 20_000, '系统命令超时，请重试'));
     return { result: result === 'already' ? 'already' : 'changed', state: desired };
   },
   takeUiCleanupResult: async (): Promise<{ title: string; message: string } | null> => {
     if (!native?.takeUiCleanupResult) return null;
-    return native.takeUiCleanupResult();
+    return withNativeTimeout(native.takeUiCleanupResult(), 8_000, '操作结果读取超时');
   },
   startUiCleanup: async (id: string, restore: boolean): Promise<void> => {
-    if (!native?.startUiCleanup || await native.startUiCleanup(id, restore) !== true) throw new Error('无法启动这个操作');
+    if (!native?.startUiCleanup || await withNativeTimeout(native.startUiCleanup(id, restore), 10_000, '无法启动这个操作') !== true) throw new Error('无法启动这个操作');
   },
   confirmVendorStartupGuide: async (): Promise<BackendSnapshot | undefined> => {
     if (!native?.confirmVendorStartupGuide) return undefined;
-    return normalizeSnapshot(await native.confirmVendorStartupGuide());
+    return normalizeSnapshot(await withNativeTimeout<any>(native.confirmVendorStartupGuide(), 20000, '状态读取超时，请重试'));
   },
 };

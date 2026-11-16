@@ -4,6 +4,285 @@
 
 ## 2026-11-16
 
+### 2026-11-16 23:57:46 +08:00 — 逐项处理上线前报告中的性能、原生等待与厂商设置问题
+
+- 按用户要求逐项复核并修复 `上线前Bug排查报告.md` 中的问题。报告改为处理结果：原生卡住、队列拥塞、健康状态误判及三星入口缺口有对应代码修复；其它品牌状态读取“只靠用户确认”的误述已纠正；系统管理无障碍重绑的边界明确保留，不宣称全品牌真机已验收。
+- 新增 `ClearScreenAppInventory.kt`：不可变应用元数据内存缓存60秒，包变化/配置变化/实际内存压力失效，UI_HIDDEN不导致每次返回重扫；规则仍实时合并。资源任务有等待预算、单项降级、未完成任务取消和队列清理，位图异常路径也回收。快照使用独立有界队列，写命令不等待图标；总开关直接回执，其余需要快照的写操作提交后再异步读取状态。
+- 健康检查拆分为独立有界队列，授权组件与实际绑定分别读取，同默认进程存活不再依赖运行进程列表或启用列表的偶发结果。前端保留单次失败只置unknown的改动；保留开启状态但未连接/不可用时给出重新开启及后台限制检查提示，自动配对也依据实际健康而非只看开启列表。
+- 补齐此前未覆盖的学习、总开关、应用规则、默认设置、日志、引导标记及系统跳转等待上限。原生队列与学习主线程命令有开始执行前的排队期限；设置识别过久或应用已离开前台不迟到跳转。学习状态轮询单次在途，停止学习失败反馈并复位；已开始的系统调用不承诺因前端超时而撤销。
+- 自启动/后台/电池导航加强可信系统包与调用条件核验、失败候选回退及降级提示。三星依据官方action与 `activity_type=2` 打开“从不休眠的应用”，界面使用“休眠管理”，不将该名单当作自启动授权；不新增自动授权或设置写入能力。
+- 验证：最终 `npx tsc --noEmit` 与 `:app:compileDebugKotlin --offline --console=plain --quiet`（JBR21.0.11）均退出码0；目标代码/文档差异检查通过，新源文件和报告无尾随空白。按用户约定未执行自动化、集成、端到端或真机功能/UI测试，未打包、未安装；未声称冷启动性能、厂商路由或通知写入已完成新包验收。保留共享工作区其他窗口改动。
+- 涉及文件：`ClearScreenAppInventory.kt`、`ClearScreenNativeModule.kt`、`ClearScreenSettingsNavigator.kt`、`src/native/ClearScreenNative.ts`、`ServicePermissionsScreen.tsx`、`App.tsx`、README、Wiki权限说明及本报告；复用资料保存至项目资料目录的“上线前稳定性修复与复用说明.md”。
+
+### 2026-11-16 23:21:05 +08:00 — 上线前排查报告删减非技术内容
+
+- 按用户要求，`docs/wiki/上线前Bug排查报告.md` 删除客服相关表述与隐私同意页/应用商店合规相关内容（原 M4 条目、摘要与建议动作对应项）；该项目仅在 GitHub 分享，不走应用商店审核。
+- 其余风险分级、厂商适配矩阵、已修复项与本轮代码改动不变。
+
+### 2026-11-16 23:13:09 +08:00 — 上线前全面排查：native 调用超时与状态误判修复
+
+- 用户上线前要求排查「开了又断 / 卡住没反应」及五大厂商适配。三路专项走查 + 关键代码逐行复核，报告见[上线前Bug排查报告](上线前Bug排查报告.md)。
+- `src/native/ClearScreenNative.ts`：给 `getSnapshot`、清理权限/清理项、通知状态读取与写入、渠道扫描、推荐项读取/改写等 11 个 native 方法补前端超时（15s/8s/10s/20s/30s/40s），底层无响应时不再无限 pending；渠道扫描按底层 dumpsys 35s 上限留 40s。
+- `App.tsx`：前台返回与健康探测的单次读取失败只把 `accessibilityHealth` 置 unknown，保留最后一次已确认的 `skipRunning`，避免开关闪现「未连接」；真实掉线仍由 3s 轮询纠正。
+- 未发现上线阻断项；高危为首页全量应用图标解码无缓存（下版本优化）与厂商杀后台后无法主动重建无障碍服务（平台边界，需引导白名单）。tsc 通过，未出包。
+
+### 2026-11-16 22:27:44 +08:00 — 修复学习控件读取的超时占位与界面收尾
+
+- 用户反馈天气页选择控件时有时一直停在「读取中」。源码中超时仅通知界面，旧底层读取仍占着唯一布尔通道；会话失效的返回路径还可能直接丢弃结果而不统一收尾，复杂天气页的不可见子树也占用读取预算。本次依据这些源码路径修正，未操作手机复现该截图场景。
+- 后台、选取、重放改用独立的请求占位与受限读取通道，每通道最多两个仍存活的任务（含已超时但底层调用未返回的任务）。超时/取消退休逻辑占位，旧任务只释放自身占位和资源，不能误清新任务；容量耗尽时恢复按钮并提示稍后重试，不继续堆积线程。底层调用仍需自行返回后才释放其正在使用的节点/事件，不强行终止或提前回收。
+- 入口与点选读取新增统一收尾回调，并以请求序号核对当前界面；成功、失败、超时、启动失败及会话失效都会收尾，取消或迟到结果不再覆盖新读取状态。保留4.5秒主动读取预算，失败后可重试或取消；已保存规则、连续学习和工具栏保持逻辑未清空或重置。
+- 主动选取及v5确认、重放和关闭回读跳过不可见子树，保留原子节点序号；旧v2/3/4及混合旧规则的首次匹配仍沿用原树读取方式，避免破坏既有指纹。截断、超时及安全证据不足仍整帧丢弃，不把不完整页面用作点击依据。
+- 入口准备期间，主线程通用扫描、OCR、提示快照和媒体重复扫描让路，已学规则仍在独立通道执行；读取结束后恢复普通扫描，完整选择层与持续学习阶段不因此暂停自动处理。读取期间无法回读的既有原生动作记为未确认，不虚计成功。诊断增加 `selectionReadBusy` / `selectionReaders`，仅含占位及任务数。
+- 验证：最终 `:app:compileDebugKotlin --offline --console=plain --quiet`（JBR 21.0.11）退出码0；相关代码和说明 `git diff --check` 通过。按用户约定未执行自动化、集成、端到端或真机功能/UI测试，未打包、未安装，具体天气页效果仍待用户真机确认；保留其他窗口的界面、图标、版本及文档修改。
+- 涉及文件：`ClearScreenAdLearning.kt`、`ClearScreenAccessibilityService.kt`、`README.md`、`docs/wiki/README.md`、本修改记录；复用说明同步至 `D:\BaiduSyncdisk\其它\系统秘钥\ClearScreen\学习关闭规则重放说明.md`。
+
+### 2026-11-16 22:23:12 +08:00 — 更新应用启动图标
+
+- 使用用户提供的新图替换 Expo/平台图标、vivo 商店规格图及 Android 各密度的普通、圆形和自适应前景启动图标；自适应图标背景同步为素材主蓝色 `#1890DC`。页面品牌 Logo `assets/logo.png` 保持不变。
+- 验证：核对所有输出 PNG 尺寸、商店图标大小（29,642 字节）并成功解析 `app.json`；未构建、未运行测试、未安装。
+- 涉及文件：`app.json`、`assets/app-icon-source.png`、`assets/logo-icon.png`、`assets/logo-foreground.png`、`assets/logo-store-512.png`、Android `mipmap-*/ic_launcher*.png`、`android/app/src/main/res/values/colors.xml`、`docs/wiki/应用商店合规核查.md`、本修改记录。
+
+### 2026-11-16 17:40:15 +08:00 — 构建 Release 1.0.121（127）
+
+- 将 `app.json` 与 `android/app/build.gradle` 同步升至 `1.0.121` / `versionCode 127`，生成正式包 `android/app/build/outputs/apk/净屏.apk`；包名保持 `com.clearscreen.prototype`。
+- 验证：`npx tsc --noEmit` 通过；`:app:assembleRelease --offline --console=plain` BUILD SUCCESSFUL；`aapt` 回读版本和包名正确；APK v2 签名通过，证书 SHA-256 与正式证书一致；Release 原始 APK 与 `净屏.apk` SHA-256 一致（`FF0A44E85B26FD7D297491C41B43FCF61AE20B9FB0B90A8127D4CEA050AA5896`），大小 124,764,601 字节。未安装：当前 USB 只连接 vivo V2502DA，小米设备未连接；未做真机 UI 或功能验收。
+- 涉及文件：`app.json`、`android/app/build.gradle`、本修改记录；APK 输出：`android/app/build/outputs/apk/净屏.apk`。
+
+### 2026-11-16 15:54:54 +08:00 — 构建并安装 1.0.120（126）
+
+- 将 `app.json` 与 `android/app/build.gradle` 的 Android 版本同步更新为 `1.0.120` / `versionCode 126`，构建当前工作区 Release APK：`android/app/build/outputs/apk/净屏.apk`。
+- 验证：`npx tsc --noEmit` 成功；`:app:assembleRelease --offline --console=plain` BUILD SUCCESSFUL；APK 包名 `com.clearscreen.prototype`、版本 `1.0.120` / `126`，v2 签名证书 SHA-256 与项目签名一致，Release APK 与 `净屏.apk` 别名哈希一致（SHA-256 `41A7EDB8379D13859077E22A9645EC7377B577CA202C77915074588BFD298D4B`）。已通过 `adb install -r --no-streaming` 覆盖安装至 vivo V2502DA；设备回读版本为 `1.0.120` / `126`，`firstInstallTime` 仍为 `2026-09-20 15:33:13`。未执行界面或功能验收。
+
+### 2026-11-16 15:46:02 +08:00 — 应用通知开关「没有改成功」修复：改走权限通道并修正读取优先级
+
+- 用户在「应用通知管理」点开关弹「没有改成功 / 系统返回的通知状态与操作不一致」。真机判决实验（vivo V2502DA，Android 16）定位到两个叠加 bug：① **写入**：`cmd appops set … POST_NOTIFICATION` 的包级/uid 级/数字 uid 三种写法在 Android 16 全部被静默丢弃（exit 0 但状态不变，同 ROM 上 `settings put` 也有同类丢弃问题）；② **读取**：`appNotificationState` 优先取包级 appop（恒为 `allow`），忽略 uid 级（随系统开关同步为 `ignore`）与 `POST_NOTIFICATIONS` 运行时权限（`granted=false`），导致回读永远「enabled」→ 校验必失败；批量列表 `blockedNotifications` 还把 uid 级已禁用但包级为 allow 的应用排除出禁用集，列表开关全显示开（与截图一致）。
+- **修复**（`ClearScreenShellOps.kt`，ADB 与 Shizuku 两后端共用）：写入改为三通道依次尝试、每步回读确认——`pm grant/revoke --user N <pkg> android.permission.POST_NOTIFICATIONS`（Android 13+ 用户可见开关的真身，实测 exit 0 即生效且系统自动同步 uid appop）→ `appops set --uid` → `appops set` 包级（Android 12- 仍走 appop）；读取改为「权限 revoked → disabled，uid 级模式优先于包级，Default mode 兜底」；批量列表去掉「包级为 default 才认 uid 禁用」的错误条件（uid 禁用优先）。验证：`:app:compileDebugKotlin` BUILD SUCCESSFUL；真机模拟新读取逻辑：醒图（权限 revoked）→ disabled（旧逻辑误报 enabled）、腾讯会议 → enabled，与系统设置一致。
+- 未打包、未安装、未真机验收应用内交互（等「更新App安装」指令）。
+
+### 2026-11-16 14:56:17 +08:00 — 删除首页「去修复」状态，不能用时归入「去开启」
+
+- 用户截图首页状态卡红框，反馈主按钮有一个「去修复」状态，要求删掉：不能用的时候直接变成「去开启」那个状态。
+- `src/screens/HomeScreen.tsx`：`HomeStatus` 删除 `repair`；原触发 `repair` 的两个分支（`accessibilityHealth==='unavailable'`、`!skipRunning`）改为 `permission`（「需要开启服务 / 去开启」），分支顺序与判定优先级不变（`!ready` → 「状态待确认 / 检查服务」保持原样，未动）。`STATUS_TONE`/`statusTitle`/`statusIcon`/`actionTitle` 删除 repair 项，`primaryAction` 去掉 repair 条件——去开启点击动作本就是 `onEnableAccessibility`，行为不变，仅状态文案/图标/配色归入 permission（蓝球 accessibility 图标，不再出现橙色 warning 球）。
+- 文案同步：`SettingsDetailScreen.tsx` 帮助条目「开启或暂停净屏」中「首页显示‘需要修复’」改「需要开启服务」；`docs/wiki/README.md` 健康检查说明与 `docs/wiki/权限状态核验.md` 中「显示需要修复」的表述同步为「需要开启服务」并注明原状态已删除。
+- 验证 `npx tsc --noEmit` exit 0、`git diff --check` 无输出，`src/` 内 repair/需要修复/去修复 零残留。未打包、未安装、未真机验收（并行窗口 14:51:54 刚安装 1.0.119，不含本次改动）。
+
+### 2026-11-16 14:51:54 +08:00 — 构建并覆盖安装净屏 1.0.119
+
+- Android 版本从 `1.0.118` / versionCode `124` 递增到 `1.0.119` / `125`，同步 `app.json` 与 `android/app/build.gradle`。Release 包含当前工作区的最新界面与标语字体改动。
+- 验证：`npx tsc --noEmit` 与 `:app:assembleRelease --offline --console=plain` 通过；正式签名 v2 验证通过，证书 SHA-256 为 `93c410454a8263736ff60bb6e27153b19f74f4c934f444531842f5162ccfa999`。APK `android/app/build/outputs/apk/净屏.apk` 大小 124,748,257 字节，SHA-256 `68FBC21A84382CE4F1A8F953C8B1966C304B72067CCFB4FF35DB60DCA3FC6FF7`；与 Gradle Release APK 字节一致。
+- 经 USB 对 vivo V2502DA 执行 `adb install -r --no-streaming` 返回 `Success`；回读包名版本为 `com.clearscreen.prototype`、`1.0.119` / `125`，首次安装时间保持 `2026-09-20 15:33:13`，未卸载或清除数据。未启动应用进行功能/UI 验收。
+- 涉及文件：`app.json`、`android/app/build.gradle`、本修改记录；APK 产物：`android/app/build/outputs/apk/净屏.apk`。
+
+### 2026-11-16 14:48:41 +08:00 — 优先显示已开启的营销通知渠道
+
+- 营销通知列表按渠道状态排序：已开启的项目置顶；已关闭和状态未知的项目保持原扫描顺序。
+- 验证：随后执行目标文件 `git diff --check`；未运行测试或构建，未进行真机 UI 验收。
+- 涉及文件：`src/screens/MarketingChannelsScreen.tsx`、本修改记录。
+
+### 2026-11-16 14:29:18 +08:00 — 标语字体改签名手写体（志莽行书，替换马善政体）
+
+- 用户反馈马善政体是毛笔楷书风、不够「手写签名」，要求换签名体。同屏对比志莽行书（ZhiMangXing）、龙藏体（LongCang）、刘建毛草（LiuJianMaoCao，gstatic 直链获取）三款签名风后选定 **志莽行书**：斜势连笔、签字感强且 8 字可辨认；刘建毛草更飘逸但「屏幕」偏潦草，弃用。预览图 `tmp/tagline-handwrite-preview.png` 已按新字体重渲。
+- 字体文件替换为子集版 `assets/fonts/brand-tagline-zhimangxing.ttf`（6.9KB），删除原 `brand-tagline-mashanzheng.ttf`；`src/assets.ts` 注释同步更新（仍为**标语用字子集，改文案需重新子集化**）。`App.tsx` 加载逻辑不变。
+- 三处标语字号随新字体微调（志莽行书字面偏小、笔画斜）：首页 `brandTagline` 18→19、启动页 `SplashScreen.tagline` 23→25、`UI.tsx` `tagline` 16→17。fontFamily/去粗体/字距方案不变。
+- 验证：`npx tsc --noEmit` exit 0。未打包、未安装、未真机验收（等「更新App安装」指令）。
+
+### 2026-11-16 14:22:03 +08:00 — 品牌标语「净化屏幕 畅享生活」改为手写体
+
+- 用户指定首页品牌行标语改手写体设计。选用 Google Fonts 开源中文手写体 **马善政体（MaShanZheng，毛笔楷书风）**：小字号下笔画最清晰、与品牌蓝 #0B78F2 协调；同屏对比过志莽行书（ZhiMangXing）与龙藏体（LongCang）后弃用（16~18px 下笔画偏碎）。预览图 `tmp/tagline-handwrite-preview.png`。
+- 字体为子集裁剪版 `assets/fonts/brand-tagline-mashanzheng.ttf`（仅含标语用字＋「净屏ClearScreen」＋标点，完整字体 5.8MB → 9KB）。`src/assets.ts` 新增 `FONT_TAGLINE`/`FONT_TAGLINE_SOURCE` 导出并注明：**标语文案若改动需重新子集化**。`App.tsx` 以 `useFonts` 加载，字体就绪前不渲染界面，避免回退字体闪烁。
+- 样式统一三处：首页 `HomeScreen.brandTagline`（16→18，加 `adjustsFontSizeToFit` 防窄屏截断）、启动页 `SplashScreen.tagline`（18→23，启动页当前未被路由引用）、通用品牌头 `UI.tsx` `tagline`（14→16）。三处均 `fontFamily:FONT_TAGLINE` 并移除 `fontWeight`（防止 Android 伪粗体破坏笔触），字距微调（0.5/2）。
+- 验证：`npx tsc --noEmit` exit 0；无原生代码改动。未打包、未安装、未真机验收（等「更新App安装」指令）。
+
+### 2026-11-16 14:20:27 +08:00 — 首页状态面板去除白色圆角底
+
+- `statusPanel` 删除 `backgroundColor:'#FFFFFF'` 与 `borderRadius:20`，盾牌徽标、状态文字与「学习关闭」按钮直接置于状态卡淡蓝底上。布局（minHeight/对齐/间距）不变。
+
+### 2026-11-16 14:17:16 +08:00 — 首页主操作按钮拉伸至与状态面板同宽
+
+- 「暂停净屏/开启净屏」按钮由 `width:'63%'` 居中改为 `alignSelf:'stretch'`，与上方白色状态面板左右边缘对齐，消除两侧多余留白。按钮高度、圆角、渐变、图标与文字排布不变。
+
+### 2026-11-16 13:16:32 +08:00 — 学习关闭记录页迁入广告管理页新入口并移除首页卡片
+
+- 广告管理页（AdsScreen）四个入口下新增第 5 栏「管理学习关闭按钮」（仅 Android 显示），新画配套入口图标 `assets/ads/learned-close.png`（淡青圆角方块 + 蓝色图层堆叠符号，384×384，与另四张同规格），点击进入原「自定义关闭窗口」页（LearnedCloseRecords）。
+- 首页（HomeScreen）删除「自定义关闭窗口」整块卡片及其列表行渲染、`learnedRecords/onLearnedRecords/onDeleteLearned` 三个 props 与孤立样式 `headerActions`；App.tsx 首页传参同步去掉这三项。页面内容、删除逻辑（deleteLearned）与路由 `learnedRecords` 均保留不变。
+- 验证：`npx tsc --noEmit` 通过；`git diff --check` 无错误。
+
+### 2026-11-16 13:11:37 +08:00 — 弹窗橙色全改蓝、标题图标换同风格圆角方图标
+
+- 用户截图「清空记录?」弹窗红框两处：橙色元素（警告图标、`destructive` 橙渐变按钮）改蓝色；标题图标位「都要有图标」且风格与其它地方（`assets/ads/*.png` 圆角方图标：浅蓝渐变底＋白细边＋蓝色光泽符号）一致。
+- **去橙改蓝**：`AppDialog.tsx` 中 `destructive` 按钮渐变 `#E8912D→#D2761C` 与普通主按钮统一为 `#0A69DD→#0877CC`；`warning`（`#CF7520`/`#FFF3E4`）、`error`（`#D2691E`/`#FFF1E6`）的橙色 tone 配色随图标方案一并移除，界面不再出现红/橙。
+- **标题图标**：新绘 `assets/dialog/tone-{info,success,warning,error}.png`（384×384 RGBA，圆角方 [4,4,380,380] r76、白细边、纵向浅蓝渐变底、饱和蓝圆头笔画符号＋白色光泽＋柔和光晕，4x 超采样+LANCZOS，生成脚本 `tmp/gen_dialog_icons.py`）。四个 tone 都有图标（符号分别为 i／✓／!／✕），配色统一蓝。`AppDialog.tsx` 标题位改 `<Image>` 渲染（38dp），删掉 Ionicons tone 调色板（`TONES`→`TONE_ICONS`）；按钮文案自动图标与布局逻辑不动。`src/assets.ts` 新增 `DIALOG_TONE_*` 四个导出。
+- 同步 `docs/wiki/README.md` 弹窗视觉规范两处（去红橙表述、标题图标规格 38dp）。验证 `npx tsc --noEmit` exit 0、`git diff --check` 无输出；未打包、未安装、未真机验收。
+- 成功 tone 原绿色图标亦按「与其它图标风格一致」统一为蓝色系（符号 ✓ 区分语义）；若需保留绿色反馈请说明。
+
+### 2026-11-16 13:27:16 +08:00 — 系统设置权限开关改为操作提示加跳转设置页
+
+- 用户点按「系统设置权限」开关希望直接跳转对应设置页并提示如何操作；此前无线调试未开启时弹窗只有「重试」，点按无反应（原生每次都在同一处失败）。
+- `ServicePermissionsScreen.tsx`：点按开关（未连接且非配对中）改为先弹「开启无线调试」操作提示（三步：开发者选项打开无线调试；未配对时点「使用配对码配对设备」保持窗口打开；返回本页开关自动开启），确认「去设置」后跳转；已配对只缺无线调试时先发起一次后台重连再跳开发者选项，回前台自动连上；未配对走既有自动配对加跳转流程。连接失败、自动配对失败和 150 秒超时弹窗的「重试/重试连接」全部改为「去设置」进入同一引导；行内失败提示的「重试连接」同步改「去设置」。开关仍按实际连接状态显示，已连接点按断开，配对中点按停止不变。
+- 验证：`npx tsc --noEmit` 通过；`git diff --check` 通过。未打包、未安装、未做真机验收，按仓库约定仅做静态检查。
+- 涉及文件：`src/screens/ServicePermissionsScreen.tsx`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-16 13:05:59 +08:00 — 广告管理与系统设置页品牌区高度收紧
+
+- 两页顶部品牌区（红框区域）高度过高、上方留白过多的问题：`brandRow` minHeight 138→94、下边距 16→12，Logo 58→50、分隔线 44→36，全息图（盾牌/齿轮）宽度 34%→26%，整块高度约降 44dp。
+- `src/screens/AdsScreen.tsx` 与 `src/screens/SettingsScreen.tsx` 按注释要求两页同步同一规格；中英文标题字号、入口卡片规格未动。
+- 验证：`npx tsc --noEmit`、`git diff --check` 通过。未打包、未安装、未做真机验收。
+
+### 2026-11-16 13:04:08 +08:00 — 首页状态卡「学习关闭」白块加宽并留出右侧缝隙
+
+- 按用户截图（红框标状态卡左右边缘）：左侧盾牌有 ~20dp 自然留白，右侧「学习关闭」白块贴着面板边缘（仅 14dp 卡片内边距）显局促。`HomeScreen.tsx` `learnButton` 由 68×68 改 78×68（加宽）并加 `marginRight:6`，右侧留白 14→20dp 与左侧对齐（「像左边的一样」）。布局其余部分、文案与回调不变；`npx tsc --noEmit` 通过。版本升至 1.0.118 / versionCode 124，`assembleRelease`（JAVA_HOME 用 `.jdks\jbr-21.0.11`）BUILD SUCCESSFUL in 1m8s，`adb install -r` 覆盖安装到 vivo V2502DA 与 Xiaomi 22101317C，dumpsys 确认 1.0.118/124，应用已拉起。
+
+### 2026-11-16 12:21:58 +08:00 — 构建并覆盖安装净屏 1.0.117 到两台测试机
+
+- 按用户「所有同类型弹窗一次性弄好」的要求，将当前工作区全部弹窗改动（去红、字号收紧、按钮图标补全、次要按钮细边）随 1.0.117 / versionCode 123 打包。`JAVA_HOME` 指向的 `jdk-21.0.12.1+1` 损坏（缺 lib\jvm.cfg），改用 `C:\Users\22567\.jdks\jbr-21.0.11`（JDK 21）执行 `gradlew assembleRelease`，BUILD SUCCESSFUL in 1m18s，产物 `android/app/build/outputs/apk/release/app-release.apk`（124 MB）。
+- `adb install -r` 覆盖安装到 vivo V2502DA（10AG4M2KGF00527）与 Xiaomi 22101317C（2f8898c80822），均 Success；dumpsys 确认两台 versionName=1.0.117 / versionCode=123，应用已拉起。弹窗真机视觉验收（按钮图标、字号、橙色警示按钮）待用户确认。
+
+### 2026-11-16 12:15:37 +08:00 — 弹窗按钮图标补全与次要按钮样式微调
+
+- `AppDialog` 按钮图标推断补全：「稍后/以后/暂不」→time、「连接/连上/配对」→link、「授权/授予/允许」→shield-checkmark；全项目 14 种按钮文案均覆盖（取消、知道了、去开启、现在连上、去连接、重新读取、重新设置、稍后、确定、打开系统设置、恢复开启、去系统设置、去授予权限、恢复默认）。次要按钮加淡蓝细边（rgba(11,120,242,0.10)）与主按钮渐变拉开层次。同步 README 弹窗视觉规范图标映射，并修正第 157 行旧约定「危险操作使用红色按钮」为橙色警示渐变。`npx tsc --noEmit` 通过；未打包安装。
+
+### 2026-11-16 12:11:33 +08:00 — 应用通知入口与管理页统一命名
+
+- 按用户截图将「广告」页入口、对应页面标题统一改为「应用通知管理」；使用说明、README 和 Wiki 中的相关入口名称同步更新。导航目标、通知状态读取与开关行为不变。
+- 涉及 `src/screens/AdsScreen.tsx`、`src/screens/AppNotificationsScreen.tsx`、`src/screens/SettingsDetailScreen.tsx`、`README.md`、`docs/wiki/README.md` 和本记录。工作区原有其他窗口改动均保留。
+- 验证：`git diff --check` 通过；未运行类型检查或打包，未做真机验收。
+
+### 2026-11-16 12:10:53 +08:00 — 提示应用通知开关的未知状态
+
+- 应用通知列表在未连接、读取失败或部分应用状态缺失时显示明确提示，并提供连接或重试入口；未知状态不会被转换为关闭，点按未知开关会先要求重新读取。同步更新 README 和 Wiki 的通知状态说明。
+- 涉及文件：`src/screens/AppNotificationsScreen.tsx`、`src/native/ClearScreenNative.ts`、`README.md`、`docs/wiki/README.md`、本修改记录。
+- 验证：`npx tsc --noEmit` 与本次涉及文件的 `git diff --check` 通过；未运行应用或进行真机 UI 验收。
+
+### 2026-11-16 12:10:21 +08:00 — TopBar 标题改为屏幕水平居中
+
+- 用户截图红框=二级页顶栏标题（截图里为「应用管理」），反馈文字不居中。根因：`src/components/UI.tsx` 的 `TopBar` 用 `space-between` 三段式行布局，左返回键槽宽 40、右操作槽宽 88（有 action 时），不对称导致标题中心偏左约 24px。
+- 修法：标题 `Text` 改为绝对定位覆盖层（`topTitleWrap`：`position:'absolute'` + `alignItems/justifyContent:'center'` + `paddingHorizontal:44` 对称内边距），真正对齐屏幕水平中心；`pointerEvents:"none"` 保证不拦截返回键与右侧「全部开启」按钮的点击；`numberOfLines={1}` 防长标题换行，`topTitle` 加 `textAlign:'center'`。返回键与操作槽的 flex 布局不变。
+- 影响范围：所有用 `TopBar` 的二级页标题（应用详情/排除应用/处理记录/服务与权限/系统推荐开关等）统一变为屏幕居中，标题文案零改动。
+- 验证：`npx tsc --noEmit` exit 0；`git diff --check -- src/components/UI.tsx` 无输出。未打包、未安装、未做真机验收。
+- 注意：其他并行窗口在途改动已保留（含 AppsScreen 标题文案「应用管理」→「排除应用」的重命名，本条目不涉及文案）。
+
+### 2026-11-16 12:09:47 +08:00 — 将营销通知入口和页面改名
+
+- 将「广告」页入口及营销通知页面标题统一改为「营销通知管理」，并同步更新使用说明中的页面路径、搜索关键词和 Wiki 当前导航名称；页面功能和跳转逻辑不变。
+- 验证：相关文件 `git diff --check` 通过（有 LF/CRLF 提示）；未运行测试或构建，未进行真机 UI 验收。
+- 涉及文件：`src/screens/AdsScreen.tsx`、`src/screens/MarketingChannelsScreen.tsx`、`src/screens/SettingsDetailScreen.tsx`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-16 12:08:35 +08:00 — 将「应用管理」入口改名为「排除应用」
+
+- 按用户截图统一广告页入口和进入后的页面标题为「排除应用」；同步更新应用内使用说明、README 与 Wiki 中对应的导航名称。入口仍打开原应用列表，启停开关、筛选和排除规则逻辑不变。
+- 验证：`npx tsc --noEmit` 通过；相关文件 `git diff --check` 通过（仅有 LF/CRLF 提示）。未打包或安装 APK，未进行真机 UI 验收。
+- 涉及文件：`src/screens/AdsScreen.tsx`、`src/screens/AppsScreen.tsx`、`src/screens/SettingsDetailScreen.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-16 12:06:44 +08:00 — 全局弹窗去红色、补图标、字号收紧
+
+- 用户截图「恢复默认设置？」确认弹窗，要求这类弹窗统一美化：不使用红色、该加图标的加图标、字号小一点。弹窗统一实现只在 `src/components/AppDialog.tsx`，改这一处所有 `showAlert` 弹窗（约 40 个调用点）全部生效。
+- **去红色**：`destructive` 按钮红渐变 `#E62050→#CC1642` 改橙色警示渐变 `#E8912D→#D2761C`（与 warning tone 同色系，危险语义保留）；`error` tone 图标 `#DF1645` 红改橙棕 `#D2691E`，浅红底 `#FFF0F3` 改 `#FFF1E6`。恢复默认、删除、清空记录等按钮不再出现红色。
+- **补图标**：按钮文字前自动加 15px Ionicons，按文案推断——取消/关闭→close、重试/重新/恢复/重置→refresh、删除/清除/移除→trash、去/打开/连接/设置→open、确定/完成/应用/保存→checkmark；推断不出的文案不加图标。`DialogButton` 新增可选 `icon` 字段可显式覆盖。标题 tone 图标 27→22px、容器 46→38px。
+- **字号收紧**：标题 20/900→17/800，正文 15→13，按钮 15/800→13/700，按钮高 48→42，卡片圆角 26→22、内边距 22→18，按钮改横排 icon+文字（`flexDirection:'row'` + gap 5）。
+- 同步 `docs/wiki/README.md` 弹窗视觉规范。`npx tsc --noEmit` 通过、`git diff --check` 无输出；未打包、未安装，弹窗观感待用户真机确认。
+
+### 2026-11-16 12:06:07 +08:00 — 营销通知页美化空状态与连接入口
+
+- 「营销通知」页纯视觉美化，文案与逻辑零改动：① 未连接时的说明文字改为浅色圆角信息条（白色半透明底 + 浅蓝描边 + 信息图标）；② 「去连接补全」由纯文字链接升级为品牌渐变主按钮（#0B78F2→#12C2C8、白字、投影、按压反馈），与首页主按钮同风格；③ 空状态卡片改为图标（`assets/ads/marketing-notifications.png`，64dp）+ 状态文字居中排版；④ 扫描中状态加加载指示器。
+- 仅动 `src/screens/MarketingChannelsScreen.tsx` 视觉样式；渠道列表行、开关、弹窗与扫描逻辑未改；未新增任何解释性文案。
+- 验证：`npx tsc --noEmit`、`git diff --check` 通过。未打包、未安装、未做真机验收。
+
+### 2026-11-16 11:59:50 +08:00 — 隐私与数据页按设计稿优化选中态并拆分清空记录卡片
+
+- 「隐私与数据」页记录保留周期选项按设计稿改版：选中项由浅蓝底深色字改为蓝青渐变底（#0B78F2→#12C2C8）+ 白色文字 + 白色勾选标记，圆角 12→14、间距 8→10、按钮加高，选中项带轻投影。
+- 「清空记录」从保留周期卡片内拆出为独立卡片，两个块面分开，不再挤在同一张卡里；保留周期卡片底部的分隔线随之移除。
+- 仅动 `src/screens/SettingsDetailScreen.tsx` 视觉与布局，文案、保留周期逻辑、清空回调均未改。
+- 验证：`npx tsc --noEmit`、`git diff --check` 通过。未打包、未安装、未做真机验收。
+
+### 2026-11-16 11:46:57 +08:00 — 首页状态区改为纯白底
+
+- 首页状态卡内部区域改为纯白色块，移除右上方半透明圆形装饰，避免出现截图圈出的灰色弧形底图。图标、状态文字、“学习关闭”按钮和外层卡片布局保持不变。
+- 验证：`npx tsc --noEmit`、目标文件 `git diff --check` 通过。未启动应用或进行真机 UI 验收，未打包、安装 APK。
+- 涉及文件：`src/screens/HomeScreen.tsx`、本修改记录。
+
+### 2026-11-16 11:41:28 +08:00 — 收窄首页状态操作按钮
+
+- 首页状态卡主操作按钮（如“暂停净屏”）宽度调整为卡片内容区的 63%，并水平居中，对齐截图红框示意；按钮高度、颜色、圆角、图标和文字保持原样。
+- 验证：`npx tsc --noEmit`、目标文件 `git diff --check` 通过。未启动应用或进行真机 UI 验收，未打包、安装 APK。
+- 涉及文件：`src/screens/HomeScreen.tsx`、本修改记录。
+
+### 2026-11-16 11:38:59 +08:00 — 将 1.0.117 覆盖安装到已连接手机
+
+- 按用户要求将正式 APK 1.0.117 / versionCode 123 安装到 vivo V2502DA（`10AG4M2KGF00527`）和 Xiaomi 22101317C（`2f8898c80822`）。两台设备的 `adb install -r` 均返回 `Success`；包管理器均回读版本 1.0.117 / 123，首次安装时间保持原值（vivo `2026-09-20 15:33:13`；小米 `2026-11-06 18:47:52`）。
+- 安装后无障碍启用列表仍包含净屏服务；设备更新时间分别为 vivo `2026-11-16 11:38:46`、小米 `2026-11-16 11:38:35`。未卸载或清除数据；未启动应用，未进行功能/UI验收。
+- APK：`android/app/build/outputs/apk/净屏.apk`，SHA-256 `6958C27B7A000CD31834D0C5B35D1E7A31E79AF04C80E3365263F244948DE821`；安装使用同哈希的 Gradle ASCII 路径以便 ADB 传输。
+- 涉及文件：本修改记录；项目基本信息与安装核验记录同步至系统秘钥目录。
+
+### 2026-11-16 11:30:13 +08:00 — 构建净屏 1.0.117 Release APK
+
+- 按用户要求打包当前工作区，包含 11:21 的学习关闭更新和 11:25 的首页徽标素材更新；版本升至 1.0.117 / versionCode 123，包名保持 `com.clearscreen.prototype`。APK：`android/app/build/outputs/apk/净屏.apk`，大小 124,672,476 字节，SHA-256 `6958C27B7A000CD31834D0C5B35D1E7A31E79AF04C80E3365263F244948DE821`。
+- 验证：`npx tsc --noEmit`、`:app:assembleRelease --offline --console=plain --quiet` 通过；`aapt` 元数据确认应用名、包名和版本，`apksigner` v2 验签及正式证书指纹核对通过。未安装到手机、未启动应用，未进行功能/UI验收。
+- 涉及文件：`app.json`、`android/app/build.gradle`、本修改记录；项目基本信息与构建核验记录同步至系统秘钥目录。
+
+### 2026-11-16 11:25:42 +08:00 — 删除首页「工作中」徽标右下角绿点
+
+- 用户截图红框标出首页状态卡左侧圆形徽标右下角的绿色圆点，要求删掉。确认该点**不是代码渲染**，而是烤进图片素材 `assets/home/reference-shield-working.png`（1254×1254 RGBA，`assets.ts` 的 `HOME_REFERENCE_SHIELD_WORKING` → `HomeScreen.tsx` working 态状态图）：绿色球体中心 (897,895)、半径约 54，外围白色厚环，整体压在圆形徽标的白色外环上（徽标圆心 (618,624)、外半径约 450）。`reference-shield-paused.png` 无此点。
+- 删除方式：像素级修补而非重画整图。以绿球中心为圆心、半径 132 的圆（含白环与阴影）+ 绿色掩码做遮罩，按**徽标圆心极坐标角向插值**重建被遮区域的 RGBA——底层是「平滑渐变面 + 旋转对称白色外环 + 透明边缘」，角向插值能同时保圆环弧线连续与 alpha 边缘，避免扩散模糊把外环抹糊。边界 16px 羽化过渡，掩码外像素原样保留。
+- 校验：重建像素 61226/61226 全覆盖；剩余绿色像素 0；alpha 外接框 168–1067 / 168–1081 与原图一致（外轮廓未变）；放大复核 `tmp/shield-working-fixed-zoom-20261116.png` 显示渐变平滑、白色外环连续、透明区干净、无残留圆形轮廓；56dp 实机尺寸对照见 `tmp/shield-dot-removed-compare-20261116.png`。原图备份 `tmp/reference-shield-working-original-20261116.png`（未删）。
+- **代码零改动**：素材文件原路径覆盖，`src/assets.ts` / `HomeScreen.tsx` 引用不变。`npx tsc --noEmit` 通过；`git diff --check` 无错误（仅其它在途文件 LF/CRLF 提示）。未打包、未安装、未做真机 UI 验收。
+
+### 2026-11-16 11:21:29 +08:00 — 学习关闭保存后保持学习模式
+
+- 用户选择并识别控件、关闭已确认且规则保存成功后，不再自动结束学习或移除悬浮工具栏；提示“已学会关闭”，恢复普通广告扫描，工具栏继续显示“选择控件 / 取消”。用户可继续选择其他控件，完成后点工具栏“取消”退出。
+- 同步更新根目录 README 中英文说明和 Wiki 学习关闭行为说明。
+- 验证：`npx tsc --noEmit`、`:app:compileDebugKotlin --offline --console=plain --quiet` 成功；目标文件 `git diff --check` 无错误（有 LF/CRLF 提示）。未启动应用、未打包安装，未进行功能/UI验收。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAdLearning.kt`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-16 11:20:50 +08:00 — 构建并覆盖安装最新 Release APK
+
+- 按用户要求构建并安装当前工作区代码（包含 11:14 的受限设置引导调整）。Release APK：`android/app/build/outputs/apk/净屏.apk`，包名 `com.clearscreen.prototype`，版本 `1.0.116` / versionCode `122`，大小 124,672,476 字节，SHA-256 `9324A6207455850E4D3377148FA8D700E0E7E6768D4350F1F95F01F896B19CA9`。`:app:assembleRelease` 构建成功；`aapt` 元数据读取和 `apksigner verify` 通过，正式签名指纹与已有安装匹配。
+- 使用 `adb install -r --no-streaming` 覆盖安装到 vivo V2502DA（`10AG4M2KGF00527`）和 Xiaomi 22101317C（`2f8898c80822`），均返回 `Success`。回读包名版本为 `1.0.116` / code 122，首次安装时间保留（vivo：2026-09-20 15:33:13；Xiaomi：2026-11-06 18:47:52）。未启动应用或进行真机 UI/功能验收。
+- 构建使用可用 JBR 21.0.11；系统默认 `JAVA_HOME` 指向无效 JDK，首次构建未启动。涉及：APK 与本修改记录。
+
+### 2026-11-16 11:14:40 +08:00 — 移除侧载后额外的受限设置引导弹窗
+
+- 用户截图指出侧载安装后点击开启无障碍会出现「先允许受限设置」应用内弹窗，要求删除。本次移除侧载检测触发的额外提示及「打开应用信息」分支；确认开启后直接进入 Android 系统无障碍设置。Android 系统本身的受限设置要求仍需用户按系统情况手动处理。
+- README 与 Wiki 同步说明：不再显示应用内受限设置引导；遇到系统阻止时仍可在应用信息中手动允许。
+- 验证：`npx tsc --noEmit` 通过；`git diff --check -- App.tsx README.md docs/wiki/README.md` 通过（仅有 LF/CRLF 提示）。未打包、未安装，未进行真机功能/UI验收。
+- 涉及文件：`App.tsx`、`README.md`、`docs/wiki/README.md`、本修改记录。
+
+### 2026-11-16 10:49:56 +08:00 — 移除独立无障碍引导页并统一开启流程
+
+- 首次启动不再按旧引导完成标记跳转到独立页面，始终进入首页；移除该页的导航分支和页面文件。首页“去开启”、服务与权限中的“自动跳过广告”以及无障碍未开启时的“学习关闭”入口共用同一个确认提示，确认后进入系统无障碍设置，返回应用时复核状态。侧载受限设置仍沿用系统要求的额外提示。
+- 同步更新应用内首次开启帮助、根目录 README 与 Wiki 的入口和授权说明；保留原生 onboarding 数据接口以兼容既有存储。
+- 涉及 `App.tsx`、`src/screens/HomeScreen.tsx`、`src/screens/ServicePermissionsScreen.tsx`、`src/screens/SettingsDetailScreen.tsx`、删除 `src/screens/PermissionsScreen.tsx`、`README.md`、`docs/wiki/README.md` 和本记录。
+- 验证：`npx tsc --noEmit` 通过，`git diff --check` 通过；未打包、未安装，未进行真机 UI 验收。
+
+### 2026-11-16 10:43:48 +08:00 — 无障碍服务入口文案统一为「自动跳过广告」
+
+- 用户截图指出「服务与权限」页第一行的「自动跳过服务」，要求改叫「自动跳过广告」。该行控制的是同一个无障碍服务开关，功能、状态读取与跳转全部不变，只统一面向用户的名称。
+- 全量替换显示文案，源码零残留「自动跳过服务」：`ServicePermissionsScreen.tsx`（列表行标题、图标映射 key、开启引导弹窗标题、配对提示）、`PermissionsScreen.tsx`（引导页 TopBar）、`QuickComponentsScreen.tsx`（配对提示与错误文案）、`SettingsDetailScreen.tsx`（首次开启说明正文）。匹配规则 `/无障碍|自动跳过/` 不含完整词，未受影响；`title` 中「首次开启自动跳过」及搜索关键词「自动跳过」保留。
+- 同步 `docs/wiki/README.md` 的 COMPACT_UI 页面清单与服务与权限表格项名。`npx tsc --noEmit` 通过、`git diff --check` 无输出；未打包、未安装，真机文案待用户验收。
+
+### 2026-11-16 10:42:53 +08:00 — 重绘广告管理页「系统推荐开关」图标，修复歪斜
+
+- 用户截图红框标出广告管理页第二行「系统推荐开关」的齿轮图标，反馈「有点歪」。像素分析定位根因（`assets/ads/system-recommendations.png`，384×384 RGBA）：该素材是**两层圆角方块错位叠加**（近白背层在上、淡青正面方块整体下移约 70px），且**蓝色齿轮相对画布中心下移 62.7px**（符号中心 (187.9, 254.7)，另三张图标均落在 (192,192)±7px 内，见 `tmp/system-recommendations-original-20261116.png`）。齿轮本体 8 齿角度仍落在 0°/45°/90°… 轴线上，不是旋转问题，是构图偏移。
+- 按同套另外三张图标的规格重绘（PIL 4 倍超采样 + LANCZOS）：单层圆角方块 `[4,4,380,380]` / 圆角 76，纵向淡青渐变沿用原素材正面方块色；齿轮改用**解析极坐标轮廓**（8 齿、45° 严格对称、齿顶齿根 smoothstep 过渡，不叠加实心圆做圆角，避免 11-15 播放图标出现过的顶点鼓包），保留白色圆环 + 蓝色圆心与细白描边；符号严格居中。
+- 像素校验：alpha 外接框 4–379 与其余三张一致；符号外接框 84–299、中心 (191.5, 191.5)，左右镜像误差 0.0027、上下 0.0030，四角透明。四张图标并排复核见 `tmp/ads-four-icons-final-20261116.png`，卡片前后对照见 `tmp/sys-recommend-compare-20261116.png`。原图备份 `tmp/system-recommendations-original-20261116.png`（未删）。
+- **代码零改动**：`src/assets.ts:18` 的 `ADS_SYSTEM_RECOMMEND` 与 `src/screens/AdsScreen.tsx:43` 引用路径、尺寸均不变，只替换图片文件。`npx tsc --noEmit` 通过；`git diff --check` 无错误（仅其它在途文件 LF/CRLF 提示）。未打包、未安装、未做真机 UI 验收。
+
+### 2026-11-16 10:41:50 +08:00 — 学习关闭按局部控件定位，支持动态页面与移动的关闭按钮
+
+- 用户反馈音乐页中的广告关闭叉号没有变化，却显示「控件无法稳定识别」，并要求其它区域或目标存在动态变化时仍可识别。源码中这条提示对应无法建立唯一选择器，并不是检测到按钮晃动；原选择器依赖容器内的文字上下文，并拒绝包含滚动节点或较大子树的容器。静态、无标签的小浮窗关闭按钮也可能因此无法学习。本次按源码判定路径修正，未将截图场景描述为真机复现。
+- 新学习优先建立v5局部选择器，按按钮身份、关闭/已可用跳过语义及就近容器定位，去掉对兄弟文案、其它区域动画、节点序号和固定位置的依赖。没有目标标识或有效标签的匿名图标还需局部广告标记，或祖先链和创意控件角色摘要，不能只按通用ImageView类型点击；新选择器必须唯一指向用户实际选择的当前节点。信息足够的旧v4方式仍作为兼容兜底。
+- 点选、第二次确认和自动重放统一支持v5按当前唯一目标重新定位，按钮移动、包装层变化或「关闭/×」等同类标签变化可继续处理。执行前刷新真实节点，并使用它的当前边界核验遮挡；不可点击图标只使用当次节点中心，不保存或重放旧位置。保留前台窗口、应用版本、真实控件、危险操作/输入、唯一性、应用排除和当前遮挡检查。
+- v5关闭确认改为连续两次原真实节点消失且当前无相同选择器目标；其它区域滚动和页面变化不阻止保存，也不会单独被计为成功。旧v2/3/4规则继续读取，沿用原有匹配和确认约束；同步原生列表的v5支持、规则去重及同类标签的重试保护。原不稳定提示改为「未找到对应控件，请重试」，歧义继续单独提示。
+- 验证：最终 `:app:compileDebugKotlin --offline --console=plain --quiet`（JBR 21.0.11）退出码0；相关代码和文档 `git diff --check` 通过。按用户约定未执行自动化/集成/端到端或真机功能/UI测试，未打包、未安装，具体音乐页场景仍待用户验收。新局部行为用于重新学习生成的v5规则，既有规则未清空或强制迁移；保留其他窗口同期的界面和文档修改。
+- 涉及文件：`ClearScreenAdLearning.kt`、`ClearScreenStore.kt`、`ClearScreenNativeModule.kt`、`README.md`、`docs/wiki/README.md`、本修改记录；复用说明同步至 `D:\BaiduSyncdisk\其它\系统秘钥\ClearScreen\学习关闭规则重放说明.md`。
+
+### 2026-11-16 10:38:35 +08:00 — 广告管理页入口行高与设置页统一，两页入口文字改为常规字重
+
+- 用户对比两张真机截图：广告管理页四张入口卡片明显高于设置页五张入口卡片，字号更大，且两页入口文字都是 900 特粗。按设置页为基准统一：`AdsScreen.tsx` 卡片由 `height:92 / borderRadius:22 / marginBottom:14` 改为 `minHeight:65 / borderRadius:18 / marginBottom:9`，内层 `minHeight:63 / paddingHorizontal:15 / paddingVertical:7 / gap:13`、图标 56→48、竖分隔线 34→28，渐变色改用设置页同一组数值，箭头由页面内自带 Ionicons 改为共享 `Chevron`；与 `SettingsScreen.tsx` 逐项一致。
+- 字号统一为 18（原广告页 20）；两页入口标题 `fontWeight` 由 `'900'` 改为 `'400'`（常规，不再加粗）；两页顶部中英文页面标识由 `'900'` 降为 `'600'`，保留标题层级但整体不再过重。红框外的文案、入口数量与跳转逻辑均未改。
+- 两页样式表上方各加一行同步注释，后续改动需同时更新两处。
+- 验证：`npx tsc --noEmit` 通过；`git diff --check` 通过；逐行比对两页 `card` / `cardInner` / `cardIcon` / `cardDivider` / `cardTitle` 规格完全一致。未打包、未安装、未做真机 UI 验收，按仓库约定仅做静态检查。
+- 涉及文件：`src/screens/AdsScreen.tsx`、`src/screens/SettingsScreen.tsx`、`docs/wiki/README.md`、本修改记录。
+
 ### 2026-11-16 09:32:22 +08:00 — 发布前隐去本机标识
 
 - 将待推送的 Markdown 文档中的 Android ADB 设备序列号替换为通用占位符，并将本机用户目录改写为 `$env:USERPROFILE`；保留设备型号、版本、构建和安装验证事实。
@@ -1579,4 +1858,12 @@
 - 验证：`npx tsc --noEmit` 通过；Gradle 无残留锁，`:app:assembleRelease` BUILD SUCCESSFUL；`adb install -r` 覆盖安装到小米 22101317C（[DEVICE-ID]），包版本 1.0.78（84），`firstInstallTime` 未变化（未清数据）。
 - 真机验证：系统广告与营销通知页收拢与保留项、授权通道页短提示均有整页截图；「去开启无障碍服务」落到 `com.android.settings/.accessibility.MiuiAccessibilitySettingsActivity`；「打开开发者选项」落到 `com.miui.securitycenter/com.miui.appmanager.ApplicationsDetailsActivity`（应用信息页 + 兜底提示）。按应用通知跳转在本轮被设备并发占用打断（包一度被另一会话 `pm disable`、前台被反复切走），未完成截图取证，组件 `com.android.settings/.Settings$AppNotificationSettingsActivity` 已确认存在。
 - 涉及文件：`src/screens/SystemCleanupScreen.tsx`、`src/screens/AdbAccessScreen.tsx`、`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenSettingsNavigator.kt`、`ClearScreenNativeModule.kt`、`app.json`、`android/app/build.gradle`、本修改记录。
+- 参考：当前工作区修改，未提交。
+
+## 无线调试掉权限修复（2026-11-16）
+- 根因排查（`ClearScreenNativeModule.kt`）：①「手动关闭无线调试」调用的 `stopAdbAutoPair` 会顺带 `cancelReconnectRequest()` 清掉重连意图，并主动断开已建立的连接——配对成功后一走该路径就表现为「连上即掉权限」；②ADB 保活缺失，adbd 闲置断链后模块只会报「未连接」，无任何重连动作；③无后台看门狗，只有切回前台才触发 `handleAppForeground` 重连，挂后台即永久失联；④系统/OEM 在屏幕锁定或省电时关掉无线调试开关后，app 无法恢复。
+- 修复（`ClearScreenNativeModule.kt`）：`stopAdbAutoPair` 只停止配对，保留重连意图、不再断开已建连接；新增 `adbReconnectExecutor` 看门狗（15s 心跳探测、20s 后台巡检、60s 失败退避，`triggerAdbReconnectWatchdog` 在配对/连接失败时唤醒）；`resolveAdbWifiEnabled` 检测到开关被系统关闭时尝试 `svc wifi enable`/`settings put global adb_wifi_enabled 1`/`pm grant` 三连自动重开。
+- 修复（`ClearScreenAdbOperations.kt`）：连接成功后执行 `pm grant WRITE_SECURE_SETTINGS`（manifest 同步加权限声明）；`isVerifiedConnected` 空闲探测从 5 分钟收紧到 3 分钟；新增 `startAdbHeartbeat`（前台 30s 探活，断链即自动重连）与 `restoreIfRequested` 自动恢复链路，AdbConnectionStore 顺带恢复无障碍/通知监听开关。
+- 验证：`npx tsc --noEmit` 通过、`git diff --check` 干净；`JAVA_HOME` 改用 `C:/Users/22567/.gradle/jdks/eclipse_adoptium-17-amd64-windows.2`（Temurin 17.0.20.1）后 `:app:compileDebugKotlin` BUILD SUCCESSFUL（原 `C:/Users/22567/jdk/jdk-21` 缺 javac 损坏、Android Studio JBR 为 Java 25 与 RN gradle 插件不兼容）。
+- 涉及文件：`android/app/src/main/java/com/clearscreen/prototype/backend/ClearScreenAdbOperations.kt`、`ClearScreenNativeModule.kt`、`android/app/src/main/AndroidManifest.xml`、本修改记录。
 - 参考：当前工作区修改，未提交。

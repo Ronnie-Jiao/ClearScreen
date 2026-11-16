@@ -258,10 +258,13 @@ internal object ClearScreenShellOps {
             if (!text.startsWith("package:")) continue
             val name = text.removePrefix("package:").substringBefore(' ').trim()
             val id = text.substringAfter("uid:", "").trim().toIntOrNull() ?: continue
-            val packageMode = packageModes[name]?.lowercase(Locale.ROOT)
-            if (id in blockedUids && name.matches(PACKAGE_PATTERN) &&
-              (packageMode == null || packageMode == "default")
-            ) blocked.add(name)
+            // A blocked uid mode wins over any package-level mode: on modern
+            // Android the user-visible switch lives at the uid level and the
+            // package mode can stay "allow" while notifications are blocked
+            // (observed on Android 16, where `appops set POST_NOTIFICATION`
+            // writes are silently dropped and only the uid level tracks the
+            // POST_NOTIFICATIONS permission).
+            if (id in blockedUids && name.matches(PACKAGE_PATTERN)) blocked.add(name)
           }
         }
       }
@@ -274,17 +277,28 @@ internal object ClearScreenShellOps {
   fun appNotificationState(runner: ClearScreenShellRunner, packageName: String): String {
     val pkg = requirePackage(packageName)
     val user = runner.userId()
+    // Android 13+ exposes the user-visible switch as the POST_NOTIFICATIONS
+    // runtime permission. A revoked permission always means notifications are
+    // off, even when the package-level appop still reads "allow".
+    val dump = runner.exec("/system/bin/dumpsys", "package", pkg)
+    if (dump.code == 0) {
+      val revoked = dump.output.lineSequence().map { it.trim() }.any {
+        it.startsWith("android.permission.POST_NOTIFICATIONS:") && it.contains("granted=false")
+      }
+      if (revoked) return "disabled"
+    }
     val result = runner.exec("/system/bin/cmd", "appops", "get", "--user", user.toString(), pkg, "POST_NOTIFICATION")
     if (result.code != 0) return "unknown"
     val lines = result.output.lineSequence().map { it.trim() }.toList()
     val packageMode = lines.firstOrNull { it.startsWith("POST_NOTIFICATION:") }
       ?.substringAfter(':')?.trim()?.substringBefore(';')?.trim()
-    if (packageMode != null && !packageMode.equals("default", ignoreCase = true)) {
-      return modeToState(packageMode)
-    }
     val uidMode = lines.firstOrNull { it.startsWith("Uid mode:") && it.contains("POST_NOTIFICATION:") }
       ?.substringAfter("POST_NOTIFICATION:")?.trim()?.substringBefore(';')?.trim()
+    // A uid-level mode wins over the package level: the system keeps the
+    // user-visible switch at the uid level, so the package mode alone would
+    // report "enabled" for apps whose notifications are blocked.
     if (uidMode != null && !uidMode.equals("default", ignoreCase = true)) return modeToState(uidMode)
+    if (packageMode != null && !packageMode.equals("default", ignoreCase = true)) return modeToState(packageMode)
     val fallback = lines.firstOrNull { it.startsWith("Default mode:") }
     if (fallback != null) return modeToState(fallback.substringAfter(':').trim())
     if (packageMode != null || uidMode != null) return "enabled"
@@ -305,18 +319,28 @@ internal object ClearScreenShellOps {
       "unknown" -> error("系统没有提供这个应用的通知状态，本次不会更改")
     }
     val mode = if (enabled) "allow" else "ignore"
-    // Keep the package and uid levels in agreement: MIUI's switch writes both,
-    // and query-op only reports the package level.
-    val written = runner.exec(
-      "/system/bin/cmd", "appops", "set", "--user", user.toString(), pkg, "POST_NOTIFICATION", mode,
+    // Three write channels, tried in order until a read-back confirms the new
+    // state. Android 16 silently drops every `appops set POST_NOTIFICATION`
+    // form (exit code 0, state unchanged), so the POST_NOTIFICATIONS runtime
+    // permission is the primary channel on Android 13+: `pm grant/revoke`
+    // flips the user-visible switch and the system syncs the uid appop.
+    // Older devices have no such permission and only honour the appop writes.
+    val attempts = listOf(
+      arrayOf("/system/bin/pm", if (enabled) "grant" else "revoke", "--user", user.toString(), pkg, "android.permission.POST_NOTIFICATIONS"),
+      arrayOf("/system/bin/cmd", "appops", "set", "--user", user.toString(), "--uid", pkg, "POST_NOTIFICATION", mode),
+      arrayOf("/system/bin/cmd", "appops", "set", "--user", user.toString(), pkg, "POST_NOTIFICATION", mode),
     )
-    check(written.code == 0) { "系统拒绝了这次修改" }
-    val writtenUid = runner.exec(
-      "/system/bin/cmd", "appops", "set", "--user", user.toString(), "--uid", pkg, "POST_NOTIFICATION", mode,
-    )
-    check(writtenUid.code == 0) { "系统拒绝了这次修改" }
-    check(appNotificationState(runner, pkg) == desired) { "系统返回的通知状态与操作不一致" }
-    return desired
+    var lastError = "系统拒绝了这次修改"
+    for (attempt in attempts) {
+      val written = runner.exec(*attempt)
+      if (written.code != 0) continue
+      when (appNotificationState(runner, pkg)) {
+        desired -> return desired
+        "unknown" -> lastError = "系统没有提供这个应用的通知状态"
+        else -> lastError = "系统返回的通知状态与操作不一致"
+      }
+    }
+    error(lastError)
   }
 
   private fun isBlockedMode(mode: String): Boolean =

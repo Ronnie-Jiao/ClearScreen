@@ -1,14 +1,13 @@
 import React from 'react';
-import { Image, ImageSourcePropType, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ImageSourcePropType, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { Background } from '../components/UI';
+import { Background, Chevron } from '../components/UI';
 import { BottomNav, useBottomNavMetrics } from '../components/BottomNav';
 import { C } from '../theme';
-import { LOGO, SPLASH_BACKGROUND, ADS_APP_MANAGEMENT, ADS_SYSTEM_RECOMMEND, ADS_APP_NOTIFICATIONS, ADS_MARKETING_NOTIFICATIONS, ADS_SHIELD } from '../assets';
+import { LOGO, SPLASH_BACKGROUND, ADS_APP_MANAGEMENT, ADS_SYSTEM_RECOMMEND, ADS_APP_NOTIFICATIONS, ADS_MARKETING_NOTIFICATIONS, ADS_LEARNED_CLOSE, ADS_SHIELD } from '../assets';
 
 type MainTab='home'|'apps'|'settings';
-type AdsDestination='systemRecommend'|'appNotifications'|'marketingChannels';
+type AdsDestination='systemRecommend'|'appNotifications'|'marketingChannels'|'learnedRecords';
 
 // The 2026-11-15 ad-management design uses the same light wave wallpaper as the splash screen.
 const ADS_WALLPAPER=SPLASH_BACKGROUND;
@@ -28,11 +27,11 @@ function AdsBrandHeader(){
 
 function AdEntryCard({title,icon,onPress}:{title:string;icon:ImageSourcePropType;onPress:()=>void}){
  return <Pressable accessibilityRole="button" accessibilityLabel={title} onPress={onPress} style={({pressed})=>[s.card,pressed&&s.cardPressed]}>
-  <LinearGradient colors={['rgba(255,255,255,0.94)','rgba(232,246,255,0.70)']} start={{x:0,y:0}} end={{x:1,y:1}} style={s.cardInner}>
+  <LinearGradient colors={['rgba(255,255,255,0.93)','rgba(230,244,255,0.76)']} start={{x:0,y:0}} end={{x:1,y:1}} style={s.cardInner}>
    <Image source={icon} resizeMode="contain" style={s.cardIcon}/>
    <View pointerEvents="none" style={s.cardDivider}/>
    <Text style={s.cardTitle} numberOfLines={1}>{title}</Text>
-   <Ionicons name="chevron-forward" size={22} color="#7E9AB8"/>
+   <Chevron/>
   </LinearGradient>
  </Pressable>;
 }
@@ -40,10 +39,11 @@ function AdEntryCard({title,icon,onPress}:{title:string;icon:ImageSourcePropType
 export default function AdsScreen({onTab,onOpen,onOpenAppManagement}:{onTab:(tab:MainTab)=>void;onOpen:(page:AdsDestination)=>void;onOpenAppManagement:()=>void}){
  const {inset:navInset}=useBottomNavMetrics();
  const entries:{title:string;icon:ImageSourcePropType;onPress:()=>void}[]=[
-  {title:'应用管理',icon:ADS_APP_MANAGEMENT,onPress:onOpenAppManagement},
+  {title:'排除应用',icon:ADS_APP_MANAGEMENT,onPress:onOpenAppManagement},
   {title:'系统推荐开关',icon:ADS_SYSTEM_RECOMMEND,onPress:()=>onOpen('systemRecommend')},
-  {title:'应用通知',icon:ADS_APP_NOTIFICATIONS,onPress:()=>onOpen('appNotifications')},
-  {title:'营销通知',icon:ADS_MARKETING_NOTIFICATIONS,onPress:()=>onOpen('marketingChannels')},
+  {title:'应用通知管理',icon:ADS_APP_NOTIFICATIONS,onPress:()=>onOpen('appNotifications')},
+  {title:'营销通知管理',icon:ADS_MARKETING_NOTIFICATIONS,onPress:()=>onOpen('marketingChannels')},
+  ...(Platform.OS==='android'?[{title:'管理学习关闭按钮',icon:ADS_LEARNED_CLOSE,onPress:()=>onOpen('learnedRecords')}]:[]),
  ];
  return <Background backgroundSource={ADS_WALLPAPER}><View style={s.root}>
   <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[s.scroll,{paddingBottom:96+navInset}]}>
@@ -54,19 +54,20 @@ export default function AdsScreen({onTab,onOpen,onOpenAppManagement}:{onTab:(tab
  </View></Background>;
 }
 
+// 入口卡片规格与另一首页保持一致（行高/间距/图标/字号/字重），修改时需两页同步。
 const s=StyleSheet.create({
  root:{flex:1},scroll:{flexGrow:1,paddingHorizontal:16},
- brandRow:{minHeight:138,marginBottom:16,flexDirection:'row',alignItems:'center',gap:8},
- brandLogo:{width:58,height:58,flexShrink:0},
- brandDivider:{width:1,height:44,backgroundColor:'#A5C9EA',marginHorizontal:3,flexShrink:0},
+ brandRow:{minHeight:94,marginBottom:12,flexDirection:'row',alignItems:'center',gap:8},
+ brandLogo:{width:50,height:50,flexShrink:0},
+ brandDivider:{width:1,height:36,backgroundColor:'#A5C9EA',marginHorizontal:3,flexShrink:0},
  brandText:{flex:1,minWidth:0,gap:2},
- brandTitle:{fontSize:25,lineHeight:32,fontWeight:'900',color:C.navy},
- brandEnglish:{fontSize:15,lineHeight:20,fontWeight:'900',color:C.navy},
- brandShield:{width:'34%',aspectRatio:645/585,flexShrink:0},
- card:{height:92,borderRadius:22,marginBottom:14,backgroundColor:'rgba(255,255,255,0.80)',borderWidth:1,borderColor:'rgba(255,255,255,0.95)',shadowColor:'#4A7EA2',shadowOpacity:.12,shadowRadius:14,shadowOffset:{width:0,height:6},elevation:3,overflow:'hidden'},
- cardPressed:{opacity:.88,transform:[{scale:.985}]},
- cardInner:{flex:1,flexDirection:'row',alignItems:'center',paddingHorizontal:16,gap:14},
- cardIcon:{width:56,height:56,flexShrink:0,borderRadius:16},
- cardDivider:{width:1,height:34,backgroundColor:'#C9DEF2',flexShrink:0},
- cardTitle:{flex:1,minWidth:0,fontSize:20,fontWeight:'900',color:C.navy,letterSpacing:-.2},
+ brandTitle:{fontSize:25,lineHeight:32,fontWeight:'600',color:C.navy},
+ brandEnglish:{fontSize:15,lineHeight:20,fontWeight:'600',color:C.navy},
+ brandShield:{width:'26%',aspectRatio:645/585,flexShrink:0},
+ card:{minHeight:65,marginBottom:9,borderRadius:18,borderWidth:1,borderColor:'rgba(255,255,255,0.95)',backgroundColor:'rgba(255,255,255,0.82)',shadowColor:'#4A7EA2',shadowOpacity:.14,shadowRadius:12,shadowOffset:{width:0,height:6},elevation:3},
+ cardPressed:{opacity:.88},
+ cardInner:{minHeight:63,borderRadius:17,overflow:'hidden',flexDirection:'row',alignItems:'center',paddingHorizontal:15,paddingVertical:7,gap:13},
+ cardIcon:{width:48,height:48,flexShrink:0},
+ cardDivider:{width:1,height:28,backgroundColor:'#B6D5F3',flexShrink:0},
+ cardTitle:{flex:1,minWidth:0,fontSize:18,fontWeight:'400',color:C.navy},
 });

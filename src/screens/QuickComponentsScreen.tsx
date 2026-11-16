@@ -78,7 +78,7 @@ export default function QuickComponentsScreen({ onBack }: { onBack: () => void }
       }
       const health = await ClearScreenNative.getAccessibilityHealth().catch(() => null);
       if (health && !health.permissions.skip) {
-        showAlert('还差一步：开启自动跳过服务', '净屏要靠它在配对弹窗出现时读出配对码。开启后重新进入本页，按提示连接；连上后会自动检查。', [
+        showAlert('还差一步：开启自动跳过广告', '净屏要靠它在配对弹窗出现时读出配对码。开启后重新进入本页，按提示连接；连上后会自动检查。', [
           { text: '取消', style: 'cancel' },
           { text: '去开启', onPress: openAccessibility },
         ], { tone: 'warning' });
@@ -241,7 +241,7 @@ function stateHint(item: CleanupTarget) {
 function explainError(error: unknown): string {
   const raw = (error instanceof Error ? error.message : String(error ?? '')).trim();
   if (/隐私|同意/.test(raw)) return '暂时无法完成操作，请重试。';
-  if (/无障碍|自动跳过/.test(raw)) return '自动跳过服务没开，净屏读不到系统信息。请在系统设置里开启后再试。';
+  if (/无障碍|自动跳过/.test(raw)) return '自动跳过广告没开，净屏读不到系统信息。请在系统设置里开启后再试。';
   if (/没有响应|超时|timeout|timed out/i.test(raw)) return '手机系统命令没有响应，连接可能已经断了。点「现在连上」重连后再试。';
   if (/Shizuku|授权通道|未连接|没有连接|请先启动|请先授予/i.test(raw)) return '还没连上这台手机，所以查不了。点「现在连上」，用无线调试配对一次再试。';
   if (!raw) return '系统没有给出原因，请重试；仍然不行就重连这台手机。';

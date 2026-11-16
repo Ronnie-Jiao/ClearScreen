@@ -572,6 +572,9 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     if (!rule.skipEnabled || rule.whitelist) return rejectScan("app-excluded")
     if (adGesturePending) return rejectScan("gesture-pending")
     if (adLearning?.tryReplay(packageName) == true) return true
+    // Keep the overlay's timeout/cancel callbacks responsive while its reader
+    // owns the initial capture. Learned rules still run on their own channel.
+    if (adLearning?.preparingSelection == true) return rejectScan("learning-read")
     pendingVisualAction?.takeIf { it.packageName == packageName }?.let {
       if (SystemClock.uptimeMillis() - it.at <= 4_000L) return rejectScan("visual-action-pending")
       pendingVisualAction = null
@@ -792,6 +795,10 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     // not inflate the success counter.
     handler.postDelayed({
       if (!ensureConsentAndStore() || !store.isMasterEnabled()) return@postDelayed
+      if (adLearning?.preparingSelection == true) {
+        appendActionEvent(packageName, action, "pending", "关闭结果未确认")
+        return@postDelayed
+      }
       if (!isEligibleForegroundPackage(packageName)) {
         appendActionEvent(packageName, action, "failed", "前台已切换，关闭结果未确认")
         return@postDelayed
@@ -875,7 +882,8 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       packageName, root.windowId, SystemClock.uptimeMillis(),
       // A replay already owns a fresh, guarded tree read. Do not make its
       // completion wait behind another full snapshot on the handler thread.
-      waitForLateControls || adLearning?.replayPending == true || hasPendingAdUi(snapshotForHints(root)),
+      waitForLateControls || adLearning?.replayPending == true || adLearning?.preparingSelection == true ||
+        hasPendingAdUi(snapshotForHints(root)),
     ) ?: return
     postNextAdScan(ticket)
   }
@@ -914,6 +922,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
     isEligibleAdPackage(packageName) && isCurrentForegroundPackage(packageName)
 
   private fun maybeStartMediaWatch(packageName: String, eventType: Int) {
+    if (adLearning?.preparingSelection == true) return
     if (!ensureConsentAndStore() || !store.isSettingEnabled(ClearScreenStore.KEY_SKIP_SPLASH_VIDEO, true) ||
       !isEligibleForegroundPackage(packageName) || mediaWatch?.packageName == packageName
     ) return
@@ -947,6 +956,10 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       now >= watch.deadlineAt
     ) {
       stopMediaWatch()
+      return
+    }
+    if (adLearning?.preparingSelection == true) {
+      if (mediaWatch === watch) handler.postDelayed(mediaWatchTick, MEDIA_WATCH_INTERVAL_MS)
       return
     }
     val root = findRootForPackage(watch.packageName) ?: run { stopMediaWatch(); return }
@@ -988,6 +1001,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
 
   private fun isAppProcessingEnabled(packageName: String, allowPendingReplay: Boolean = false): Boolean =
     adLearning?.blocksReplay != true && (allowPendingReplay || adLearning?.replayPending != true) &&
+      (allowPendingReplay || adLearning?.preparingSelection != true) &&
       !ClearScreenUiCleanup.isActive() && !serviceDestroyed && ::store.isInitialized && store.isMasterEnabled() &&
       store.getAppRule(packageName).let { it.skipEnabled && !it.whitelist }
 
@@ -2407,7 +2421,7 @@ class ClearScreenAccessibilityService : AccessibilityService() {
       adScans.cancel(ticket)
       return
     }
-    if (adLearning?.replayPending == true) {
+    if (adLearning?.replayPending == true || adLearning?.preparingSelection == true) {
       // The replay's worker checks protected UI on both reads. Keep this
       // finite retry ticket alive without competing for the same tree.
       postNextAdScan(ticket)

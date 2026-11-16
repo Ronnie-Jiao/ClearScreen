@@ -76,9 +76,13 @@ class ClearScreenStore internal constructor(private val preferences: SharedPrefe
       val old = rules.optJSONObject(i) ?: continue
       val selector = rule.optJSONObject("selector")
       val oldSelector = old.optJSONObject("selector")
-      val identityFields = if (selector?.optInt("version") == 4 && oldSelector?.optInt("version") == 4)
-        listOf("version", "id", "kind", "label", "anchorId", "anchorKind", "branch", "peers")
-      else listOf("version", "id", "kind", "label", "anchorId", "anchorKind", "route", "context")
+      val identityFields = when {
+        selector?.optInt("version") == 5 && oldSelector?.optInt("version") == 5 ->
+          listOf("version", "id", "kind", "label", "meaning", "anchorId", "anchorKind", "branch", "witness")
+        selector?.optInt("version") == 4 && oldSelector?.optInt("version") == 4 ->
+          listOf("version", "id", "kind", "label", "anchorId", "anchorKind", "branch", "peers")
+        else -> listOf("version", "id", "kind", "label", "anchorId", "anchorKind", "route", "context")
+      }
       val sameTarget = selector != null && old.optLong("updated") == rule.optLong("updated") &&
         oldSelector != null && identityFields.all { oldSelector.optString(it) == selector.optString(it) }
       if (old.optString("pkg") != rule.optString("pkg") || !sameTarget) retained.add(old)

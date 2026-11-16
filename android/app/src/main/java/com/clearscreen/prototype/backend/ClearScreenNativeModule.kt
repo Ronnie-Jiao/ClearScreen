@@ -1,21 +1,15 @@
 package com.clearscreen.prototype.backend
 
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
-import android.util.Base64
-import android.view.accessibility.AccessibilityManager
 import android.widget.Toast
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -26,11 +20,12 @@ import com.facebook.react.bridge.WritableArray
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.LifecycleEventListener
-import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
-import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.Locale
 
 class ClearScreenNativeModule(
@@ -43,17 +38,31 @@ class ClearScreenNativeModule(
   private val store by storeDelegate
   private val privacyConsentStore by lazy { ClearScreenPrivacyConsentStore(reactContext) }
   private val executor = Executors.newSingleThreadExecutor()
+  private val snapshotExecutor = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+    ArrayBlockingQueue<Runnable>(4), { task -> Thread(task, "clearscreen-snapshot").apply { isDaemon = true } })
+  private val healthExecutor = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+    ArrayBlockingQueue<Runnable>(1), { task -> Thread(task, "clearscreen-health").apply { isDaemon = true } })
   private val permissionExecutor = Executors.newSingleThreadExecutor()
   private val adbReconnectExecutor = Executors.newSingleThreadExecutor()
   private val adbReconnectLock = Any()
   private var adbReconnectScheduled = false
   private var lastAdbReconnectAttempt = 0L
-  @Volatile private var inventoryThreads: ExecutorService? = null
+  private val adbWatchdogExecutor = Executors.newSingleThreadScheduledExecutor { task ->
+    Thread(task, "clearscreen-adb-watchdog").apply { isDaemon = true }
+  }
+  private val appInventory = ClearScreenAppInventory(reactContext)
   private val permissionReader by lazy { ClearScreenPermissionReader(reactContext) }
   private val cleanupController by lazy { ClearScreenCleanupController(reactContext, { store }, ::requirePrivacyConsent) }
   @Volatile private var hostResumed = false
 
-  init { reactContext.addLifecycleEventListener(this) }
+  init {
+    reactContext.addLifecycleEventListener(this)
+    // Keep the wireless-debugging channel alive while the app is on screen and
+    // heal it after the system turns the toggle off or reaps an idle socket.
+    adbWatchdogExecutor.scheduleWithFixedDelay(
+      { runCatching { adbWatchdogTick() } }, 30L, 30L, TimeUnit.SECONDS,
+    )
+  }
 
   override fun onHostPause() { hostResumed = false; ClearScreenAccessibilityHealth.invalidate(); ClearScreenSettingsObserver.onHostPause(); ClearScreenUiCleanup.onHostPause() }
   override fun onHostResume() {
@@ -85,6 +94,7 @@ class ClearScreenNativeModule(
           if (!hostResumed || !privacyConsentStore.hasCurrentConsent() ||
             !ClearScreenAdbOperations.shouldRestore(reactContext)) return@execute
           synchronized(adbReconnectLock) { lastAdbReconnectAttempt = SystemClock.elapsedRealtime() }
+          ensureWirelessDebuggingEnabled()
           ClearScreenAdbOperations.restoreIfRequested(reactContext)
         } catch (_: Exception) {
           // The status remains disconnected; a later foreground visit can retry.
@@ -97,21 +107,34 @@ class ClearScreenNativeModule(
     }
   }
 
-  override fun getName(): String = "ClearScreenBackend"
+  /** Foreground watchdog: probe a live channel, otherwise restore the connection. */
+  private fun adbWatchdogTick() {
+    if (!hostResumed) return
+    if (ClearScreenAdbOperations.isVerifiedConnected()) {
+      ClearScreenAdbOperations.keepAlive()
+      return
+    }
+    if (!privacyConsentStore.hasCurrentConsent() ||
+      !ClearScreenAdbOperations.shouldRestore(reactContext)) return
+    scheduleAdbReconnect()
+  }
 
-  /**
-   * Launcher labels and icons are read per installed app, and each read loads
-   * that app's resources. Those reads are independent, so a small pool keeps
-   * the first screen from waiting for hundreds of serial resource loads.
-   */
-  private fun inventoryPool(): ExecutorService {
-    inventoryThreads?.let { return it }
-    return synchronized(this) {
-      inventoryThreads ?: Executors.newFixedThreadPool(
-        minOf(6, maxOf(2, Runtime.getRuntime().availableProcessors())),
-      ).also { inventoryThreads = it }
+  private fun wirelessDebuggingEnabled(): Boolean = runCatching {
+    Settings.Global.getInt(reactContext.contentResolver, "adb_wifi_enabled", 1) != 0
+  }.getOrDefault(true)
+
+  /** Re-enables the wireless debugging toggle when the system/OEM turned it off. */
+  private fun ensureWirelessDebuggingEnabled() {
+    runCatching {
+      val granted = reactContext.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") ==
+        PackageManager.PERMISSION_GRANTED
+      if (granted && !wirelessDebuggingEnabled()) {
+        Settings.Global.putInt(reactContext.contentResolver, "adb_wifi_enabled", 1)
+      }
     }
   }
+
+  override fun getName(): String = "ClearScreenBackend"
 
   @ReactMethod
   fun getAdLearningState(promise: Promise) = learningCommand(promise, "state")
@@ -129,9 +152,11 @@ class ClearScreenNativeModule(
   fun deleteAdLearningRule(key: String, promise: Promise) = learningCommand(promise, "delete", key)
 
   private fun learningCommand(promise: Promise, action: String, key: String? = null) {
+    val deadline = SystemClock.elapsedRealtime() + if (action == "state") 3_000L else 6_000L
     android.os.Handler(android.os.Looper.getMainLooper()).post {
       synchronized(ClearScreenPrivacyConsentStore.operationLock) {
         try {
+          check(SystemClock.elapsedRealtime() < deadline) { "学习请求等待超时，尚未执行" }
           requirePrivacyConsent()
           val learning = ClearScreenAccessibilityService.learningService?.adLearning
           when (action) {
@@ -162,7 +187,7 @@ class ClearScreenNativeModule(
               putString("id", id)
               putString("appId", rule.optString("pkg"))
               putDouble("timestamp", rule.optLong("created", 0L).toDouble())
-              putBoolean("needsRelearn", selectorVersion !in 2..4)
+              putBoolean("needsRelearn", selectorVersion !in 2..5)
             })
           }
           promise.resolve(Arguments.createMap().apply {
@@ -177,7 +202,7 @@ class ClearScreenNativeModule(
   }
 
   @ReactMethod
-  fun getSnapshot(promise: Promise) = runAsync(promise) {
+  fun getSnapshot(promise: Promise) = runAsync(promise, snapshotExecutor) {
     val current = snapshot()
     scheduleAdbReconnect()
     current
@@ -199,7 +224,7 @@ class ClearScreenNativeModule(
 
   /** No app inventory, logs, signing diagnostics, or OEM provider reads. */
   @ReactMethod
-  fun getAccessibilityHealth(promise: Promise) = runAsync(promise, permissionExecutor) {
+  fun getAccessibilityHealth(promise: Promise) = runAsync(promise, healthExecutor) {
     if (!privacyConsentStore.hasCurrentConsent()) privacySnapshot()
     else {
       val map = Arguments.createMap().apply {
@@ -221,16 +246,14 @@ class ClearScreenNativeModule(
   fun setMasterEnabled(enabled: Boolean, promise: Promise) = runAsync(promise) {
     requirePrivacyConsent()
     store.setMasterEnabled(enabled)
-    snapshot()
+    true
   }
 
   @ReactMethod
-  fun acceptPrivacyPolicy(promise: Promise) = runAsync(promise) {
+  fun acceptPrivacyPolicy(promise: Promise) = runSnapshotMutation(promise) {
     privacyConsentStore.acceptCurrentPolicy()
     store.prepareAfterConsent()
-    val current = snapshot()
     scheduleAdbReconnect()
-    current
   }
 
   @ReactMethod
@@ -292,10 +315,9 @@ class ClearScreenNativeModule(
   }
 
   @ReactMethod
-  fun restoreDefaults(promise: Promise) = runAsync(promise) {
+  fun restoreDefaults(promise: Promise) = runSnapshotMutation(promise) {
     requirePrivacyConsent()
     store.restoreDefaultPreferences()
-    snapshot()
   }
 
   @ReactMethod
@@ -306,10 +328,9 @@ class ClearScreenNativeModule(
   }
 
   @ReactMethod
-  fun clearLogs(promise: Promise) = runAsync(promise) {
+  fun clearLogs(promise: Promise) = runSnapshotMutation(promise) {
     requirePrivacyConsent()
     store.clearEvents()
-    snapshot()
   }
 
   @ReactMethod
@@ -552,9 +573,10 @@ class ClearScreenNativeModule(
 
   @ReactMethod
   fun stopAdbAutoPair(promise: Promise) = runAsync(promise) {
+    // Only cancels the in-flight pairing assist. The user's request to keep the
+    // channel connected — and any live connection itself — must survive a
+    // cancelled attempt, otherwise the switch silently drops after setup.
     ClearScreenAdbPairingHelper.stop()
-    ClearScreenAdbOperations.cancelReconnectRequest(reactContext)
-    if (ClearScreenAdbOperations.isVerifiedConnected()) ClearScreenAdbOperations.disconnect(reactContext)
     adbResult(ClearScreenAdbOperations.status(reactContext))
   }
 
@@ -643,7 +665,10 @@ class ClearScreenNativeModule(
 
   @ReactMethod
   fun openStartupSettings(promise: Promise) {
-    openObservedSettings(promise, ClearScreenSettingsObserver.Kind.STARTUP) { settingsNavigator.openStartupSettings() }
+    if (settingsNavigator.startupManagement == "sleeping") {
+      ClearScreenSettingsObserver.clear()
+      openSettingsPage(promise) { settingsNavigator.openStartupSettings() }
+    } else openObservedSettings(promise, ClearScreenSettingsObserver.Kind.STARTUP) { settingsNavigator.openStartupSettings() }
   }
 
   @ReactMethod
@@ -652,12 +677,11 @@ class ClearScreenNativeModule(
   }
 
   @ReactMethod
-  fun confirmVendorStartupGuide(promise: Promise) = runAsync(promise) {
+  fun confirmVendorStartupGuide(promise: Promise) = runSnapshotMutation(promise) {
     requirePrivacyConsent()
     // This is an acknowledgement of the guided check, not a fabricated claim
     // that Android exposed the OEM switch to us.
     store.setVendorStartupGuideConfirmed(true)
-    snapshot()
   }
 
   override fun invalidate() {
@@ -667,8 +691,10 @@ class ClearScreenNativeModule(
     permissionReader.close()
     cleanupController.close()
     permissionExecutor.shutdownNow()
+    healthExecutor.shutdownNow()
+    snapshotExecutor.shutdownNow()
     adbReconnectExecutor.shutdownNow()
-    inventoryThreads?.shutdownNow()
+    appInventory.close()
     executor.shutdownNow()
     super.invalidate()
   }
@@ -743,7 +769,8 @@ class ClearScreenNativeModule(
     map.putBoolean("vpnRunning", false)
     map.putNullableBoolean("batteryOptimizationIgnored", isBatteryOptimizationIgnored())
     map.putNullableBoolean("backgroundRestricted", isBackgroundRestricted())
-    map.putNullableBoolean("startupAllowed", permissionReader.startupAllowed())
+    map.putNullableBoolean("startupAllowed", if (settingsNavigator.startupManagement == "sleeping") null else permissionReader.startupAllowed())
+    map.putString("startupManagement", settingsNavigator.startupManagement)
     map.putNullableBoolean("backgroundAllowed", ClearScreenSettingsObserver.value(ClearScreenSettingsObserver.Kind.BACKGROUND))
     map.putBoolean("isVivoFamily", isVivoFamilyDevice())
     map.putBoolean("vendorStartupSettingsAvailable", settingsNavigator.hasStartupSettings())
@@ -887,72 +914,18 @@ class ClearScreenNativeModule(
     if (value == null) map.putNull(key) else map.putString(key, value)
   }
 
-  private fun installedApps(): List<WritableMap> {
-    val packageManager = reactContext.packageManager
-    val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-    val resolveInfos = packageManager.queryIntentActivities(launchIntent, PackageManager.MATCH_ALL)
-    val packages = resolveInfos.mapNotNull { it.activityInfo?.packageName }
-      .distinct()
-      .filter { it != reactContext.packageName }
-      .mapNotNull { packageName ->
-        runCatching { packageManager.getApplicationInfo(packageName, PackageManager.MATCH_ALL) }.getOrNull()
-      }
-    // Resolving every app label and launcher icon is what makes the first
-    // screen slow, and PackageManager serves these reads concurrently. Spread
-    // them over a small pool, and read each label once instead of once for
-    // sorting and once for the payload.
-    val entries = packages.map { info ->
-      inventoryPool().submit<InventoryEntry> {
-        InventoryEntry(
-          info = info,
-          name = packageManager.getApplicationLabel(info).toString(),
-          iconUri = drawableToDataUri(packageManager.getApplicationIcon(info)),
-        )
-      }
+  private fun installedApps(): List<WritableMap> = appInventory.entries().map { entry ->
+    val rule = store.getAppRule(entry.packageName)
+    Arguments.createMap().apply {
+      putString("id", entry.packageName)
+      putString("packageName", entry.packageName)
+      putString("name", entry.name)
+      putString("iconUri", entry.iconUri)
+      putBoolean("skip", rule.skipEnabled)
+      putBoolean("network", rule.networkBlockEnabled)
+      putBoolean("whitelist", rule.whitelist)
+      putBoolean("isSystemApp", entry.systemApp)
     }
-    val resolved = entries.map { future ->
-      try {
-        future.get()
-      } catch (error: InterruptedException) {
-        Thread.currentThread().interrupt()
-        throw error
-      } catch (error: ExecutionException) {
-        throw (error.cause ?: error)
-      }
-    }.sortedBy { it.name.lowercase() }
-
-    return resolved.map { entry ->
-      val info = entry.info
-      val rule = store.getAppRule(info.packageName)
-      Arguments.createMap().apply {
-        putString("id", info.packageName)
-        putString("packageName", info.packageName)
-        putString("name", entry.name)
-        putString("iconUri", entry.iconUri)
-        putBoolean("skip", rule.skipEnabled)
-        putBoolean("network", rule.networkBlockEnabled)
-        putBoolean("whitelist", rule.whitelist)
-        putBoolean("isSystemApp", info.flags and ApplicationInfo.FLAG_SYSTEM != 0)
-      }
-    }
-  }
-
-  private data class InventoryEntry(
-    val info: ApplicationInfo,
-    val name: String,
-    val iconUri: String,
-  )
-
-  private fun drawableToDataUri(drawable: android.graphics.drawable.Drawable): String {
-    val size = 96
-    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    drawable.setBounds(0, 0, size, size)
-    drawable.draw(canvas)
-    val output = ByteArrayOutputStream()
-    bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
-    bitmap.recycle()
-    return "data:image/png;base64," + Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
   }
 
   private fun isBatteryOptimizationIgnored(): Boolean? {
@@ -993,27 +966,20 @@ class ClearScreenNativeModule(
       reactContext.contentResolver,
       Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
     ).orEmpty()
-    val serviceEnabled = runCatching {
-      val manager = reactContext.getSystemService(AccessibilityManager::class.java)
-      manager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-        ?.any { info ->
-          val serviceInfo = info.resolveInfo?.serviceInfo
-          serviceInfo?.packageName?.equals(component.packageName, ignoreCase = true) == true &&
-            serviceInfo?.name?.equals(component.className, ignoreCase = true) == true
-        } == true
-    }.getOrDefault(false)
-    val processAlive = runCatching {
-      val manager = reactContext.getSystemService(ActivityManager::class.java)
-      manager?.runningAppProcesses.orEmpty().any { process ->
-        process.processName == reactContext.packageName
-      }
-    }.getOrDefault(false)
-    val serviceBound = serviceEnabled && ClearScreenAccessibilityService.running
+    val settingEnabled = storedServices.split(':').any {
+      val saved = ComponentName.unflattenFromString(it)
+      saved != null && saved.packageName.equals(component.packageName, ignoreCase = true) &&
+        saved.className.equals(component.className, ignoreCase = true)
+    }
+    val serviceBound = settingEnabled && ClearScreenAccessibilityService.running
+    // This module and the accessibility service use the same default process.
+    // Executing this call proves that process is alive, not that the service is bound.
+    val processAlive = android.os.Process.myPid() > 0
     val health = if (!serviceBound) ClearScreenAccessibilityHealth.UNAVAILABLE
       else if (verify && hostResumed) ClearScreenAccessibilityHealth.check(reactContext.currentActivity)
       else ClearScreenAccessibilityHealth.current()
     return AccessibilityState(
-      settingEnabled = ClearScreenAccessibilityService.isEnabled(reactContext),
+      settingEnabled = settingEnabled,
       serviceBound = serviceBound,
       processAlive = processAlive,
       storedServices = storedServices,
@@ -1038,9 +1004,11 @@ class ClearScreenNativeModule(
   }
 
   private fun openObservedSettings(promise: Promise, kind: ClearScreenSettingsObserver.Kind, open: () -> Unit) {
+    val deadline = SystemClock.elapsedRealtime() + 5_000L
     try {
       requirePrivacyConsent()
       ClearScreenSettingsObserver.begin(reactContext, kind)
+      check(hostResumed && SystemClock.elapsedRealtime() < deadline) { "设置读取超时或应用已离开前台，请返回后重试" }
       open()
       promise.resolve(true)
     } catch (error: Exception) {
@@ -1063,13 +1031,39 @@ class ClearScreenNativeModule(
     java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
 
   private fun <T> runAsync(promise: Promise, worker: ExecutorService = executor, block: () -> T) {
-    worker.execute {
-      try {
-        promise.resolve(block())
-      } catch (error: Exception) {
-        promise.reject("BACKEND_ERROR", error)
+    val deadline = SystemClock.elapsedRealtime() + if (worker === snapshotExecutor) 12_000L else if (worker === healthExecutor) 2_000L else 4_000L
+    try {
+      worker.execute {
+        if (SystemClock.elapsedRealtime() >= deadline) {
+          promise.reject("BACKEND_TIMEOUT", "请求等待超时，请重试")
+          return@execute
+        }
+        try {
+          promise.resolve(block())
+        } catch (error: Exception) {
+          promise.reject("BACKEND_ERROR", error)
+        }
       }
+    } catch (error: Exception) {
+      promise.reject("BACKEND_BUSY", "读取繁忙，请稍后重试", error)
     }
+  }
+
+  /** Commit on the command queue; app enumeration must not hold that queue. */
+  private fun runSnapshotMutation(promise: Promise, mutation: () -> Unit) {
+    val deadline = SystemClock.elapsedRealtime() + 4_000L
+    try {
+      executor.execute {
+        if (SystemClock.elapsedRealtime() >= deadline) {
+          promise.reject("BACKEND_TIMEOUT", "操作等待超时，尚未执行")
+          return@execute
+        }
+        try {
+          mutation()
+          runAsync(promise, snapshotExecutor) { snapshot() }
+        } catch (error: Exception) { promise.reject("BACKEND_ERROR", error) }
+      }
+    } catch (error: Exception) { promise.reject("BACKEND_BUSY", "操作繁忙，请稍后重试", error) }
   }
 
 }

@@ -32,7 +32,6 @@ import org.json.JSONObject
 import java.io.Closeable
 import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.TimeoutException
 import kotlin.math.abs
 
@@ -66,9 +65,9 @@ internal class ClearScreenAdLearning(
     private set
   @Volatile internal var preparingSelection = false
     private set
-  private val backgroundReadBusy = AtomicBoolean(false)
-  private val selectionReadBusy = AtomicBoolean(false)
-  private val replayReadBusy = AtomicBoolean(false)
+  private val backgroundReadBusy = ReadChannel()
+  private val selectionReadBusy = ReadChannel()
+  private val replayReadBusy = ReadChannel()
   private var previous: Page? = null
   @Volatile private var pending = false
   @Volatile private var replaying = false
@@ -99,6 +98,7 @@ internal class ClearScreenAdLearning(
       "replaying=$replaying rules=${rules.length()} status=$replayStatus " +
       "lookupMs=$replayLookupMs lookupReadMs=$replayLookupReadMs lookupMatchMs=$replayLookupMatchMs " +
       "dispatchMs=$replayDispatchMs " +
+      "selectionReadBusy=${selectionReadBusy.get()} selectionReaders=${selectionReadBusy.workerCount()} " +
       "ageMs=${if (replayStatusAt == 0L) -1L else SystemClock.uptimeMillis() - replayStatusAt}"
   }
   private fun recordReplay(status: String) {
@@ -118,6 +118,7 @@ internal class ClearScreenAdLearning(
     val path: String, val id: String, val kind: String, val label: String, val hasLabel: Boolean,
     val bounds: Rect, val visible: Boolean, val clickable: Boolean, val enabled: Boolean,
     val close: Boolean, val unsafe: Boolean, val scrollable: Boolean, val readySkip: Boolean, val adBadge: Boolean,
+    val meaning: String,
   )
   private data class Page(
     val pkg: String, val window: Int, val bounds: Rect, val shape: String,
@@ -143,6 +144,28 @@ internal class ClearScreenAdLearning(
     @Suppress("DEPRECATION") override fun close() { nodes.values.forEach { it.recycle() } }
   }
 
+  /** One current request, at most two live workers including retired Binder reads. */
+  private class ReadChannel {
+    class Lease { @Volatile var cancelled = false }
+    private var owner: Lease? = null
+    private var workers = 0
+    @Synchronized fun acquire(): Lease? {
+      if (owner != null || workers >= 2) return null
+      return Lease().also { owner = it; workers++ }
+    }
+    @Synchronized fun get(): Boolean = owner != null
+    @Synchronized fun workerCount(): Int = workers
+    @Synchronized fun cancel(lease: Lease) {
+      lease.cancelled = true
+      if (owner === lease) owner = null
+    }
+    @Synchronized fun cancelCurrent() { owner?.cancelled = true; owner = null }
+    @Synchronized fun workerFinished(lease: Lease) {
+      if (owner === lease) owner = null
+      workers--
+    }
+  }
+
   private fun control(node: AccessibilityNodeInfo, path: String, pkg: String, insideReadySkip: Boolean = false,
     safety: PageSafety? = null): Control {
     val bounds = Rect().also(node::getBoundsInScreen)
@@ -166,6 +189,12 @@ internal class ClearScreenAdLearning(
     val readySkip = clickable && node.isEnabled &&
       (action?.kind == AdSemanticRules.ControlKind.SKIP || AdSemanticRules.isSkipResource(id)) &&
       !AdSemanticRules.hasPendingSkipHint(labels)
+    val meaning = when {
+      readySkip -> "skip"
+      action?.kind == AdSemanticRules.ControlKind.CLOSE || action?.kind == AdSemanticRules.ControlKind.GLYPH -> "close"
+      !AdSemanticRules.isSkipResource(id) && CLOSE_RESOURCE.containsMatchIn(id) -> "close"
+      else -> "exact"
+    }
     // Only a ready skip and its own counter children may ignore countdown changes.
     val identity = if (readySkip || insideReadySkip) labels.joinToString(" ") {
       AdSemanticRules.ocrEvidenceLabel(it, insideReadySkip)
@@ -180,11 +209,11 @@ internal class ClearScreenAdLearning(
       clickable, node.isEnabled,
       action != null || readySkip ||
         CLOSE_RESOURCE.containsMatchIn(id),
-      unsafe, node.isScrollable, readySkip, labels.any { AdSemanticRules.normalize(it) in AD_BADGES })
+      unsafe, node.isScrollable, readySkip, labels.any { AdSemanticRules.normalize(it) in AD_BADGES }, meaning)
   }
 
   private fun frame(nodeLimit: Int = 500, childLimit: Int = 150, depthLimit: Int = 30,
-    keepReading: () -> Boolean = { true }): Frame? {
+    keepReading: () -> Boolean = { true }, visibleOnly: Boolean = false): Frame? {
     if (!keepReading()) return null
     val root = runCatching(safeRoot).getOrNull() ?: return null
     val nodes = linkedMapOf<String, AccessibilityNodeInfo>()
@@ -194,6 +223,7 @@ internal class ClearScreenAdLearning(
     fun visit(node: AccessibilityNodeInfo, path: String, depth: Int, pkg: String, insideReadySkip: Boolean = false) {
       nodes[path] = node
       if (!keepReading()) { truncated = true; return }
+      if (visibleOnly && depth > 0 && !node.isVisibleToUser) return
       val captured = control(node, path, pkg, insideReadySkip, safety)
       controls.add(captured)
       // Input controls are never candidates; do not read their descendants either.
@@ -226,63 +256,63 @@ internal class ClearScreenAdLearning(
     }
   }
 
-  /** Binder/tree reads never run on the overlay's input thread and never queue behind a stuck read. */
+  /** Retire timed-out reads without letting late results release a newer read. */
   private fun <T> readAsync(
     work: (() -> Boolean) -> T,
     discard: (T) -> Unit = {},
     release: () -> Unit = {},
     requireLearning: Boolean = true,
-    busy: AtomicBoolean = selectionReadBusy,
+    busy: ReadChannel = selectionReadBusy,
     timeoutMs: Long = 2_500L,
     readVersion: () -> Long = { generation },
+    onSettled: () -> Unit = {},
     finish: (Result<T>) -> Unit,
   ): Boolean {
-    if (!busy.compareAndSet(false, true)) return false
+    val lease = busy.acquire() ?: return false
     val session = readVersion()
     val deadline = SystemClock.uptimeMillis() + timeoutMs
     val sessionCurrent = { readVersion() == session && (!requireLearning || active) }
-    val current = { sessionCurrent() && SystemClock.uptimeMillis() < deadline }
+    val current = { !lease.cancelled && sessionCurrent() && SystemClock.uptimeMillis() < deadline }
     var delivered = false // Only accessed on the handler thread.
-    val timeout = Runnable {
-      if (!delivered && sessionCurrent()) {
-        delivered = true
+    lateinit var timeout: Runnable
+    fun deliver(result: Result<T>) {
+      if (delivered) { result.onSuccess(discard); return }
+      delivered = true
+      handler.removeCallbacks(timeout)
+      val sameSession = sessionCurrent()
+      val cancelled = lease.cancelled
+      val timely = current()
+      busy.cancel(lease)
+      // Cleanup also runs for invalidated sessions; callers own their UI token.
+      runCatching(onSettled)
+      if (!sameSession || cancelled) result.onSuccess(discard)
+      else if (timely) finish(result)
+      else {
+        result.onSuccess(discard)
         Log.i("ClearScreenLearning", "read-timeout")
         finish(Result.failure(TimeoutException()))
       }
     }
+    timeout = Runnable { deliver(Result.failure(TimeoutException())) }
     handler.postDelayed(timeout, timeoutMs)
     val started = runCatching {
       Thread({
         val result = runCatching { try { work(current) } finally { release() } }
-        busy.set(false)
-        handler.post {
-          handler.removeCallbacks(timeout)
-          if (!delivered && current()) {
-            delivered = true
-            finish(result)
-          } else {
-            result.onSuccess(discard)
-            if (!delivered && sessionCurrent()) {
-              delivered = true
-              finish(Result.failure(TimeoutException()))
-            }
-          }
-        }
+        busy.workerFinished(lease)
+        handler.post { deliver(result) }
       }, "ClearScreenLearningReader").apply { isDaemon = true; start() }
     }
     if (started.isFailure) {
-      release()
-      busy.set(false)
-      handler.removeCallbacks(timeout)
-      delivered = true
-      finish(Result.failure(started.exceptionOrNull()!!))
+      runCatching(release)
+      busy.workerFinished(lease)
+      deliver(Result.failure(started.exceptionOrNull()!!))
     }
     return true
   }
 
   /** Capture the current accessible controls and window identity before showing the selector. */
   private fun selectionWindow(current: () -> Boolean): SelectionWindow? {
-    val captured = frame(3000, 1000, 30, current) ?: return null
+    val captured = frame(3000, 1000, 30, current, visibleOnly = true) ?: return null
     return captured.use {
       val page = it.page
       if (!current()) null else SelectionWindow(page.pkg, page.window, page.updated, selectionMarkers(page), page)
@@ -387,7 +417,7 @@ internal class ClearScreenAdLearning(
     return result
   }
 
-  private fun selectorFor(page: Page, target: Control): JSONObject? {
+  private fun legacySelectorFor(page: Page, target: Control): JSONObject? {
     var path = parent(target.path)
     var first: JSONObject? = null
     var identifiedAnchor: JSONObject? = null
@@ -407,6 +437,96 @@ internal class ClearScreenAdLearning(
     return identifiedAnchor ?: first
   }
 
+  /** Bind the selected control to its own container, not to other screen content. */
+  private fun selectorFor(page: Page, target: Control): JSONObject? {
+    val nodesByPath = page.controls.associateBy { it.path }
+    var path = parent(target.path)
+    repeat(8) {
+      val anchor = nodesByPath[path] ?: return legacySelectorFor(page, target)
+      val witness = focusedWitness(page, target, anchor)
+      if (witness != null) {
+        val selector = JSONObject().put("version", 5).put("id", target.id).put("kind", target.kind)
+          .put("label", focusedLabel(target)).put("meaning", target.meaning)
+          .put("anchorId", anchor.id).put("anchorKind", anchor.kind).put("witness", witness)
+          // Only anonymous controls need the branch. Identified close/skip
+          // controls may acquire/remove wrappers while the ad is animating.
+          .put("branch", if (focusedHasIdentity(target)) "" else
+            digest(branch(page, target, anchor).joinToString("|") { role(it) }))
+        if (focusedMatches(page, selector).singleOrNull()?.path == target.path) return selector
+      }
+      if (path == "0") return legacySelectorFor(page, target)
+      path = parent(path)
+    }
+    return legacySelectorFor(page, target)
+  }
+
+  private fun focusedHasIdentity(target: Control): Boolean =
+    target.id.isNotBlank() || target.meaning != "exact" || target.hasLabel
+
+  private fun focusedLabel(target: Control): String = when (target.meaning) {
+    "close" -> CLOSE_IDENTITY_HASH
+    "skip" -> SKIP_IDENTITY_HASH
+    else -> target.label
+  }
+
+  private fun focusedIdentityMatches(target: Control, selector: JSONObject): Boolean =
+    target.id == selector.optString("id") && target.kind == selector.optString("kind") &&
+      target.meaning == selector.optString("meaning") && focusedLabel(target) == selector.optString("label")
+
+  /** A local witness may change its text, descendants or position between reads. */
+  private fun focusedWitness(page: Page, target: Control, anchor: Control, preferred: String? = null): String? {
+    if (anchor.scrollable || !descendant(target.path, anchor.path) || !anchor.bounds.contains(target.bounds)) return null
+    if (anchor.id.isNotBlank() && focusedHasIdentity(target)) return "identified"
+    val anchorArea = area(anchor)
+    val pageArea = page.bounds.width().toLong() * page.bounds.height()
+    val bounded = anchorArea > 0 && pageArea > 0 && page.bounds.contains(anchor.bounds) &&
+      anchorArea * 2 <= pageArea && anchor.bounds.height() * 5 <= page.bounds.height() * 3
+    if (!bounded) return null
+    val context = page.controls.asSequence().filter { other ->
+      other.visible && !other.unsafe && descendant(other.path, anchor.path) &&
+        other.path != target.path && !descendant(other.path, target.path) && !descendant(target.path, other.path) &&
+        anchor.bounds.contains(other.bounds)
+    }
+    if (context.any { it.adBadge }) return "ad"
+    // A label-free floating creative is still usable context. Its content is
+    // not fingerprinted, and unrelated siblings/lyrics are not compared.
+    val companions = context.filter { area(it) >= maxOf(area(target) * 2, dp(32).toLong() * dp(32)) }
+    if (focusedHasIdentity(target)) return if (companions.any()) "content" else null
+    // Anonymous icons also retain a structural witness for their creative;
+    // the icon's generic ImageView class alone must not identify other UI.
+    return companions.map { "content:${digest(role(it))}" }
+      .firstOrNull { preferred == null || it == preferred }
+  }
+
+  private fun focusedMatches(page: Page, selector: JSONObject): List<Control> {
+    val savedWitness = selector.optString("witness")
+    if (savedWitness !in setOf("identified", "ad", "content") && !savedWitness.startsWith("content:")) return emptyList()
+    val targets = page.controls.filter { focusedIdentityMatches(it, selector) &&
+      eligible(page, it, allowUnclickable = true) && closeCandidate(it) }
+    if (targets.size > 80) return emptyList()
+    val nodesByPath = page.controls.associateBy { it.path }
+    return targets.asSequence().filter { target ->
+      var path = parent(target.path)
+      var matched = false
+      for (depth in 1..8) {
+        val anchor = nodesByPath[path] ?: break
+        if (anchor.id == selector.optString("anchorId") && anchor.kind == selector.optString("anchorKind")) {
+          val witness = focusedWitness(page, target, anchor, preferred = savedWitness)
+          val sameWitness = witness != null && (witness == savedWitness || savedWitness.startsWith("content") && witness == "ad")
+          val savedBranch = selector.optString("branch")
+          if (sameWitness && (savedBranch.isBlank() && focusedHasIdentity(target) || savedBranch.isNotBlank() &&
+              savedBranch == digest(branch(page, target, anchor).joinToString("|") { role(it) }))) {
+            matched = true
+            break
+          }
+        }
+        if (path == "0") break
+        path = parent(path)
+      }
+      matched
+    }.take(2).toList()
+  }
+
   private fun role(control: Control) = "${control.id}:${control.kind}:${control.clickable}"
 
   private fun branch(page: Page, target: Control, anchor: Control): List<Control> =
@@ -422,6 +542,7 @@ internal class ClearScreenAdLearning(
 
   private fun matches(page: Page, selector: JSONObject): List<Control> {
     val version = selector.optInt("version")
+    if (version == 5) return focusedMatches(page, selector)
     if (version !in 2..4) return emptyList()
     val route = selector.optString("route")
     if (!route.startsWith('.')) return emptyList()
@@ -460,7 +581,7 @@ internal class ClearScreenAdLearning(
       // original anchor/route only when a single target still belongs to a
       // bounded local card with an explicit ad badge in the current tree.
       val legacyAdContext = version == 2 && candidates.size == 1 && !exactContext && !stableIdentity &&
-        selectorFor(page, target)?.optBoolean("localAdBadge") == true
+        legacySelectorFor(page, target)?.optBoolean("localAdBadge") == true
       if (exactContext || stableIdentity || stableAdStructure || legacyAdContext) target else null
     }
     // The complete saved local tree still identifies anonymous sibling icons
@@ -516,11 +637,12 @@ internal class ClearScreenAdLearning(
     selector.optString("id"), selector.optString("kind"), selector.optString("label"),
     selector.optString("anchorId"), selector.optString("anchorKind"),
     selector.optString("branch").ifBlank { selector.optString("route") },
+    selector.optString("witness"),
   ).joinToString("\u001f")
 
   /** Different saved rules can still point to the very same visible node. */
   private fun replayControlKey(page: Page, target: Control): String = listOf(
-    page.pkg, page.updated.toString(), page.window.toString(), target.path, target.id, target.kind, target.label,
+    page.pkg, page.updated.toString(), page.window.toString(), target.path, target.id, target.kind, focusedLabel(target),
   ).joinToString("\u001f")
 
   /** Expand the finger hit area only; the saved rule and eventual action still use the real node. */
@@ -606,7 +728,9 @@ internal class ClearScreenAdLearning(
       })
       return PickResult(issue = PickIssue.AMBIGUOUS)
     val selector = selectorFor(page, target) ?: return PickResult(issue = PickIssue.UNIDENTIFIABLE)
-    if (matches(page, selector).size != 1) return PickResult(issue = PickIssue.UNIDENTIFIABLE)
+    val confirmed = matches(page, selector)
+    if (confirmed.size > 1) return PickResult(issue = PickIssue.AMBIGUOUS)
+    if (confirmed.singleOrNull()?.path != target.path) return PickResult(issue = PickIssue.UNIDENTIFIABLE)
     return PickResult(selection = Selection(page, target, selector))
   }
 
@@ -617,13 +741,15 @@ internal class ClearScreenAdLearning(
     val originalSelector = selectorFor(markedPage, expected)
     val identified = originalSelector?.let { matches(page, it) }.orEmpty()
     val atMarker = identified.filter { sameBoundsWithinTolerance(it.bounds, expected.bounds) }
-    val candidates = if (atMarker.isNotEmpty()) atMarker else page.controls.filter {
+    val candidates = if (atMarker.isNotEmpty()) atMarker
+      else if (originalSelector?.optInt("version") == 5 && identified.size == 1) identified
+      else page.controls.filter {
       sameControlIdentity(expected, it) && sameBoundsWithinTolerance(it.bounds, expected.bounds) &&
         eligible(page, it, allowUnclickable = true) && closeCandidate(it)
     }
     if (candidates.size > 1) return PickResult(issue = PickIssue.AMBIGUOUS)
     val target = candidates.singleOrNull() ?: return PickResult(issue =
-      if (identified.isNotEmpty()) PickIssue.TARGET_MOVED else PickIssue.NO_TARGET)
+      if (identified.size > 1) PickIssue.AMBIGUOUS else if (identified.isNotEmpty()) PickIssue.TARGET_MOVED else PickIssue.NO_TARGET)
     // A newly exposed/reparented node may have the same visible identity and
     // bounds. Build its selector from the current local context, then require
     // that selector to identify this exact current node uniquely before acting.
@@ -639,6 +765,7 @@ internal class ClearScreenAdLearning(
     selectionGeneration++
     preparingSelection = false
     updateToolbarSelectionState()
+    backgroundReadBusy.cancelCurrent(); selectionReadBusy.cancelCurrent(); replayReadBusy.cancelCurrent()
     clearPending()
     previous = null
     if (selecting) {
@@ -662,6 +789,7 @@ internal class ClearScreenAdLearning(
     selecting = false
     selectionWindowId = null
     preparingSelection = false
+    backgroundReadBusy.cancelCurrent(); selectionReadBusy.cancelCurrent(); replayReadBusy.cancelCurrent()
     previous = null
     handler.removeCallbacks(tick)
     removeOverlay()
@@ -734,7 +862,7 @@ internal class ClearScreenAdLearning(
             val target = page.controls.filter { eligible(page, it) && it.close && it.bounds == bounds &&
               it.id == source.viewIdResourceName.orEmpty() && it.kind == source.className.toString() }.singleOrNull()
             val selector = target?.let { selectorFor(page, it) }
-            if (selector == null || matches(page, selector).size != 1) null else {
+            if (target == null || selector == null || matches(page, selector).singleOrNull()?.path != target.path) null else {
               @Suppress("DEPRECATION") val tracked = AccessibilityNodeInfo.obtain(source)
               selector to Clicked(page, tracked)
             }
@@ -803,13 +931,21 @@ internal class ClearScreenAdLearning(
     if (!active) return
     if (blocksReplay) { toast("正在处理，请稍候"); return }
     if (preparingSelection) return
+    val request = ++selectionGeneration
+    backgroundReadBusy.cancelCurrent()
+    selectionReadBusy.cancelCurrent()
     preparingSelection = true
     updateToolbarSelectionState()
     previous = null
+    val settle: () -> Unit = {
+      if (selectionGeneration == request) {
+        preparingSelection = false
+        updateToolbarSelectionState()
+        handler.post { if (active && allowed() && !preparingSelection && !selecting && !blocksReplay) resumeScan() }
+      }
+    }
     if (!readAsync(work = ::selectionWindow, timeoutMs = 4_500L,
-        readVersion = { selectionGeneration }) { result ->
-      preparingSelection = false
-      updateToolbarSelectionState()
+        readVersion = { selectionGeneration }, onSettled = settle) { result ->
       val before = result.getOrNull()
       if (before == null) {
         Log.i("ClearScreenLearning", if (result.isFailure) "entry-failed" else "entry-unavailable")
@@ -819,10 +955,9 @@ internal class ClearScreenAdLearning(
         toast("当前页面没有可识别的控件")
       } else showControlSelector(before)
     }) {
-      preparingSelection = false
-      updateToolbarSelectionState()
+      settle()
       Log.i("ClearScreenLearning", "entry-busy")
-      toast("控件读取尚未完成")
+      toast("系统读取暂未响应，请稍后重试")
     }
   }
 
@@ -949,14 +1084,16 @@ internal class ClearScreenAdLearning(
           readingSelection = true
           showStatus("正在识别控件")
           if (!readAsync(work = { live ->
-              frame(3000, 1000, 30, live)?.use { current ->
+              frame(3000, 1000, 30, live, visibleOnly = true)?.use { current ->
                 val page = current.page
                 val picked = if (sameWindow(selectedWindow, page)) pick(page, x, y, selectedWindow.page, marker)
                   else PickResult(issue = PickIssue.WINDOW_CHANGED)
                 if (picked.issue == null) picked else picked.copy(freshWindow =
                   SelectionWindow(page.pkg, page.window, page.updated, selectionMarkers(page), page))
               } ?: PickResult(issue = PickIssue.UNAVAILABLE)
-            }, timeoutMs = 4_500L, readVersion = { selectionGeneration }) { result ->
+            }, timeoutMs = 4_500L, readVersion = { selectionGeneration }, onSettled = {
+              if (this@ClearScreenAdLearning.overlay === this && selectionRequest == request) readingSelection = false
+            }) { result ->
               if (!selecting || blocksReplay || this@ClearScreenAdLearning.overlay !== this || selectionRequest != request) return@readAsync
               readingSelection = false
               val outcome = result.getOrNull()
@@ -976,7 +1113,7 @@ internal class ClearScreenAdLearning(
                 PickIssue.BLOCKED -> "此处的控件不可选"
                 PickIssue.NO_TARGET -> "此处控件不可选"
                 PickIssue.AMBIGUOUS -> "附近有多个控件，请点准目标"
-                PickIssue.UNIDENTIFIABLE -> "控件无法稳定识别"
+                PickIssue.UNIDENTIFIABLE -> "未找到对应控件，请重试"
                 null -> "未找到可点击控件"
               })
             }) {
@@ -1031,13 +1168,12 @@ internal class ClearScreenAdLearning(
 
   private fun confirmControl(chosen: Selection) {
     if (!readAsync(work = { current ->
-      frame(3000, 1000, 30, current)?.use { captured ->
+      frame(3000, 1000, 30, current, visibleOnly = chosen.selector.optInt("version") == 5)?.use { captured ->
         val target = matches(captured.page, chosen.selector).singleOrNull()
         if (!sameWindow(chosen.page, captured.page) || target == null ||
-          !sameBoundsWithinTolerance(target.bounds, chosen.control.bounds) ||
-          chosen.page.scroll != captured.page.scroll) null else {
+          !sameSelectedTarget(chosen.page, chosen.control, captured.page, target, chosen.selector)) null else {
           var tracked: AccessibilityNodeInfo? = null
-          val sent = click(captured, target, current) { tracked = it }
+          val sent = click(captured, target, chosen.selector, current) { tracked = it }
           if (sent && tracked != null) Clicked(captured.page, tracked!!) else {
             @Suppress("DEPRECATION") tracked?.recycle()
             null
@@ -1059,17 +1195,19 @@ internal class ClearScreenAdLearning(
     }
   }
 
-  private fun click(frame: Frame, target: Control, current: () -> Boolean = { true },
+  private fun click(frame: Frame, target: Control, selector: JSONObject, current: () -> Boolean = { true },
     track: (AccessibilityNodeInfo) -> Unit = { trackedNode = it }): Boolean = runCatching {
+    val focused = selector.optInt("version") == 5
     if (!current() || !allowed() || !eligible(frame.page, target, allowUnclickable = true) ||
-      !canTouch(frame.page.pkg, frame.page.window, target.bounds)) return@runCatching false
+      !focused && !canTouch(frame.page.pkg, frame.page.window, target.bounds)) return@runCatching false
     val live = frame.nodes[target.path] ?: return@runCatching false
     if (!current() || !live.refresh() || live.packageName?.toString() != frame.page.pkg || live.windowId != frame.page.window) return@runCatching false
     val insideReadySkip = frame.page.controls.any { it.readySkip && descendant(target.path, it.path) }
     val refreshed = control(live, target.path, frame.page.pkg, insideReadySkip)
+    val sameTarget = if (focused) focusedIdentityMatches(refreshed, selector) else
+      sameControlIdentity(refreshed, target) && sameBoundsWithinTolerance(refreshed.bounds, target.bounds)
     if (!current() || !allowed() || !eligible(frame.page, refreshed, allowUnclickable = true) ||
-      refreshed.id != target.id || refreshed.kind != target.kind ||
-      refreshed.label != target.label || !sameBoundsWithinTolerance(refreshed.bounds, target.bounds) ||
+      !sameTarget ||
       !canTouch(frame.page.pkg, frame.page.window, refreshed.bounds)) return@runCatching false
     @Suppress("DEPRECATION")
     val tracked = AccessibilityNodeInfo.obtain(live)
@@ -1114,14 +1252,14 @@ internal class ClearScreenAdLearning(
     depthLimit: Int = 30, reopenOnFailure: Boolean = true) {
     val rule = JSONObject().put("key", UUID.randomUUID().toString()).put("pkg", page.pkg)
       .put("updated", page.updated).put("selector", selector).put("created", System.currentTimeMillis())
-    checkClosure(page, nodeLimit, childLimit, depthLimit) { closed ->
+    checkClosure(page, selector, nodeLimit, childLimit, depthLimit) { closed ->
       if (closed) {
         previous = null
         if (runCatching { store.saveLearnedAdRule(rule) }.getOrDefault(false)) {
-          // Learning pauses normal scanning. Resume it once this rule has been
-          // confirmed and saved so that the next encounter can use the rule.
-          stop("已学会关闭")
-          handler.post { if (!active && allowed() && !pending) resumeScan() }
+          // Keep the learning session and toolbar open so the user can learn
+          // additional controls. Resume normal scanning after this attempt.
+          toast("已学会关闭")
+          handler.post { if (active && allowed() && !pending) resumeScan() }
         } else {
           message = "学习规则保存失败"
           toast(message)
@@ -1144,7 +1282,7 @@ internal class ClearScreenAdLearning(
   }
 
   /** Require two disappearance samples; the attempt deadline also bounds slow Binder reads. */
-  private fun checkClosure(page: Page, nodeLimit: Int = 500, childLimit: Int = 150, depthLimit: Int = 30,
+  private fun checkClosure(page: Page, selector: JSONObject, nodeLimit: Int = 500, childLimit: Int = 150, depthLimit: Int = 30,
     finish: (Boolean) -> Unit) {
     val token = generation
     val wasReplay = replaying
@@ -1154,10 +1292,12 @@ internal class ClearScreenAdLearning(
         if (generation != token || !pending || !allowed()) return@postDelayed
         @Suppress("DEPRECATION") val tracked = trackedNode?.let { AccessibilityNodeInfo.obtain(it) }
         if (!readAsync(work = { current ->
-            val after = frame(nodeLimit, childLimit, depthLimit, current)?.use { it.page }
+            val after = frame(nodeLimit, childLimit, depthLimit, current,
+              visibleOnly = selector.optInt("version") == 5)?.use { it.page }
           val gone = current() && tracked?.let { !it.refresh() || !it.isVisibleToUser } == true
           after != null && after.pkg == page.pkg && after.updated == page.updated &&
-            after.scroll == page.scroll && after.shape != page.shape && gone
+            gone && if (selector.optInt("version") == 5) matches(after, selector).isEmpty()
+              else after.scroll == page.scroll && after.shape != page.shape
         }, release = { @Suppress("DEPRECATION") tracked?.recycle() }, requireLearning = false,
           busy = if (wasReplay) replayReadBusy else selectionReadBusy,
           timeoutMs = 4_500L) { result ->
@@ -1202,7 +1342,7 @@ internal class ClearScreenAdLearning(
       val attemptKey = replayKey(rule, selector)
       val lastAttempt = attempted[attemptKey]
       if (rule.optString("pkg") != pkg || rule.optString("key").isBlank() ||
-        selector.optInt("version") !in 2..4 || lastAttempt != null && now - lastAttempt < 30_000L) null
+        selector.optInt("version") !in 2..5 || lastAttempt != null && now - lastAttempt < 30_000L) null
       else rule
     }
     if (eligibleRules.isEmpty()) return@synchronized false
@@ -1218,7 +1358,8 @@ internal class ClearScreenAdLearning(
     val token = beginAttempt(25_000L, replay = true)
     if (!readAsync(work = { current ->
         val readStartedAt = SystemClock.uptimeMillis()
-        val currentFrame = frame(3000, 1000, 30, current)
+        val currentFrame = frame(3000, 1000, 30, current,
+          visibleOnly = eligibleRules.all { it.optJSONObject("selector")?.optInt("version") == 5 })
         val readMs = SystemClock.uptimeMillis() - readStartedAt
         val matchStartedAt = SystemClock.uptimeMillis()
         val read = currentFrame?.use { captured ->
@@ -1267,15 +1408,14 @@ internal class ClearScreenAdLearning(
           attemptedControls[controlKey] = SystemClock.uptimeMillis()
           while (attemptedControls.size > 80) attemptedControls.remove(attemptedControls.keys.first())
           if (!readAsync(work = { current ->
-              frame(3000, 1000, 30, current)?.use { captured ->
+              frame(3000, 1000, 30, current, visibleOnly = candidate.selector.optInt("version") == 5)?.use { captured ->
                 val live = matches(captured.page, candidate.selector).singleOrNull()
                 if (!current() || !sameWindow(candidate.page, captured.page) ||
-                  candidate.page.scroll != captured.page.scroll || live == null ||
-                  candidate.control.id != live.id || candidate.control.kind != live.kind ||
-                  candidate.control.label != live.label || candidate.control.bounds != live.bounds) ReplayAttempt()
+                  live == null || !sameSelectedTarget(candidate.page, candidate.control, captured.page, live,
+                    candidate.selector)) ReplayAttempt()
                 else {
                   var tracked: AccessibilityNodeInfo? = null
-                  val sent = click(captured, live, current) { tracked = it }
+                  val sent = click(captured, live, candidate.selector, current) { tracked = it }
                   val clicked = if (sent && tracked != null) Clicked(captured.page, tracked!!) else {
                     @Suppress("DEPRECATION") tracked?.recycle()
                     null
@@ -1300,7 +1440,7 @@ internal class ClearScreenAdLearning(
                 replayDispatchMs = SystemClock.uptimeMillis() - replayStartedAt
                 recordReplay("verifying")
                 trackedNode = clicked.node
-                checkClosure(clicked.page, 3000, 1000, 30) { closed ->
+                checkClosure(clicked.page, candidate.selector, 3000, 1000, 30) { closed ->
                   synchronized(ClearScreenPrivacyConsentStore.operationLock) {
                     recordReplay(if (closed) "closed" else "unconfirmed")
                     if (closed) {
@@ -1333,6 +1473,9 @@ internal class ClearScreenAdLearning(
   }
 
   private fun sameControlIdentity(a: Control, b: Control) = a.id == b.id && a.kind == b.kind && a.label == b.label
+  private fun sameSelectedTarget(before: Page, selected: Control, after: Page, live: Control, selector: JSONObject): Boolean =
+    if (selector.optInt("version") == 5) focusedIdentityMatches(selected, selector) && focusedIdentityMatches(live, selector)
+    else before.scroll == after.scroll && sameControlIdentity(selected, live) && sameBoundsWithinTolerance(selected.bounds, live.bounds)
   /** Allow only screen-pixel rounding, never relocation to another UI area. */
   private fun sameBoundsWithinTolerance(a: Rect, b: Rect): Boolean {
     val tolerance = maxOf(1, dp(2))
@@ -1397,6 +1540,8 @@ internal class ClearScreenAdLearning(
     private val CLOSE_RESOURCE = Regex("(?:^|[_/])(close|skip|dismiss)(?:$|[_])", RegexOption.IGNORE_CASE)
     private const val HEX = "0123456789abcdef"
     private val EMPTY_LABEL_HASH = digest("")
+    private val CLOSE_IDENTITY_HASH = digest("action:close")
+    private val SKIP_IDENTITY_HASH = digest("action:skip")
     private fun digest(text: String): String {
       val bytes = MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
       val output = CharArray(bytes.size * 2)

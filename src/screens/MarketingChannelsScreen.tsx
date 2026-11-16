@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { AppItem } from '../data';
 import { useAppAlert } from '../components/AppDialog';
 import { Background, Card, Toggle, TopBar } from '../components/UI';
+import { ADS_MARKETING_NOTIFICATIONS } from '../assets';
 import { ClearScreenNative, type MarketingChannel, type NotificationAccessStatus } from '../native/ClearScreenNative';
 import { C, COMPACT_UI } from '../theme';
 
@@ -27,6 +30,13 @@ export default function MarketingChannelsScreen({ apps, onBack, onOpenServicePer
   const promptShown = useRef(false);
   const refreshChannelsOnResume = useRef(false);
   const appNames = useMemo(() => new Map(apps.filter(app => app.packageName).map(app => [app.packageName!, app.name])), [apps]);
+  const sortedChannels = useMemo(() => channels
+    .map((channel, index) => ({ channel, index }))
+    .sort((left, right) => {
+      const enabledFirst = Number(right.channel.state === 'on') - Number(left.channel.state === 'on');
+      return enabledFirst || left.index - right.index;
+    })
+    .map(({ channel }) => channel), [channels]);
   const refreshAccess = useCallback(async () => {
     const [notification, cleanup] = await Promise.all([
       ClearScreenNative.getNotificationAccessStatus().catch(() => ({ supported: false, granted: false })),
@@ -109,18 +119,26 @@ export default function MarketingChannelsScreen({ apps, onBack, onOpenServicePer
   return (
     <Background>
       <ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
-        <TopBar compact title="营销通知" onBack={onBack} />
-        {observed ? <Text style={s.note}>未连接服务时只列出正在发通知或刚发生变更的渠道，结果不完整；连接后可读取完整清单。</Text> : null}
+        <TopBar compact title="营销通知管理" onBack={onBack} />
+        {observed ? <View style={s.noteBanner}>
+          <Ionicons name="information-circle" size={18} color={C.blue} style={s.noteIcon}/>
+          <Text style={s.note}>未连接服务时只列出正在发通知或刚发生变更的渠道，结果不完整；连接后可读取完整清单。</Text>
+        </View> : null}
         {observed ? <Pressable accessibilityRole="button" accessibilityLabel="去服务与权限连接" disabled={!!busy}
-          onPress={onOpenServicePermissions} style={s.actionRow}>
-          <Text style={s.action}>去连接补全</Text>
+          onPress={onOpenServicePermissions} style={({ pressed }) => [s.actionButton, pressed && s.actionPressed]}>
+          <LinearGradient colors={['#0B78F2', '#12C2C8']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.actionGradient}>
+            <Text style={s.action}>去连接补全</Text>
+          </LinearGradient>
         </Pressable> : null}
         <Card compact style={s.card}>
-          {busy === 'channels' ? <Text accessibilityLiveRegion="polite" style={s.empty}>正在扫描…</Text> : null}
+          {busy === 'channels' ? <View accessibilityLiveRegion="polite" style={s.emptyWrap}><ActivityIndicator color={C.blue}/><Text style={s.empty}>正在扫描…</Text></View> : null}
           {channelsScanned && !channels.length ? (
-            <Text style={s.empty}>{mode === 'full' ? '未发现候选渠道' : '未连接，暂未观察到营销渠道'}</Text>
+            <View style={s.emptyWrap}>
+              <Image source={ADS_MARKETING_NOTIFICATIONS} style={s.emptyIcon} resizeMode="contain"/>
+              <Text style={s.empty}>{mode === 'full' ? '未发现候选渠道' : '未连接，暂未观察到营销渠道'}</Text>
+            </View>
           ) : null}
-          {channels.map(channel => {
+          {sortedChannels.map(channel => {
             const appName = appNames.get(channel.packageName) || '未知应用';
             const stateLabel = channel.state === 'on' ? '已开启' : channel.state === 'off' ? '已关闭' : '状态未知';
             const channelName = channel.name?.trim();
@@ -144,11 +162,17 @@ export default function MarketingChannelsScreen({ apps, onBack, onOpenServicePer
 
 const s = StyleSheet.create({
   page: { paddingHorizontal: 18, paddingBottom: 36 },
-  note: { fontSize: COMPACT_UI.body, color: C.text2, lineHeight: 20, marginBottom: 6 },
-  actionRow: { alignSelf: 'flex-start', paddingVertical: 6, marginBottom: 8 },
-  action: { fontSize: COMPACT_UI.body, fontWeight: '800', color: C.text },
+  noteBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: 'rgba(255,255,255,0.72)', borderWidth: 1, borderColor: '#D6E8F8', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 11, marginBottom: 10 },
+  noteIcon: { marginTop: 1 },
+  note: { flex: 1, fontSize: COMPACT_UI.body, color: C.text2, lineHeight: 20 },
+  actionButton: { borderRadius: 14, marginBottom: 12, shadowColor: '#0D69F5', shadowOpacity: .26, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 5 },
+  actionPressed: { opacity: .88, transform: [{ scale: .985 }] },
+  actionGradient: { borderRadius: 14, paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
+  action: { fontSize: COMPACT_UI.body, fontWeight: '800', color: '#FFFFFF' },
   card: { paddingHorizontal: COMPACT_UI.cardPadding, paddingTop: 4, paddingBottom: 4, marginBottom: 12 },
-  empty: { paddingVertical: 22, textAlign: 'center', fontSize: COMPACT_UI.body, fontWeight: '700', color: C.text },
+  emptyWrap: { alignItems: 'center', paddingVertical: 24, gap: 10 },
+  emptyIcon: { width: 64, height: 64 },
+  empty: { textAlign: 'center', fontSize: COMPACT_UI.body, fontWeight: '700', color: C.text },
   row: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: C.line, paddingVertical: 8 },
   rowText: { flex: 1 },
   rowTitle: { fontSize: COMPACT_UI.body, fontWeight: '800', color: C.text },

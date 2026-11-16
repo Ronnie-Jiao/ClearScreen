@@ -10,19 +10,19 @@
 
 ## 简体中文
 
-净屏（ClearScreen）是一款以 Android 为主要平台的广告辅助工具。用户开启无障碍服务后，应用可以在用户启用的应用中识别部分广告跳过和关闭控件。应用还提供系统推荐设置、应用通知和营销通知渠道的管理入口。
+净屏（ClearScreen）是一款以 Android 为主要平台的广告辅助工具。用户开启无障碍服务后，应用可以在用户启用的应用中识别部分广告跳过和关闭控件。应用还提供系统推荐设置、应用通知管理和营销通知渠道的管理入口。
 
-净屏只在目标明确时操作。识别证据不足、控件存在歧义或无法核验系统页面时，会跳过操作。它不能保证清除所有广告，也不会代替用户授予系统权限。
+净屏只在目标明确时操作。识别证据不足、控件存在歧义或无法核验系统页面时，会跳过操作。它不能保证清除所有广告，也不会代替用户授予系统权限。开启无障碍时会直接打开 Android 系统设置；部分 Android 版本可能还要求你在应用信息中手动允许受限设置。
 
 [GitHub 项目仓库](https://github.com/Ronnie-Jiao/ClearScreen) · [隐私政策](docs/wiki/隐私政策.md) · [修改记录](docs/wiki/CHANGELOG.md)
 
 ### 功能
 
 - **广告跳过与关闭：** 在用户启用的应用中结合无障碍树结构和组合语义识别跳过、关闭、拒绝优惠等表达，覆盖“略过”“关掉”“残忍离开”“No thanks”等不同写法，不依赖封闭的精确词表。委婉拒绝/稍后再说等语义仍需同一局部广告标记或广告结构，且所有动作都必须对应真实、独立的无障碍控件。通用结构路径无需 OCR：同一子树必须含有明确广告资源 ID 或广告容器类名、较大的图片/视频创意，以及尺寸受限且真实可点击的独立控件。同一创意旁的“广告/推广/赞助”标记本身就足以确认广告语境，不再要求 CTA 文案。全屏开屏在同屏识别到广告标记、右上角紧凑“跳过”和下方跳转提示后，会立刻尝试点击；如果倒计时仍未结束，会有限重扫，并在可跳过时再尝试一次。全屏/播放器中的普通 X 仍需要更强证据；播放器里的委婉拒绝也必须有邻近广告标记。权限、播放、购买、订阅和举报/反馈操作不会被当作关闭广告；屏幕其他位置的广告字样、单独的角落 X 或大图都不触发。对界面树没有暴露足够结构的素材仍保留少量窄范围规则，例如 WiFi 万能钥匙悬浮促销、王者荣耀 KPL 海报、欧派奖励弹层和腾讯视频右下角促销。
-- **学习关闭：** 进入选择模式后，净屏标记当前页面可访问的交互控件，已启用的自动关闭规则继续工作。用户点广告关闭控件对应的标记后，净屏按这个标记代表的控件重新定位并核验，允许轻微边界取整误差，再尝试关闭；确认关闭并在本机保存规则后自动结束学习。再次打开应用时优先检查已学规则，按控件身份及其局部容器查找目标，可适应广告文案、列表位置和兄弟节点序号变化。页面保护检查与控件匹配共用一次读树，查找期间的定时重扫避免重复生成整页快照；执行前仍重新读取并要求唯一匹配且目标稳定。没有稳定标识的旧规则在结构变化后可能需要重新学习。
+- **学习关闭：** 进入选择模式后，净屏标记当前页面可访问的交互控件，已启用的自动关闭规则继续工作。用户点广告关闭控件对应的标记后，净屏优先按该按钮身份和就近容器生成局部规则，支持在同一窗口内重新定位移动的按钮，以及“关闭”“×”等同类关闭标签的变化；其它区域的歌词、进度、文字刷新和滚动不参与这类规则的匹配。执行前重新读取、唯一匹配并刷新真实目标，按当前节点操作；确认关闭并在本机保存规则后，学习模式和“选择控件 / 取消”工具栏会继续保留，用户可重复选择控件；完成后点“取消”退出学习。读取失败或超时会恢复“选择控件”，可以重试或取消；读取成功后再显示当前可见控件。再次打开应用时优先检查已学规则。页面保护检查与控件匹配共用一次读树，查找期间的定时重扫避免重复生成整页快照。旧规则继续读取，信息不足的旧规则在结构变化后可能需要重新学习。
 - **系统广告设置：** 检查受支持的系统推荐设置，并引导用户进入对应系统页面。可用开关取决于设备品牌、系统版本和设备上实际存在的设置页面。
-- **通知管理：** 提供应用通知和营销通知渠道页面。应用级通知状态按当前 Android 用户读取和修改，并在操作后回读确认；读取或修改完整通知渠道数据，以及管理部分系统广告组件，需要用户授权 ADB Shell 或 Shizuku。设备支持情况各不相同。
-- **处理记录与应用规则：** 查看处理结果、管理启用自动处理的应用，并管理学习关闭规则。
+- **通知管理：** 提供应用通知管理和营销通知渠道页面。应用级通知状态按当前 Android 用户读取和修改，并在操作后回读确认；未连接或读取不完整时明确显示未知状态并提供重试或连接入口，不把未知状态当作关闭。读取或修改完整通知渠道数据，以及管理部分系统广告组件，需要用户授权 ADB Shell 或 Shizuku。设备支持情况各不相同。
+- **处理记录与排除应用：** 查看处理结果、管理自动处理范围，并管理学习关闭规则。
 - **应用内使用说明：** “使用说明”介绍 Android/iOS 功能并提供问题排查。可以搜索标题、正文和关键词，再从结果跳转到相关应用页面。
 
 ### 平台支持
@@ -38,7 +38,11 @@
 
 Android 广告辅助功能依赖系统无障碍服务。开启后，服务会读取当前应用中可访问的界面结构；在支持的场景下，也可能使用设备端截图文字识别判断广告语境。只有用户开启服务和总开关，并且目标应用规则处于启用状态时，服务才会操作。应用内不再展示首次启动隐私政策同意页或政策阅读页；政策正文以仓库文档和公开页面提供。
 
+Android 首次打开直接进入首页。点首页“去开启”或“设置 → 服务与权限”中的“自动跳过广告”，会使用同一确认提示并打开系统无障碍设置；返回应用后自动核验服务状态。系统保留开启状态但服务未连接或核验不可用时，会提示在系统设置中重新开启，并检查自启动、后台运行和电池限制。无障碍服务的重新绑定由 Android 管理。
+
 系统推荐设置和通知功能可能需要用户连接 ADB Shell 或授权 Shizuku。净屏不使用 Root 权限，也不会创建、接管或依赖系统 VPN。系统设置能否读取或修改取决于设备品牌和系统版本；应用无法确认目标时会停止操作。
+
+Android 应用名称和图标等元数据在内存缓存60秒，安装/卸载及相关配置变化时失效；用户应用规则仍实时读取。完整快照、操作命令、权限与服务健康检查分别调度，原生调用设置等待上限，避免慢列表拖住开关。三星对应入口按“休眠管理”展示，不冒充自启动授权。
 
 应用规则、学习规则、处理记录和偏好设置保存在本机。净屏不会保存广告截图或识别出的页面文字。Google ML Kit 可能联系 Google 服务获取组件信息，也可能发送诊断或使用指标。只有用户主动检查版本信息时，应用才会访问 GitHub。详情见[隐私政策](docs/wiki/隐私政策.md)。
 
@@ -98,9 +102,9 @@ ClearScreen acts only when the target is clear. If the evidence is insufficient,
 ### Features
 
 - **Ad skip and close:** Recognizes ad controls from same-subtree accessibility structure and compositional skip/close/refusal wording, including variants such as “略过”, “关掉”, “残忍离开”, and “No thanks”; it is not limited to a fixed list of exact captions. Contextual phrases still need a local ad badge or ad structure. Actions normally use a real, independent accessibility control. For a compact floating ad whose X is rasterized and has no accessible click target, a bounded OCR gesture fallback requires a local ad disclosure or combined offer-and-action wording, compact edge geometry, the same X and evidence across two fresh frames, and a revalidated unobstructed window. It refuses ambiguous targets, clickable ad hosts, protected screens, and ordinary page/player X controls. A corner X, large image, or unrelated ad wording elsewhere on the screen is insufficient. Permission, playback, purchase, subscription, and feedback/report actions remain excluded. App-specific rules remain for creatives whose UI tree does not expose enough structure, including WiFi万能钥匙 floating promos, China Mobile's gift promo, 王者荣耀 KPL finals poster, OPPEIN reward dialog, and Tencent Video lower-right promo.
-- **Learn to close:** In selection mode, ClearScreen marks visible interactive controls while enabled automatic close rules keep running. The user taps the marker for the ad close control; ClearScreen re-identifies the control represented by that marker, tolerates minor bounds rounding and validates it before attempting one close. Learning ends after closure is verified and the local rule is saved. On later visits, learned rules receive priority and match the control's identity and local container, accommodating changing ad copy, list positions and sibling indices. A target must remain unique and stable before an action. Older anonymous rules may need to be learned again after structural changes.
+- **Learn to close:** In selection mode, ClearScreen marks visible interactive controls while enabled automatic close rules keep running. The user taps the marker for the ad close control; ClearScreen re-identifies the control represented by that marker, tolerates minor bounds rounding and validates it before attempting one close. After closure is verified and the local rule is saved, the learning session and its “Select control / Cancel” toolbar stay open so the user can select more controls; tapping “Cancel” ends learning. On later visits, learned rules receive priority and match the control's identity and local container, accommodating changing ad copy, list positions and sibling indices. Targets are re-resolved against the current tree; unrelated content changes do not invalidate v5 rules. Control reads restore the selection button on failure or timeout, allowing a retry or cancellation. Older anonymous rules may need to be learned again after structural changes.
 - **System ad settings:** Checks supported system recommendation settings and guides the user to the relevant system page. Available controls depend on the device manufacturer, OS version, and settings pages present on the device.
-- **Notification management:** Provides pages for app notifications and marketing notification channels. App-level notification changes target the current Android user and are verified by reading the state back. Reading or changing complete notification channel data, and managing some system ad components, requires user-authorized ADB Shell or Shizuku access. Device support varies.
+- **Notification management:** Provides pages for app notifications and marketing notification channels. App-level notification changes target the current Android user and are verified by reading the state back. When the device is disconnected or a status cannot be read, the app shows an unknown state with a retry or connection action instead of treating it as off. Reading or changing complete notification channel data, and managing some system ad components, requires user-authorized ADB Shell or Shizuku access. Device support varies.
 - **Activity history and app rules:** Review processing results, manage which apps are enabled, and manage learned close rules.
 - **In-app guide:** The Usage Guide explains Android and iOS features and troubleshooting. Search titles, descriptions, and keywords, then open the related app page from a result.
 

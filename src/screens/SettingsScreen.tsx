@@ -26,8 +26,8 @@ function SettingsEntry({title,icon,onPress}:{title:string;icon:ImageSourcePropTy
  return <Pressable accessibilityRole="button" accessibilityLabel={title} onPress={onPress} style={({pressed})=>[s.card,pressed&&s.cardPressed]}>
   <LinearGradient colors={['rgba(255,255,255,0.93)','rgba(230,244,255,0.76)']} start={{x:0,y:0}} end={{x:1,y:1}} style={s.cardInner}>
    <Image source={icon} resizeMode="contain" style={s.cardIcon} accessible={false}/>
-   <View style={s.cardDivider}/>
-   <Text style={s.cardTitle}>{title}</Text>
+   <View pointerEvents="none" style={s.cardDivider}/>
+   <Text style={s.cardTitle} numberOfLines={1}>{title}</Text>
    <Chevron/>
   </LinearGradient>
  </Pressable>;
@@ -64,21 +64,22 @@ export default function SettingsScreen({onTab,onServicePermissions,onOpenSection
  </View></Background>;
 }
 
+// 入口卡片规格与另一首页保持一致（行高/间距/图标/字号/字重），修改时需两页同步。
 const s=StyleSheet.create({
  root:{flex:1},
  scroll:{flexGrow:1,paddingHorizontal:16},
- brandRow:{minHeight:138,marginBottom:16,flexDirection:'row',alignItems:'center',gap:8},
- brandLogo:{width:58,height:58,flexShrink:0},
- brandDivider:{width:1,height:44,backgroundColor:'#A5C9EA',marginHorizontal:3,flexShrink:0},
+ brandRow:{minHeight:94,marginBottom:12,flexDirection:'row',alignItems:'center',gap:8},
+ brandLogo:{width:50,height:50,flexShrink:0},
+ brandDivider:{width:1,height:36,backgroundColor:'#A5C9EA',marginHorizontal:3,flexShrink:0},
  brandText:{flex:1,minWidth:0,gap:2},
- brandTitle:{fontSize:25,lineHeight:32,fontWeight:'900',color:C.navy},
- brandEnglish:{fontSize:15,lineHeight:20,fontWeight:'900',color:C.navy},
+ brandTitle:{fontSize:25,lineHeight:32,fontWeight:'600',color:C.navy},
+ brandEnglish:{fontSize:15,lineHeight:20,fontWeight:'600',color:C.navy},
  brandAccent:{color:C.teal},
- brandGear:{width:'34%',aspectRatio:545/455,flexShrink:0},
+ brandGear:{width:'26%',aspectRatio:545/455,flexShrink:0},
  card:{minHeight:65,marginBottom:9,borderRadius:18,borderWidth:1,borderColor:'rgba(255,255,255,0.95)',backgroundColor:'rgba(255,255,255,0.82)',shadowColor:'#4A7EA2',shadowOpacity:.14,shadowRadius:12,shadowOffset:{width:0,height:6},elevation:3},
  cardPressed:{opacity:.88},
  cardInner:{minHeight:63,borderRadius:17,overflow:'hidden',flexDirection:'row',alignItems:'center',paddingHorizontal:15,paddingVertical:7,gap:13},
  cardIcon:{width:48,height:48,flexShrink:0},
  cardDivider:{width:1,height:28,backgroundColor:'#B6D5F3',flexShrink:0},
- cardTitle:{flex:1,minWidth:0,fontSize:18,fontWeight:'900',color:C.navy},
+ cardTitle:{flex:1,minWidth:0,fontSize:18,fontWeight:'400',color:C.navy},
 });

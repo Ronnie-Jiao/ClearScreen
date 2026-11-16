@@ -13,6 +13,7 @@ import {
  View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Background, Card, Chevron, TopBar } from '../components/UI';
 import { AppDialog, type DialogButton } from '../components/AppDialog';
 import { LOGO } from '../assets';
@@ -30,15 +31,15 @@ const UPDATE_URL='https://api.github.com/repos/Ronnie-Jiao/ClearScreen/releases/
 const AUTHOR_REPOSITORY_URL='https://github.com/Ronnie-Jiao/ClearScreen';
 
 const ANDROID_HELP:HelpItem[]=[
- {title:'首次开启自动跳过',body:'进入“设置 > 服务与权限”，打开“自动跳过服务”，再按系统提示启用“净屏”无障碍服务。返回首页，状态显示“工作中”后即可使用。',keywords:'首次使用 开始 开启 权限 无障碍 自动跳过',destination:'servicePermissions'},
- {title:'开启或暂停净屏',body:'在首页点“开启净屏”开始自动处理，点“暂停净屏”暂停。首页显示“需要修复”或“状态待确认”时，按页面提示检查服务。',keywords:'首页 总开关 开关 工作中 暂停 继续',destination:'home'},
- {title:'选择要处理的应用',body:'打开“广告”页中的“应用管理”，用每个应用旁的开关控制是否自动处理。关闭某个应用后，净屏不会处理该应用。',keywords:'应用管理 应用列表 应用开关 排除 白名单',destination:'appManagement'},
+ {title:'首次开启自动跳过',body:'首次打开后在首页点“去开启”，或进入“设置 > 服务与权限”点“自动跳过广告”。确认提示后，在系统无障碍设置中启用“净屏”，返回首页查看服务状态。',keywords:'首次使用 开始 开启 权限 无障碍 自动跳过',destination:'servicePermissions'},
+ {title:'开启或暂停净屏',body:'在首页点“开启净屏”开始自动处理，点“暂停净屏”暂停。首页显示“需要开启服务”或“状态待确认”时，按页面提示检查服务。',keywords:'首页 总开关 开关 工作中 暂停 继续',destination:'home'},
+ {title:'选择要处理的应用',body:'打开“广告”页中的“排除应用”，用每个应用旁的开关控制是否自动处理。关闭某个应用后，净屏不会处理该应用。',keywords:'排除应用 应用列表 应用开关 白名单',destination:'appManagement'},
  {title:'学习关闭广告控件',body:'在首页点“学习关闭”，切到出现广告的应用，点学习浮层“选择控件”，再点广告关闭控件中心的蓝色小方框。净屏重新核对并尝试关闭，确认关闭后在本机保存规则；后续只在控件仍可唯一匹配时自动处理。',keywords:'学习关闭 自定义 关闭窗口 控件 选择 确认 学习规则',destination:'home'},
  {title:'查看或删除学习规则',body:'在首页“自定义关闭窗口”区域点“更多”，可查看已学规则并逐条删除。',keywords:'学习关闭 自定义关闭窗口 规则 删除',destination:'learnedRecords'},
  {title:'查看处理记录',body:'在首页“最近记录”点“更多”查看记录；点某条记录可查看详情。',keywords:'最近记录 日志 处理结果 今日记录',destination:'records'},
  {title:'设置系统推荐开关',body:'打开“广告 > 系统推荐开关”，选择要处理的项目并按页面提示操作。只会自动操作能确认页面和开关的项目。',keywords:'系统广告 系统推荐 个性化推荐 vivo 小米 华为 设置',destination:'systemRecommend'},
- {title:'管理应用通知',body:'打开“广告 > 应用通知”查找应用并查看通知状态。需要授权或连接服务时，按页面提示前往设置或连接。',keywords:'通知 应用通知 关闭通知 搜索应用',destination:'appNotifications'},
- {title:'扫描营销通知',body:'打开“广告 > 营销通知”查看通知渠道。未连接服务时只能观察部分渠道；按页面提示连接 ADB Shell 或 Shizuku 后，才能读取更完整的清单。',keywords:'营销通知 通知渠道 扫描 ADB Shell Shizuku 连接',destination:'marketingChannels'},
+ {title:'应用通知管理',body:'打开“广告 > 应用通知管理”查找应用并查看通知状态。需要授权或连接服务时，按页面提示前往设置或连接。',keywords:'通知 应用通知 关闭通知 搜索应用',destination:'appNotifications'},
+ {title:'扫描营销通知',body:'打开“广告 > 营销通知管理”查看通知渠道。未连接服务时只能观察部分渠道；按页面提示连接 ADB Shell 或 Shizuku 后，才能读取更完整的清单。',keywords:'营销通知 营销通知管理 通知渠道 扫描 ADB Shell Shizuku 连接',destination:'marketingChannels'},
  {title:'系统设置权限',body:'进入“设置 > 服务与权限”，点按“系统设置权限”并按系统页面完成无线调试配对。开关显示已连接后，相关系统设置读取和操作能力才可用。',keywords:'ADB Shell 无线调试 配对 连接 授权',destination:'servicePermissions'},
  {title:'允许后台运行',body:'进入“设置 > 服务与权限”，按手机系统页面设置开机自启动、后台运行和电池优化。不同品牌的设置入口名称可能不同。',keywords:'后台运行 开机自启动 自启动 电池优化 后台',destination:'servicePermissions'},
  {title:'管理记录和隐私数据',body:'进入“设置 > 隐私与数据”选择记录保留周期或清空记录。要删除本机全部数据，请在 Android 系统设置中清除净屏的应用数据或卸载应用。',keywords:'隐私 数据 清空记录 保留周期 删除 应用数据',destination:'privacyData'},
@@ -166,12 +167,15 @@ export default function SettingsDetailScreen({section,logRetentionDays,versionNa
        {RETENTION_OPTIONS.map(([days,label])=>{
         const selected=days===logRetentionDays;
         return <Pressable key={days} accessibilityRole="radio" accessibilityState={{checked:selected}} onPress={()=>{if(!selected)onRetentionChange(days)}} style={[s.retentionOption,selected&&s.retentionSelected]}>
+         {selected?<LinearGradient colors={['#0B78F2','#12C2C8']} start={{x:0,y:0}} end={{x:1,y:0}} style={s.optionGradient}/>:null}
          <Text style={[s.optionLabel,selected&&s.optionSelected]}>{label}</Text>
-         <View style={s.optionCheck}>{selected?<Ionicons name="checkmark" size={18} color={C.blue}/>:null}</View>
+         <View style={s.optionCheck}>{selected?<Ionicons name="checkmark" size={18} color="#FFFFFF"/>:null}</View>
         </Pressable>;
        })}
       </View>
      </View>
+    </Card>
+    <Card compact style={s.group}>
      <SettingsRow title="清空记录" onPress={onClear} last/>
     </Card>
    </>:section==='helpFeedback'?<>
@@ -224,9 +228,9 @@ const s=StyleSheet.create({
  row:{minHeight:COMPACT_UI.rowHeight,paddingVertical:12,flexDirection:'row',alignItems:'center',gap:8,borderBottomWidth:1,borderBottomColor:C.line},
  lastRow:{borderBottomWidth:0},rowTitle:{flex:1,fontSize:COMPACT_UI.body,fontWeight:'800',color:C.navy},
  value:{maxWidth:'62%',flexShrink:1,fontSize:COMPACT_UI.caption,lineHeight:18,fontWeight:'700',textAlign:'right',color:C.text2},
- retentionBlock:{paddingTop:16,paddingBottom:14,borderBottomWidth:1,borderBottomColor:C.line},fieldTitle:{fontSize:COMPACT_UI.body,fontWeight:'800',color:C.navy,marginBottom:12},
- retentionOptions:{flexDirection:'row',flexWrap:'wrap',gap:8},retentionOption:{flexBasis:'45%',flexGrow:1,minHeight:COMPACT_UI.buttonHeight,paddingHorizontal:12,paddingVertical:10,borderWidth:1,borderColor:C.line,borderRadius:12,flexDirection:'row',alignItems:'center',gap:6,backgroundColor:'#F7FBFF'},
- retentionSelected:{borderColor:C.blue,backgroundColor:'#E9F4FF'},optionLabel:{flex:1,fontSize:COMPACT_UI.body,fontWeight:'700',color:C.text2},optionSelected:{color:C.blue},optionCheck:{width:18},
+ retentionBlock:{paddingTop:16,paddingBottom:16},fieldTitle:{fontSize:COMPACT_UI.body,fontWeight:'800',color:C.navy,marginBottom:12},
+ retentionOptions:{flexDirection:'row',flexWrap:'wrap',gap:10},retentionOption:{flexBasis:'45%',flexGrow:1,minHeight:50,paddingHorizontal:14,paddingVertical:12,borderWidth:1,borderColor:C.line,borderRadius:14,flexDirection:'row',alignItems:'center',gap:6,backgroundColor:'#F7FBFF'},
+ retentionSelected:{borderColor:'transparent',shadowColor:'#0B78F5',shadowOpacity:.24,shadowRadius:10,shadowOffset:{width:0,height:5},elevation:3},optionLabel:{flex:1,fontSize:COMPACT_UI.body,fontWeight:'700',color:C.text2},optionSelected:{color:'#FFFFFF',fontWeight:'800'},optionCheck:{width:18},optionGradient:{position:'absolute',left:0,right:0,top:0,bottom:0,borderRadius:13},
  searchRow:{flexDirection:'row',alignItems:'center',gap:8,marginBottom:COMPACT_UI.gap},searchField:{height:48,flex:1,flexDirection:'row',alignItems:'center',gap:8,paddingHorizontal:13,borderRadius:14,borderWidth:1,borderColor:C.line,backgroundColor:'#FFFFFF'},searchInput:{flex:1,minWidth:0,paddingVertical:0,fontSize:COMPACT_UI.body,color:C.text},searchButton:{height:48,minWidth:76,paddingHorizontal:12,borderRadius:14,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:5,backgroundColor:C.blue},searchButtonPressed:{opacity:0.78},searchButtonText:{fontSize:COMPACT_UI.caption,fontWeight:'900',color:'#FFFFFF'},
  helpItem:{paddingVertical:14,borderBottomWidth:1,borderBottomColor:C.line},helpHeader:{flexDirection:'row',alignItems:'center',gap:8,marginBottom:6},helpTitle:{flex:1,fontSize:COMPACT_UI.body,fontWeight:'900',color:C.navy},helpBody:{fontSize:COMPACT_UI.body,lineHeight:21,color:C.text},helpEmpty:{paddingVertical:24,textAlign:'center',fontSize:COMPACT_UI.body,color:C.text2},
  aboutBrand:{alignItems:'center',paddingVertical:24},aboutLogo:{width:64,height:64,marginBottom:10},aboutName:{fontSize:20,fontWeight:'900',color:C.navy},aboutVersion:{fontSize:COMPACT_UI.body,color:C.text2,marginTop:6},

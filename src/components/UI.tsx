@@ -3,7 +3,7 @@ import { Animated, Easing, Image, ImageBackground, ImageResizeMode, ImageSourceP
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { C, COMPACT_UI, R } from '../theme';
-import { LOGO, UI_BACKGROUND } from '../assets';
+import { LOGO, UI_BACKGROUND, FONT_TAGLINE } from '../assets';
 import { ScreenInsetsContext, SCREEN_TOP_GAP } from './ScreenInsets';
 
 export function Background({children,backgroundSource=UI_BACKGROUND,resizeMode='stretch'}:{children:React.ReactNode;backgroundSource?:ImageSourcePropType;resizeMode?:ImageResizeMode}){
@@ -76,7 +76,8 @@ export function BrandHeader({title='净屏',tagline=false,action,compact=false,s
 export function TopBar({title,onBack,compact=false,action}:{title:string;onBack:()=>void;compact?:boolean;action?:React.ReactNode}){
   return <View style={[styles.topbar,compact&&styles.topbarCompact]}>
     <Pressable accessibilityRole="button" onPress={onBack} hitSlop={16} style={styles.backButton}><Ionicons name="chevron-back" size={compact?22:27} color={C.navy}/></Pressable>
-    <Text style={[styles.topTitle,compact&&styles.topTitleCompact]}>{title}</Text><View style={{width:action?88:36,alignItems:'flex-end'}}>{action}</View>
+    <View style={{width:action?88:36,alignItems:'flex-end'}}>{action}</View>
+    <View pointerEvents="none" style={styles.topTitleWrap}><Text numberOfLines={1} style={[styles.topTitle,compact&&styles.topTitleCompact]}>{title}</Text></View>
   </View>;
 }
 
@@ -101,8 +102,8 @@ const styles=StyleSheet.create({
   square:{alignItems:'center',justifyContent:'center'},
   brandRow:{flexDirection:'row',alignItems:'center',gap:12,marginBottom:14,minHeight:72}, brandRowCompact:{gap:9,marginBottom:10,minHeight:72}, brandLogo:{width:68,height:68},brandLogoCompact:{width:68,height:68},
   brandTitle:{fontSize:32,fontWeight:'900',color:C.navy,letterSpacing:-.8,lineHeight:36},brandTitleCompact:{fontSize:25,letterSpacing:-.5,lineHeight:29},brandTitleSmall:{fontSize:28,letterSpacing:-.7,lineHeight:32},brandEnglish:{fontSize:16,fontWeight:'900',color:C.navy},brandEnglishCompact:{fontSize:13},brandEnglishSmall:{fontSize:14},
-  tagline:{fontSize:14,lineHeight:19,color:C.blue,fontWeight:'700',textAlign:'center'},
-  topbar:{height:66,flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:12},backButton:{width:40,height:44,justifyContent:'center',alignItems:'flex-start'},topTitle:{fontSize:25,fontWeight:'900',color:C.navy},
+  tagline:{fontFamily:FONT_TAGLINE,fontSize:17,lineHeight:24,color:C.blue,textAlign:'center'},
+  topbar:{height:66,flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:12},backButton:{width:40,height:44,justifyContent:'center',alignItems:'flex-start'},topTitleWrap:{position:'absolute',left:0,right:0,top:0,bottom:0,alignItems:'center',justifyContent:'center',paddingHorizontal:44},topTitle:{fontSize:25,fontWeight:'900',color:C.navy,textAlign:'center'},
   topbarCompact:{height:50,marginBottom:10},topTitleCompact:{fontSize:COMPACT_UI.title},
   primary:{height:60,borderRadius:20,alignItems:'center',justifyContent:'center'},primaryText:{color:'#fff',fontSize:20,fontWeight:'900'},
   primaryCompact:{height:'auto',minHeight:COMPACT_UI.buttonHeight,paddingVertical:10,paddingHorizontal:14,borderRadius:14},primaryTextCompact:{fontSize:COMPACT_UI.body,lineHeight:20,fontWeight:'800'},

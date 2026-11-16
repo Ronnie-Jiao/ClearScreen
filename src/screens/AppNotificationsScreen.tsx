@@ -37,7 +37,7 @@ export default function AppNotificationsScreen({
   const [query, setQuery] = useState('');
   const [access, setAccess] = useState<CleanupAccess>({ running: false, granted: false });
   const [accessKnown, setAccessKnown] = useState(false);
-  const [states, setStates] = useState<Record<string, boolean>>({});
+  const [states, setStates] = useState<Record<string, boolean | null>>({});
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [busyPkg, setBusyPkg] = useState('');
@@ -80,12 +80,11 @@ export default function AppNotificationsScreen({
         ClearScreenNative.readAppNotificationStates(entries.map(app => app.packageName)),
         READ_TIMEOUT_MS,
       );
-      const next: Record<string, boolean> = {};
+      const next: Record<string, boolean | null> = {};
       list.forEach(item => { next[item.packageName] = item.enabled });
       setStates(next);
     } catch {
       setLoadFailed(true);
-      setAccessKnown(true);
       // The channel can drop between the status read and the batch read.
       void ClearScreenNative.getCleanupAccessStatus()
         .then(status => { setAccess(status) })
@@ -116,7 +115,7 @@ export default function AppNotificationsScreen({
     if (busyPkg) return;
     if (!connected) { askToConnect(); return; }
     const current = states[app.packageName];
-    if (current === undefined) {
+    if (current == null) {
       showAlert('还读不到这个应用的通知状态', '先重新读取一次，再决定是否修改。', [
         { text: '取消', style: 'cancel' },
         { text: '重新读取', onPress: () => { void loadStates() } },
@@ -145,21 +144,29 @@ export default function AppNotificationsScreen({
   };
 
   const status = () => {
-    if (!accessKnown) return null;
-    if (loadFailed) return <View style={s.notice}>
-      <Text style={s.noticeText}>读取没完成，开关状态暂时未知。</Text>
-      <Pressable accessibilityRole="button" onPress={() => { void loadStates() }} hitSlop={8}><Text style={s.noticeAction}>重试</Text></Pressable>
+    const retry = () => { void loadStates() };
+    const message = (text: string, action: string, onPress: () => void) => <View style={s.notice}>
+      <Text style={s.noticeText}>{text}</Text>
+      <Pressable accessibilityRole="button" onPress={onPress} hitSlop={8}><Text style={s.noticeAction}>{action}</Text></Pressable>
     </View>;
-    if (loading) return <View style={s.notice}>
-      <Text style={s.noticeText}>正在读取本机应用…</Text>
-    </View>;
+
+    if (!accessKnown) {
+      if (loadFailed) return message('暂时无法读取本机应用通知状态。', '重试', retry);
+      if (loading) return <View style={s.notice}><Text style={s.noticeText}>正在读取应用通知状态…</Text></View>;
+      return message('应用通知状态尚未读取。', '读取', retry);
+    }
+    if (!connected) return message('未连接本机，无法读取应用通知状态。', '去连接', onOpenAccess);
+    if (loadFailed) return message('读取没完成，开关状态暂时未知。', '重试', retry);
+    if (loading) return <View style={s.notice}><Text style={s.noticeText}>正在读取应用通知状态…</Text></View>;
+    const unknownCount = entries.reduce((count, app) => count + (states[app.packageName] == null ? 1 : 0), 0);
+    if (unknownCount > 0) return message(`${unknownCount} 个应用的通知状态未知，重新读取后才能修改。`, '重试', retry);
     return null;
   };
 
   return (
     <Background>
       <View style={s.page}>
-        <TopBar compact title="关闭应用通知" onBack={onBack} />
+        <TopBar compact title="应用通知管理" onBack={onBack} />
 
         <Card compact style={s.searchCard}>
           <View style={s.search}>
@@ -206,7 +213,7 @@ export default function AppNotificationsScreen({
                   <AppIcon source={item.icon} size={COMPACT_UI.appIcon} />
                   <Text style={s.name} numberOfLines={1}>{item.name}</Text>
                   <View style={rowBusy ? s.toggleBusy : undefined} pointerEvents={rowBusy ? 'none' : 'auto'}>
-                    <Toggle compact value={state === true} unknown={state === undefined} onChange={() => { void change(item) }} />
+                    <Toggle compact value={state === true} unknown={state == null} onChange={() => { void change(item) }} />
                   </View>
                 </View>;
               }}

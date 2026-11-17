@@ -36,7 +36,7 @@ class AdSemanticRulesTest {
     assertFalse(AdSemanticRules.isNeutralControlLabel("下一步"))
   }
   @Test fun recognizesCommonCountdownFormats() {
-    for (raw in listOf("3 跳过", "03秒跳过广告", "跳过 3s", "跳过 02", "Skip in 3", "跳过倒计时 5 秒")) {
+    for (raw in listOf("3 跳过", "03秒跳过广告", "跳过 3s", "跳过 02", "4s | 跳过", "1跳过", "跳过 4s", "Skip in 3", "跳过倒计时 5 秒")) {
       assertTrue(raw, AdSemanticRules.isCountdownSkip(AdSemanticRules.normalize(raw)))
     }
   }
@@ -45,6 +45,22 @@ class AdSemanticRulesTest {
     for (raw in listOf("跳过广告", "跳过此广告", "跳过推广", "跳过开屏广告", "Skip ad", "Skip advertisement")) {
       assertTrue(raw, AdSemanticRules.isExplicitSkip(AdSemanticRules.normalize(raw)))
     }
+  }
+
+  @Test fun splashShareAndRedirectActionsAreNeverDismissControls() {
+    for (raw in listOf("分享", "点击跳转至详情页面", "立即打开", "立即抢购", "转动手机 或 点击图标")) {
+      assertNull(raw, AdSemanticRules.controlLabel(listOf(raw)))
+    }
+  }
+
+  @Test fun onlyReadyCounterLabelsSupplyRemainingTimeForMovingAdEvidence() {
+    assertEquals(2_000L, AdSemanticRules.readySkipCountdownMillis("2s | 跳过"))
+    assertEquals(1_000L, AdSemanticRules.readySkipCountdownMillis("1跳过"))
+    assertEquals(4_000L, AdSemanticRules.readySkipCountdownMillis("跳过 4s"))
+    assertEquals(0L, AdSemanticRules.readySkipCountdownMillis("跳过 0"))
+    assertNull(AdSemanticRules.readySkipCountdownMillis("2秒后可跳过"))
+    assertNull(AdSemanticRules.readySkipCountdownMillis("Skip in 2"))
+    assertNull(AdSemanticRules.readySkipCountdownMillis("跳过教程"))
   }
 
   @Test fun doesNotTreatOtherSkipWordsAsAdvertising() {

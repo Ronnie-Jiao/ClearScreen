@@ -111,6 +111,12 @@ export default function AppNotificationsScreen({
     ], { tone: 'warning' });
   };
 
+  const openNotificationSettings = (app: Entry) => {
+    void ClearScreenNative.openAppNotificationSettings(app.packageName).catch(error => {
+      showAlert('无法打开通知设置', explainError(error), undefined, { tone: 'error' });
+    });
+  };
+
   const change = async (app: Entry) => {
     if (busyPkg) return;
     if (!connected) { askToConnect(); return; }
@@ -133,11 +139,24 @@ export default function AppNotificationsScreen({
       setStates(prev => ({ ...prev, [app.packageName]: result === 'enabled' || result === 'already_enabled' }));
     } catch (error) {
       // Never flip the switch locally on failure: ask the system what it now reads.
+      let actualState: boolean | null = null;
       try {
         const [actual] = await ClearScreenNative.readAppNotificationStates([app.packageName]);
-        if (actual) setStates(prev => ({ ...prev, [app.packageName]: actual.enabled }));
+        if (actual && typeof actual.enabled === 'boolean') {
+          actualState = actual.enabled;
+          setStates(prev => ({ ...prev, [app.packageName]: actual.enabled }));
+        }
       } catch { /* keep the last confirmed display */ }
-      showAlert('没有改成功', explainError(error), undefined, { tone: 'error' });
+      // A shell command can finish even if its reply is lost. Trust the fresh
+      // system read-back instead of reporting a false failure in that case.
+      if (actualState === desired) return;
+      const currentState = actualState === null
+        ? '净屏没能确认系统当前状态。'
+        : `${app.name}的通知仍处于${actualState ? '开启' : '关闭'}状态。`;
+      showAlert('通知修改没有完成', `${currentState}${explainError(error)}可以前往系统通知设置手动调整。`, [
+        { text: '取消', style: 'cancel' },
+        { text: '去设置', onPress: () => openNotificationSettings(app) },
+      ], { tone: 'warning' });
     } finally {
       setBusyPkg('');
     }
@@ -210,8 +229,16 @@ export default function AppNotificationsScreen({
                 const state = states[item.packageName];
                 const rowBusy = busyPkg === item.packageName;
                 return <View style={s.row}>
-                  <AppIcon source={item.icon} size={COMPACT_UI.appIcon} />
-                  <Text style={s.name} numberOfLines={1}>{item.name}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`打开${item.name}的系统通知设置`}
+                    disabled={!!busyPkg}
+                    onPress={() => openNotificationSettings(item)}
+                    style={s.appIdentity}
+                  >
+                    <AppIcon source={item.icon} size={COMPACT_UI.appIcon} />
+                    <Text style={s.name} numberOfLines={1}>{item.name}</Text>
+                  </Pressable>
                   <View style={rowBusy ? s.toggleBusy : undefined} pointerEvents={rowBusy ? 'none' : 'auto'}>
                     <Toggle compact value={state === true} unknown={state == null} onChange={() => { void change(item) }} />
                   </View>
@@ -234,6 +261,7 @@ function explainError(error: unknown): string {
   if (/隐私|同意/.test(raw)) return '本机权限没有生效，请重试；仍然不行就去「服务与权限」重新检查。';
   if (/没有响应|超时|timeout|timed out/i.test(raw)) return '手机系统命令没有响应，连接可能已经断了。去「系统设置权限」重连后再试。';
   if (/Shizuku|授权通道|未连接|没有连接|请先启动|请先授予/i.test(raw)) return '还没连上这台手机。去「系统设置权限」连上后再试。';
+  if (/系统返回的通知状态与操作不一致|系统拒绝了这次修改|系统没有确认这次修改/.test(raw)) return '手机系统没有接受这次切换。';
   if (!raw) return '系统没有给出原因，请重试；仍然不行就重新连接这台手机。';
   return raw;
 }
@@ -249,6 +277,7 @@ const s = StyleSheet.create({
   listCard: { flex: 1, paddingHorizontal: COMPACT_UI.cardPadding, paddingTop: 0, paddingBottom: 4, marginBottom: 0 },
   listContent: { paddingBottom: 32 },
   row: { height: ROW_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: C.line },
+  appIdentity: { flex: 1, height: '100%', flexDirection: 'row', alignItems: 'center', gap: 10 },
   name: { flex: 1, fontSize: COMPACT_UI.body, fontWeight: '800', color: C.text },
   toggleBusy: { opacity: 0.45 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },

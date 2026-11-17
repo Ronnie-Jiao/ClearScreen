@@ -18,24 +18,24 @@ class AdDecisionPolicyTest {
       listOf("广告", "立即打开", "关闭广告")))
   }
 
-  @Test fun aBareCountdownNeedsPositionOrAdEvidence() {
-    assertFalse(AdDecisionPolicy.allowCountdownSkip(false, false, false, false, false, false))
-    assertFalse(AdDecisionPolicy.allowCountdownSkip(false, true, false, false, false, false))
-    assertTrue(AdDecisionPolicy.allowCountdownSkip(false, false, false, false, true, false))
-    assertTrue(AdDecisionPolicy.allowCountdownSkip(false, true, true, false, false, false))
+  @Test fun aBareCountdownNeedsAdEvidenceRegardlessOfPosition() {
+    assertFalse(AdDecisionPolicy.allowCountdownSkip(false, false, false, false, false))
+    assertTrue(AdDecisionPolicy.allowCountdownSkip(false, false, false, true, false))
+    assertTrue(AdDecisionPolicy.allowCountdownSkip(false, true, false, false, false))
+    assertTrue(AdDecisionPolicy.allowCountdownSkip(false, false, false, false, true))
   }
 
   @Test fun ocrSplashSkipNeedsASkipControlAndAdLikeFullScreenCreative() {
     fun allowed(
       hasSkipLabel: Boolean = true,
-      compactTopRight: Boolean = true,
+      compactControl: Boolean = true,
       hasLargeCreative: Boolean = true,
       hasExplicitAdMarker: Boolean = false,
       promotionalSignalCount: Int = 0,
       hasPromotionalAction: Boolean = false,
     ) = AdDecisionPolicy.allowOcrBackedSplashSkip(
       hasSkipLabel,
-      compactTopRight,
+      compactControl,
       hasLargeCreative,
       hasExplicitAdMarker,
       promotionalSignalCount,
@@ -48,7 +48,7 @@ class AdDecisionPolicyTest {
     assertFalse(allowed(promotionalSignalCount = 1, hasPromotionalAction = true))
     assertFalse(allowed(promotionalSignalCount = 3, hasPromotionalAction = false))
     assertFalse(allowed(hasSkipLabel = false, hasExplicitAdMarker = true))
-    assertFalse(allowed(compactTopRight = false, hasExplicitAdMarker = true))
+    assertFalse(allowed(compactControl = false, hasExplicitAdMarker = true))
   }
 
   @Test fun lowerLeftSplashSkipNeedsSameCreativeAdAndActionEvidence() {
@@ -146,18 +146,18 @@ class AdDecisionPolicyTest {
   @Test fun fullScreenCloseNeedsFreshCreativeAndExplicitAdMarker() {
     fun allowed(
       hasCloseSemantic: Boolean = true,
-      compactTopRightControl: Boolean = true,
+      compactControl: Boolean = true,
       currentWindowEvidence: Boolean = true,
       controlBelongsToLargeCreative: Boolean = true,
       hasExplicitAdMarker: Boolean = true,
     ) = AdDecisionPolicy.allowOcrBackedFullScreenAdClose(
-      hasCloseSemantic, compactTopRightControl, currentWindowEvidence,
+      hasCloseSemantic, compactControl, currentWindowEvidence,
       controlBelongsToLargeCreative, hasExplicitAdMarker,
     )
 
     assertTrue(allowed())
     assertFalse(allowed(hasCloseSemantic = false))
-    assertFalse(allowed(compactTopRightControl = false))
+    assertFalse(allowed(compactControl = false))
     assertFalse(allowed(currentWindowEvidence = false))
     assertFalse(allowed(controlBelongsToLargeCreative = false))
     assertFalse(allowed(hasExplicitAdMarker = false))

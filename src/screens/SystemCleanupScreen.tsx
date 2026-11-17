@@ -20,7 +20,7 @@ export default function SystemCleanupScreen({
         <Card compact style={s.card}>
           <Pressable accessibilityRole="button" onPress={onOpenSystemRecommend} style={[s.row, s.rowPlain]}>
             <View style={s.rowText}>
-              <Text style={s.rowTitle}>系统推荐开关</Text>
+              <Text style={s.rowTitle}>系统推荐设置</Text>
             </View>
             <Chevron compact />
           </Pressable>

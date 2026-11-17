@@ -10,17 +10,15 @@ import { LOGO, SPLASH_BACKGROUND, FONT_TAGLINE, HOME_PAUSE, HOME_PLAY, HOME_HIST
 
 type MainTab='home'|'apps'|'settings';
 type HomePermissions={skip:boolean;skipRunning:boolean;accessibilityHealth?:'ready'|'unavailable'|'unknown'};
-type HomeStatus='permission'|'checking'|'unknown'|'select'|'paused'|'working';
+type HomeStatus='permission'|'select'|'paused'|'working';
 
-const RECENT_RECORD_LIMIT=3;
+const RECENT_RECORD_LIMIT=6;
 const RECENT_ROW_HEIGHT=62;
 const RECENT_HEADER_HEIGHT=52;
 
 type StatusTone={orb:[string,string];ring:string};
 const STATUS_TONE:Record<HomeStatus,StatusTone>={
  permission:{orb:['#0B78F2','#14B8B0'],ring:'#CFE8FF'},
- checking:{orb:['#0B78F2','#14B8B0'],ring:'#CFE8FF'},
- unknown:{orb:['#F59E0B','#F9735B'],ring:'#FFE0BE'},
  select:{orb:['#0B78F2','#14B8B0'],ring:'#CFE8FF'},
  paused:{orb:['#8B9BB0','#B6C3D2'],ring:'#DDE5EF'},
  working:{orb:['#0B78F2','#14B8B0'],ring:'#C9E6FF'},
@@ -38,7 +36,7 @@ function HomeBrandHeader(){
  </View>;
 }
 
-export default function HomeScreen({master,onAction,onTab,onEnableAccessibility,onRecords,onOpenRecord,onOpenApp,apps,logs,permissions,checking,enabledAppCount,onLearn,learning=false}:{
+export default function HomeScreen({master,onAction,onTab,onEnableAccessibility,onRecords,onOpenRecord,onOpenApp,apps,logs,permissions,enabledAppCount,onLearn,learning=false}:{
  master:boolean;
  onAction:()=>void;
  onTab:(t:MainTab)=>void;
@@ -49,7 +47,6 @@ export default function HomeScreen({master,onAction,onTab,onEnableAccessibility,
  apps:AppItem[];
  logs:LogItem[];
  permissions:HomePermissions;
- checking:boolean;
  enabledAppCount:number;
  onLearn?:()=>void;
  learning?:boolean;
@@ -59,18 +56,16 @@ export default function HomeScreen({master,onAction,onTab,onEnableAccessibility,
  const {width}=useWindowDimensions();
  const statusArtSize=width<350?84:width<390?94:104;
  let state:HomeStatus;
- if(checking)state='checking';
- else if(!permissions.skip||permissions.accessibilityHealth==='unavailable')state='permission';
- else if(permissions.accessibilityHealth!=='ready')state='unknown';
+ if(!permissions.skip||permissions.accessibilityHealth!=='ready')state='permission';
  else if(!permissions.skipRunning)state='permission';
  else if(enabledAppCount===0)state='select';
  else if(!master)state='paused';
  else state='working';
- const statusTitle:Record<HomeStatus,string>={permission:'需要开启服务',checking:'正在检查',unknown:'状态待确认',select:'还没选择应用',paused:'已暂停',working:'工作中'};
- const statusIcon:Record<HomeStatus,keyof typeof Ionicons.glyphMap>={permission:'accessibility-outline',checking:'sync-outline',unknown:'help-outline',select:'grid-outline',paused:'pause-outline',working:'checkmark'};
- const actionTitle:Partial<Record<HomeStatus,string>>={permission:'去开启',unknown:'检查服务',select:'选择应用',paused:'开启净屏',working:'暂停净屏'};
+ const statusTitle:Record<HomeStatus,string>={permission:'需要开启服务',select:'还没选择应用',paused:'已暂停',working:'工作中'};
+ const statusIcon:Record<HomeStatus,keyof typeof Ionicons.glyphMap>={permission:'accessibility-outline',select:'grid-outline',paused:'pause-outline',working:'checkmark'};
+ const actionTitle:Record<HomeStatus,string>={permission:'去开启',select:'去开启',paused:'去开启',working:'暂停净屏'};
  const action=actionTitle[state];
- const primaryAction=state==='permission'||state==='unknown'?onEnableAccessibility:onAction;
+ const primaryAction=state==='permission'?onEnableAccessibility:state==='select'?()=>onTab('apps'):onAction;
  const tone=STATUS_TONE[state];
 
  return <Background backgroundSource={SPLASH_BACKGROUND}><View style={s.root}><ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[s.scroll,{paddingBottom:84+navInset}]}>
@@ -128,7 +123,7 @@ const s=StyleSheet.create({
  scanIcon:{width:22,height:22},
  learnActive:{backgroundColor:'#DFF0FF',borderColor:'rgba(11,120,242,0.35)'},learnPressed:{opacity:.7,transform:[{scale:.96}]},
  learnLabel:{fontSize:11,lineHeight:15,color:C.blue,fontWeight:'900'},
- actionButton:{alignSelf:'stretch',borderRadius:29,backgroundColor:'#0B78F2',shadowColor:'#0B78F2',shadowOpacity:.26,shadowRadius:12,shadowOffset:{width:0,height:6},elevation:5},
+ actionButton:{alignSelf:'stretch',marginHorizontal:12,borderRadius:29,backgroundColor:'#0B78F2',shadowColor:'#0B78F2',shadowOpacity:.26,shadowRadius:12,shadowOffset:{width:0,height:6},elevation:5},
  actionPressed:{opacity:.92,transform:[{scale:.985}]},
  actionGradient:{height:58,borderRadius:29,flexDirection:'row',alignItems:'center',justifyContent:'center'},
  actionContent:{flexDirection:'row',alignItems:'center',gap:8},

@@ -31,22 +31,20 @@ internal object AdDecisionPolicy {
 
   fun allowCountdownSkip(
     hasAdWord: Boolean,
-    nearTopRight: Boolean,
-    hasSkipResource: Boolean,
+    hasAdSkipResource: Boolean,
     localAdContext: Boolean,
     videoAdContext: Boolean,
-    verifiedTopCenterAd: Boolean,
-  ): Boolean = hasAdWord || (nearTopRight && hasSkipResource) ||
-    localAdContext || videoAdContext || verifiedTopCenterAd
+    verifiedSplashAd: Boolean,
+  ): Boolean = hasAdWord || hasAdSkipResource || localAdContext || videoAdContext || verifiedSplashAd
 
   fun allowOcrBackedSplashSkip(
     hasSkipLabel: Boolean,
-    compactTopRight: Boolean,
+    compactControl: Boolean,
     hasLargeCreative: Boolean,
     hasExplicitAdMarker: Boolean,
     promotionalSignalCount: Int,
     hasPromotionalAction: Boolean,
-  ): Boolean = hasSkipLabel && compactTopRight && hasLargeCreative &&
+  ): Boolean = hasSkipLabel && compactControl && hasLargeCreative &&
     (hasExplicitAdMarker || (promotionalSignalCount >= 2 && hasPromotionalAction))
 
   fun allowOcrBackedBottomLeftSplashSkip(
@@ -85,11 +83,11 @@ internal object AdDecisionPolicy {
 
   fun allowOcrBackedFullScreenAdClose(
     hasCloseSemantic: Boolean,
-    compactTopRightControl: Boolean,
+    compactControl: Boolean,
     currentWindowEvidence: Boolean,
     controlBelongsToLargeCreative: Boolean,
     hasExplicitAdMarker: Boolean,
-  ): Boolean = hasCloseSemantic && compactTopRightControl && currentWindowEvidence &&
+  ): Boolean = hasCloseSemantic && compactControl && currentWindowEvidence &&
     controlBelongsToLargeCreative && hasExplicitAdMarker
 
   fun allowOcrBackedFloatingCreativeClose(

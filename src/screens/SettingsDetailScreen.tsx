@@ -37,7 +37,7 @@ const ANDROID_HELP:HelpItem[]=[
  {title:'学习关闭广告控件',body:'在首页点“学习关闭”，切到出现广告的应用，点学习浮层“选择控件”，再点广告关闭控件中心的蓝色小方框。净屏重新核对并尝试关闭，确认关闭后在本机保存规则；后续只在控件仍可唯一匹配时自动处理。',keywords:'学习关闭 自定义 关闭窗口 控件 选择 确认 学习规则',destination:'home'},
  {title:'查看或删除学习规则',body:'在首页“自定义关闭窗口”区域点“更多”，可查看已学规则并逐条删除。',keywords:'学习关闭 自定义关闭窗口 规则 删除',destination:'learnedRecords'},
  {title:'查看处理记录',body:'在首页“最近记录”点“更多”查看记录；点某条记录可查看详情。',keywords:'最近记录 日志 处理结果 今日记录',destination:'records'},
- {title:'设置系统推荐开关',body:'打开“广告 > 系统推荐开关”，选择要处理的项目并按页面提示操作。只会自动操作能确认页面和开关的项目。',keywords:'系统广告 系统推荐 个性化推荐 vivo 小米 华为 设置',destination:'systemRecommend'},
+ {title:'设置系统推荐',body:'打开“广告 > 系统推荐设置”，选择要处理的项目并按页面提示操作。只会打开对应系统设置页并确认你自己的改动。',keywords:'系统广告 系统推荐 个性化推荐 vivo 小米 华为 设置',destination:'systemRecommend'},
  {title:'应用通知管理',body:'打开“广告 > 应用通知管理”查找应用并查看通知状态。需要授权或连接服务时，按页面提示前往设置或连接。',keywords:'通知 应用通知 关闭通知 搜索应用',destination:'appNotifications'},
  {title:'扫描营销通知',body:'打开“广告 > 营销通知管理”查看通知渠道。未连接服务时只能观察部分渠道；按页面提示连接 ADB Shell 或 Shizuku 后，才能读取更完整的清单。',keywords:'营销通知 营销通知管理 通知渠道 扫描 ADB Shell Shizuku 连接',destination:'marketingChannels'},
  {title:'系统设置权限',body:'进入“设置 > 服务与权限”，点按“系统设置权限”并按系统页面完成无线调试配对。开关显示已连接后，相关系统设置读取和操作能力才可用。',keywords:'ADB Shell 无线调试 配对 连接 授权',destination:'servicePermissions'},
@@ -198,7 +198,7 @@ export default function SettingsDetailScreen({section,logRetentionDays,versionNa
    </>:<>
     <Card compact style={s.group}>
      <View style={s.aboutBrand}>
-      <Image source={LOGO} style={s.aboutLogo}/>
+      <Image source={LOGO} resizeMode="contain" style={s.aboutLogo}/>
       <Text style={s.aboutName}>净屏</Text>
       <Text style={s.aboutVersion}>版本 {versionName}</Text>
      </View>
@@ -233,7 +233,7 @@ const s=StyleSheet.create({
  retentionSelected:{borderColor:'transparent',shadowColor:'#0B78F5',shadowOpacity:.24,shadowRadius:10,shadowOffset:{width:0,height:5},elevation:3},optionLabel:{flex:1,fontSize:COMPACT_UI.body,fontWeight:'700',color:C.text2},optionSelected:{color:'#FFFFFF',fontWeight:'800'},optionCheck:{width:18},optionGradient:{position:'absolute',left:0,right:0,top:0,bottom:0,borderRadius:13},
  searchRow:{flexDirection:'row',alignItems:'center',gap:8,marginBottom:COMPACT_UI.gap},searchField:{height:48,flex:1,flexDirection:'row',alignItems:'center',gap:8,paddingHorizontal:13,borderRadius:14,borderWidth:1,borderColor:C.line,backgroundColor:'#FFFFFF'},searchInput:{flex:1,minWidth:0,paddingVertical:0,fontSize:COMPACT_UI.body,color:C.text},searchButton:{height:48,minWidth:76,paddingHorizontal:12,borderRadius:14,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:5,backgroundColor:C.blue},searchButtonPressed:{opacity:0.78},searchButtonText:{fontSize:COMPACT_UI.caption,fontWeight:'900',color:'#FFFFFF'},
  helpItem:{paddingVertical:14,borderBottomWidth:1,borderBottomColor:C.line},helpHeader:{flexDirection:'row',alignItems:'center',gap:8,marginBottom:6},helpTitle:{flex:1,fontSize:COMPACT_UI.body,fontWeight:'900',color:C.navy},helpBody:{fontSize:COMPACT_UI.body,lineHeight:21,color:C.text},helpEmpty:{paddingVertical:24,textAlign:'center',fontSize:COMPACT_UI.body,color:C.text2},
- aboutBrand:{alignItems:'center',paddingVertical:24},aboutLogo:{width:64,height:64,marginBottom:10},aboutName:{fontSize:20,fontWeight:'900',color:C.navy},aboutVersion:{fontSize:COMPACT_UI.body,color:C.text2,marginTop:6},
+ aboutBrand:{alignSelf:'stretch',alignItems:'center',paddingVertical:24},aboutLogo:{width:64,height:64,marginBottom:10,transform:[{translateX:-4}]},aboutName:{width:'100%',textAlign:'center',fontSize:20,fontWeight:'900',color:C.navy},aboutVersion:{width:'100%',textAlign:'center',fontSize:COMPACT_UI.body,color:C.text2,marginTop:6},
  authorRow:{minHeight:58,flexDirection:'row',alignItems:'center',gap:12},authorLabel:{fontSize:COMPACT_UI.body,fontWeight:'700',color:C.text2},authorName:{flex:1,fontSize:COMPACT_UI.body,fontWeight:'800',color:C.navy},githubLink:{width:44,height:44,borderRadius:15,alignItems:'center',justifyContent:'center',backgroundColor:'#EDF5FC'},githubLinkPressed:{opacity:0.72},
  updateHeading:{fontSize:15,fontWeight:'900',color:C.navy,marginTop:14,marginBottom:6},spinner:{paddingVertical:18},
 });

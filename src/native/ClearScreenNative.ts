@@ -419,13 +419,24 @@ export const ClearScreenNative = {
       hint: landed?.hint ? String(landed.hint) : null,
     };
   },
+  openTargetSettingsPage: async (id: string): Promise<RecommendRouteResult> => {
+    if (typeof native?.openTargetSettingsPage !== 'function') throw new Error('系统设置入口不可用');
+    const landed = await withNativeTimeout<any>(native.openTargetSettingsPage(id), 8000, '系统设置打开超时，请重试');
+    const level = landed?.level;
+    return {
+      level: level === 'vendor' || level === 'system' ? level : 'appDetails',
+      component: String(landed?.component || ''),
+      hint: landed?.hint ? String(landed.hint) : null,
+    };
+  },
   openAppNotificationSettings: (packageName: string) => openNativeSettings('openAppNotificationSettings', packageName),
   openVendorStore: () => openNativeSettings('openVendorStore'),
   openMarketingChannel: (packageName: string, channelId: string) => openNativeSettings('openMarketingChannel', packageName, channelId),
   openNotificationAccessSettings: () => openNativeSettings('openNotificationAccessSettings'),
-  openDeveloperOptions: async (): Promise<'developer' | 'settingsHome'> => {
+  openDeveloperOptions: async (): Promise<'developer' | 'settingsHome' | 'aboutPhone'> => {
     if (typeof native?.openDeveloperOptions !== 'function') throw new Error('系统设置入口不可用');
-    return await withNativeTimeout<any>(native.openDeveloperOptions(), 8000, '系统设置打开超时，请重试') === 'settingsHome' ? 'settingsHome' : 'developer';
+    const level = await withNativeTimeout<any>(native.openDeveloperOptions(), 8000, '系统设置打开超时，请重试');
+    return level === 'settingsHome' || level === 'aboutPhone' ? level : 'developer';
   },
   getAdbAccessStatus: async (): Promise<AdbAccessStatus> => {
     if (!native?.getAdbAccessStatus) throw new Error('此设备不支持直接改系统设置');

@@ -152,6 +152,15 @@ class ClearScreenStore internal constructor(private val preferences: SharedPrefe
     preferences.edit().putBoolean(KEY_MASTER_ENABLED, enabled).apply()
   }
 
+  /** Retain the callback until unsubscribed; SharedPreferences holds listeners weakly. */
+  internal fun observeMasterEnabled(changed: () -> Unit): () -> Unit {
+    val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+      if (key == null || key == KEY_MASTER_ENABLED) changed()
+    }
+    preferences.registerOnSharedPreferenceChangeListener(listener)
+    return { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+  }
+
   fun getAppRule(packageName: String): AppRuleState = synchronized(lock) {
     val rules = JSONObject(preferences.getString(KEY_APP_RULES, "{}") ?: "{}")
     // Unconfigured apps are enabled, including apps installed later. Persisted

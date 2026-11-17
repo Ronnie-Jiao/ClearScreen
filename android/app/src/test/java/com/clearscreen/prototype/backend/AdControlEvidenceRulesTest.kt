@@ -52,8 +52,11 @@ class AdControlEvidenceRulesTest {
     assertFalse(fullAd.copy(visual = false).permits(close))
   }
 
-  @Test fun xNeedsABoundedAdAndNeverGetsAGenericVisualTouch() {
-    assertFalse(fullAd.permits(glyph))
+  @Test fun xNeedsOwnedAdEvidenceAndVisualTouchStillNeedsAFullAdPage() {
+    assertTrue(fullAd.permits(glyph))
+    assertTrue(fullAd.permitsVisualTouch(glyph))
+    assertFalse(fullAd.copy(redirect = false).permits(glyph))
+    assertFalse(fullAd.copy(badge = false).permits(glyph))
     val card = fullAd.copy(fullScreen = false)
     assertTrue(card.permits(glyph))
     assertFalse(card.copy(badge = false).permits(glyph))

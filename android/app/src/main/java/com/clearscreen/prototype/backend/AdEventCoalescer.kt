@@ -12,7 +12,8 @@ internal class AdEventCoalescer(private val minimumIntervalMs: Long = 350L) {
       (previous?.packageName == packageName && previous.windowChanged))
   }
 
-  fun delay(now: Long): Long = (lastScanAt + minimumIntervalMs - now).coerceAtLeast(0L)
+  fun delay(now: Long, startup: Boolean = false): Long =
+    (lastScanAt + (if (startup) minOf(minimumIntervalMs, 100L) else minimumIntervalMs) - now).coerceAtLeast(0L)
 
   fun take(now: Long): Event? {
     val event = pending ?: return null

@@ -2,7 +2,7 @@
   "expo": {
     "name": "净屏",
     "slug": "clearscreen-high-fidelity-ui",
-    "version": "1.0.121",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/logo-icon.png",
     "userInterfaceStyle": "light",
@@ -11,7 +11,7 @@
     },
     "android": {
       "package": "com.clearscreen.prototype",
-      "versionCode": 127,
+      "versionCode": 139,
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-foreground.png",
         "backgroundColor": "#1890DC"

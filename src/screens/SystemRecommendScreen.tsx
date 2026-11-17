@@ -12,17 +12,6 @@ const accessHint = (message: string) => {
   return '请先在「服务与权限」中连接「系统设置权限」，再回来开关。';
 };
 
-const ROUTE_AD_PRIVACY = 'settings.adPrivacy';
-const ROUTE_NEWS = 'settings.news';
-const ROUTE_STORE = 'store.home';
-
-/** The three category shortcuts: the row jumps to the brand page, the switch changes the setting. */
-const GROUP_ROWS = [
-  { key: 'ad', title: '广告与隐私', category: 'system', route: ROUTE_AD_PRIVACY },
-  { key: 'news', title: '资讯与推荐', category: 'news', route: ROUTE_NEWS },
-  { key: 'store', title: '应用商店推广', category: 'store', route: ROUTE_STORE },
-] as const;
-
 const ACTION_ORDER = [true, false] as const;
 
 /** Assisted switches have no readable system value; the label reflects the last confirmed state. */
@@ -55,7 +44,7 @@ function guide(manufacturer: string) {
   if (brand.includes('vivo') || brand.includes('iqoo')) return {
     system: '设置 → 安全 → 更多安全设置 → 广告与隐私',
     news: '设置 → 系统管理与升级 → 全局搜索；负一屏 → 设置 → 个性化推荐',
-    store: '应用商店 → 我的 → 设置 → 个性化推荐 / 服务管理',
+    store: '应用商店 → 我的 → 右上角设置 → 关于 → 服务管理 / 个性化推荐',
   };
   if (brand.includes('xiaomi') || brand.includes('redmi') || brand.includes('poco')) return {
     system: 'HyperOS：设置 → 隐私与安全 → 安全 → 更多安全设置 → 广告服务；MIUI：设置 → 安全 → 更多安全设置 → 广告服务',
@@ -109,11 +98,23 @@ export default function SystemRecommendScreen({
   const [targets, setTargets] = useState<UiCleanupTarget[]>([]);
   const [busyTarget, setBusyTarget] = useState('');
   const [accessibilityReady, setAccessibilityReady] = useState<boolean | null>(null);
+  const visibleTargets = useMemo(() => {
+    const seen = new Set<string>();
+    return targets.filter(target => {
+      if (target.id.startsWith('android.adPrivacy.')) return false;
+      if (target.category !== 'system') return false;
+      if (seen.has(target.title)) return false;
+      seen.add(target.title);
+      return true;
+    });
+  }, [targets]);
   const paths = useMemo(() => guide(manufacturer), [manufacturer]);
   const fail = (title: string, error: unknown) =>
     showAlert(title, error instanceof Error ? error.message : String(error), undefined, { tone: 'error' });
-  const openRoute = (route: string) => {
-    void ClearScreenNative.openRecommendRoute(route).then(landed => {
+  // Every switch row can land the user on the exact system settings page that
+  // owns it — independent of whether the automatic toggle is available.
+  const openTargetSettings = (target: UiCleanupTarget) => {
+    void ClearScreenNative.openTargetSettingsPage(target.id).then(landed => {
       if (landed.level === 'appDetails') {
         showAlert('没有直达设置页', landed.hint || '请在系统设置中手动查找。', undefined, { tone: 'warning' });
       }
@@ -123,8 +124,10 @@ export default function SystemRecommendScreen({
     try {
       setTargets(await ClearScreenNative.getUiCleanupTargets());
       const result = await ClearScreenNative.takeUiCleanupResult();
-      if (result) {
-        showAlert(result.title, result.message);
+      // Successful on/off changes are reflected by the switch/pill itself — no dialog.
+      // Only surface an unconfirmed/failed result so silent failures stay visible.
+      if (result && /没|超时|失败/.test(result.message)) {
+        showAlert(result.title, result.message, undefined, { tone: 'warning' });
         setTargets(await ClearScreenNative.getUiCleanupTargets());
       }
       setBusyTarget('');
@@ -163,7 +166,7 @@ export default function SystemRecommendScreen({
     try {
       await ClearScreenNative.applyUiCleanupDirect(target.id, closing ? 'off' : 'on');
       setTargets(await ClearScreenNative.getUiCleanupTargets());
-      showAlert(target.title, closing ? '已经关掉了。' : '已经恢复为开启。');
+      // No success dialog: the toggle itself is the feedback.
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes('Shizuku') || message.includes('配对') || message.includes('还没和这台手机连上')) {
@@ -213,53 +216,44 @@ export default function SystemRecommendScreen({
     // Assisted switches have no live value to flip: "去设置" and "未知" both mean "set it now".
     changeTargetTo(target, target.direct ? target.state !== 'off' : true);
   };
-  // Category rows open pages; they are not separate system switches.
-  const categoryTargets = GROUP_ROWS.map(row => ({ row, target: null }));
-  const renderTarget = (target: UiCleanupTarget, plain: boolean) => (
-    <View key={target.id} style={[s.row, plain && s.rowPlain]}>
-      <View style={s.rowText}><Text style={s.rowTitle}>{target.title}</Text></View>
-      <View style={s.stateWrap}>
-        {target.direct ?
-          <Toggle compact unknown={target.state === 'unknown'} value={target.state === 'on'}
-            onChange={() => { if (!busyTarget) changeTarget(target); }} /> :
-          <StatusPill status={assistedStatus(target)} busy={Boolean(busyTarget)} title={target.title}
-            onPress={() => { if (!busyTarget) changeTarget(target); }} />}
+  const renderTarget = (target: UiCleanupTarget) => (
+    <Card compact key={target.id} style={s.card}>
+      <View style={s.row}>
+        <Pressable accessibilityRole="button" accessibilityHint={`打开「${target.title}」的系统设置页`}
+          onPress={() => openTargetSettings(target)} style={s.rowText}>
+          <Text style={s.rowTitle}>{target.title}<Text style={s.rowJump}> ›</Text></Text>
+        </Pressable>
+        <View style={s.stateWrap}>
+          {target.direct ?
+            <Toggle compact unknown={target.state === 'unknown'} value={target.state === 'on'}
+              onChange={() => { if (!busyTarget) changeTarget(target); }} /> :
+            <StatusPill status={assistedStatus(target)} busy={Boolean(busyTarget)} title={target.title}
+              onPress={() => { if (!busyTarget) openTargetSettings(target); }} />}
+        </View>
       </View>
-    </View>
+    </Card>
   );
-  const renderCategory = (row: typeof GROUP_ROWS[number], plain: boolean) =>
-    <Pressable key={row.key} accessibilityRole="button" accessibilityHint={`打开${row.title}的系统设置页`}
-      onPress={() => openRoute(row.route)} style={[s.row, plain && s.rowPlain]}>
-      <View style={s.rowText}><Text style={s.rowTitle}>{row.title}</Text></View>
-      <Chevron compact />
-    </Pressable>;
-  const actionRows = ACTION_ORDER.flatMap(needsOn => {
-    const groupTargets = targets.filter(target => needsSystemToggleOn(target) === needsOn);
-    const groupCategories = categoryTargets.filter(({ target }) => needsSystemToggleOn(target) === needsOn);
-    return [
-      ...groupTargets.map(target => (last: boolean) => renderTarget(target, last)),
-      ...groupCategories.map(({ row }) => (last: boolean) => renderCategory(row, last)),
-    ];
-  });
+  const actionRows = ACTION_ORDER.flatMap(needsOn =>
+    visibleTargets.filter(target => needsSystemToggleOn(target) === needsOn)
+      .map(target => renderTarget(target)));
 
   return (
     <Background>
       <ScrollView contentContainerStyle={s.page} showsVerticalScrollIndicator={false}>
-        <TopBar compact title="系统推荐开关" onBack={onBack} />
+        <TopBar compact title="系统推荐设置" onBack={onBack} />
 
-        <Card compact style={s.card}>
-          {targets.length === 0 ? <>
-              <Text style={s.emptyStatus}>这台手机暂未适配自动开关，可先打开对应设置页面手动关闭。</Text>
-              <Pressable accessibilityRole="button" onPress={onOpenSystemPrivacy} style={[s.row, s.rowPlain]}>
-                <View style={s.rowText}>
-                  <Text style={s.rowTitle}>系统广告设置</Text>
-                  <Text style={s.rowStatus}>{paths.system}</Text>
-                </View>
-                <Chevron compact />
-              </Pressable>
-            </> : null}
-          {actionRows.map((renderRow, index) => renderRow(index === actionRows.length - 1))}
-        </Card>
+        {visibleTargets.length === 0 ?
+          <Card compact style={s.card}>
+            <Text style={s.emptyStatus}>这台手机暂未适配自动开关，可先打开对应设置页面手动关闭。</Text>
+            <Pressable accessibilityRole="button" onPress={onOpenSystemPrivacy} style={s.row}>
+              <View style={s.rowText}>
+                <Text style={s.rowTitle}>系统广告设置</Text>
+                <Text style={s.rowStatus}>{paths.system}</Text>
+              </View>
+              <Chevron compact />
+            </Pressable>
+          </Card> : null}
+        {actionRows}
       </ScrollView>
     </Background>
   );
@@ -267,9 +261,8 @@ export default function SystemRecommendScreen({
 
 const s = StyleSheet.create({
   page: { paddingHorizontal: 18, paddingBottom: 36 },
-  card: { paddingHorizontal: COMPACT_UI.cardPadding, paddingTop: 4, paddingBottom: 4, marginBottom: 12 },
-  row: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: C.line, paddingVertical: 8 },
-  rowPlain: { borderBottomWidth: 0 },
+  card: { paddingHorizontal: COMPACT_UI.cardPadding, paddingTop: 8, paddingBottom: 8, marginBottom: 12 },
+  row: { minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: 10 },
   rowText: { flex: 1 },
   stateWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   pill: { minWidth: 68, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, alignItems: 'center' },
@@ -283,6 +276,7 @@ const s = StyleSheet.create({
   pillTextSet: { color: C.green },
   pillTextUnknown: { color: '#7186A3' },
   rowTitle: { fontSize: COMPACT_UI.body, fontWeight: '800', color: C.text },
+  rowJump: { color: C.blue, fontWeight: '400' },
   rowStatus: { fontSize: COMPACT_UI.body, color: C.text, marginTop: 3, lineHeight: 20 },
   emptyStatus: { fontSize: COMPACT_UI.body, color: C.text, paddingHorizontal: 8, paddingVertical: 14, lineHeight: 21 },
 });

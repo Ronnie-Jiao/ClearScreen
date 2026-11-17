@@ -280,13 +280,10 @@ internal object ClearScreenShellOps {
     // Android 13+ exposes the user-visible switch as the POST_NOTIFICATIONS
     // runtime permission. A revoked permission always means notifications are
     // off, even when the package-level appop still reads "allow".
-    val dump = runner.exec("/system/bin/dumpsys", "package", pkg)
-    if (dump.code == 0) {
-      val revoked = dump.output.lineSequence().map { it.trim() }.any {
-        it.startsWith("android.permission.POST_NOTIFICATIONS:") && it.contains("granted=false")
-      }
-      if (revoked) return "disabled"
-    }
+    // `dumpsys package` contains a section per Android user; phones with app
+    // clone / dual apps therefore report several POST_NOTIFICATIONS lines.
+    // Only the current user's section describes the switch shown in settings.
+    if (notificationPermissionRevoked(runner, pkg, user) == true) return "disabled"
     val result = runner.exec("/system/bin/cmd", "appops", "get", "--user", user.toString(), pkg, "POST_NOTIFICATION")
     if (result.code != 0) return "unknown"
     val lines = result.output.lineSequence().map { it.trim() }.toList()
@@ -314,34 +311,100 @@ internal object ClearScreenShellOps {
       "这台手机没有安装这个应用"
     }
     val desired = if (enabled) "enabled" else "disabled"
-    when (appNotificationState(runner, pkg)) {
-      desired -> return "already_$desired"
-      "unknown" -> error("系统没有提供这个应用的通知状态，本次不会更改")
-    }
     val mode = if (enabled) "allow" else "ignore"
-    // Three write channels, tried in order until a read-back confirms the new
-    // state. Android 16 silently drops every `appops set POST_NOTIFICATION`
-    // form (exit code 0, state unchanged), so the POST_NOTIFICATIONS runtime
-    // permission is the primary channel on Android 13+: `pm grant/revoke`
-    // flips the user-visible switch and the system syncs the uid appop.
-    // Older devices have no such permission and only honour the appop writes.
-    val attempts = listOf(
-      arrayOf("/system/bin/pm", if (enabled) "grant" else "revoke", "--user", user.toString(), pkg, "android.permission.POST_NOTIFICATIONS"),
-      arrayOf("/system/bin/cmd", "appops", "set", "--user", user.toString(), "--uid", pkg, "POST_NOTIFICATION", mode),
+
+    // Vivo/OriginOS (and several other OEM ROMs) render the user-visible
+    // "允许通知" switch from an EXPLICIT `POST_NOTIFICATION` appop record.
+    // A POST_NOTIFICATIONS runtime permission that is merely `granted=true`
+    // with NO appop record still shows as OFF in system settings (verified on
+    // a vivo Android 16 device with Taobao). Writing an explicit package-level
+    // `POST_NOTIFICATION: allow` record is what actually turns that switch on.
+    //
+    // Therefore:
+    // - enable: run BOTH `pm grant` (permission) and `cmd appops set ... allow`
+    //   (the explicit record). No `already_enabled` shortcut — even when the
+    //   permission is already granted we must lay down the appop record.
+    // - disable: `pm revoke` writes a uid-level `ignore` that the system honours;
+    //   a package-level appop `ignore` is attempted as a fallback.
+    // Every command runs, then a read-back confirms the target state AND (when
+    // enabling) the presence of an explicit appop record.
+    val attempts = if (enabled) listOf(
+      arrayOf("/system/bin/pm", "grant", "--user", user.toString(), pkg, "android.permission.POST_NOTIFICATIONS"),
+      arrayOf("/system/bin/cmd", "appops", "set", "--user", user.toString(), pkg, "POST_NOTIFICATION", mode),
+    ) else listOf(
+      arrayOf("/system/bin/pm", "revoke", "--user", user.toString(), pkg, "android.permission.POST_NOTIFICATIONS"),
       arrayOf("/system/bin/cmd", "appops", "set", "--user", user.toString(), pkg, "POST_NOTIFICATION", mode),
     )
-    var lastError = "系统拒绝了这次修改"
+    var anyExecuted = false
     for (attempt in attempts) {
-      val written = runner.exec(*attempt)
-      if (written.code != 0) continue
-      when (appNotificationState(runner, pkg)) {
-        desired -> return desired
-        "unknown" -> lastError = "系统没有提供这个应用的通知状态"
-        else -> lastError = "系统返回的通知状态与操作不一致"
-      }
+      if (runner.exec(*attempt).code == 0) anyExecuted = true
     }
-    error(lastError)
+    if (!anyExecuted) error("系统拒绝了这次修改")
+
+    val state = appNotificationState(runner, pkg)
+    if (state == "unknown") error("系统没有提供这个应用的通知状态")
+    if (state != desired) error("系统返回的通知状态与操作不一致")
+    // Enabling additionally requires an explicit appop record; permission alone
+    // is not enough for OEM settings to reflect the switch as on.
+    if (enabled && !hasExplicitNotificationOp(runner, pkg, user)) {
+      error("系统仍未记录通知开关，请到系统设置中打开")
+    }
+    return desired
   }
+
+  /** True when the package has an explicit package- or uid-level POST_NOTIFICATION appop record. */
+  private fun hasExplicitNotificationOp(
+    runner: ClearScreenShellRunner,
+    pkg: String,
+    user: Int,
+  ): Boolean {
+    val result = runner.exec(
+      "/system/bin/cmd", "appops", "get", "--user", user.toString(), pkg, "POST_NOTIFICATION",
+    )
+    if (result.code != 0) return false
+    return result.output.lineSequence().any { raw ->
+      val line = raw.trim()
+      line.startsWith("POST_NOTIFICATION:") ||
+        (line.startsWith("Uid mode:") && line.contains("POST_NOTIFICATION:"))
+    }
+  }
+
+  /**
+   * Reads POST_NOTIFICATIONS only from the current Android user's section of
+   * `dumpsys package`. A phone with app clone / dual apps has several users,
+   * and a revoked permission in another user must not turn this user's switch
+   * off. Returns null when the dump has no usable line (older Android / ROM).
+   */
+  private fun notificationPermissionRevoked(
+    runner: ClearScreenShellRunner,
+    pkg: String,
+    user: Int,
+  ): Boolean? {
+    val dump = runner.exec("/system/bin/dumpsys", "package", pkg)
+    if (dump.code != 0) return null
+    val permissionPrefix = "android.permission.POST_NOTIFICATIONS:"
+    var sectionUser: Int? = null
+    var sawSection = false
+    var granted: Boolean? = null
+    for (raw in dump.output.lineSequence()) {
+      val line = raw.trim()
+      val section = USER_SECTION.matchEntire(line)
+      if (section != null) {
+        sawSection = true
+        sectionUser = section.groupValues[1].toIntOrNull()
+        continue
+      }
+      if (!line.startsWith(permissionPrefix)) continue
+      // On a single-user dump there is no User header; keep the old fallback.
+      if (sawSection && sectionUser != user) continue
+      val value = line.substringAfter("granted=").substringBefore(',').trim()
+      if (value == "true") granted = true
+      else if (value == "false" && granted != true) granted = false
+    }
+    return granted?.not()
+  }
+
+  private val USER_SECTION = Regex("^User (\\d+):.*")
 
   private fun isBlockedMode(mode: String): Boolean =
     mode.lowercase(Locale.ROOT).let { it == "ignore" || it == "deny" }

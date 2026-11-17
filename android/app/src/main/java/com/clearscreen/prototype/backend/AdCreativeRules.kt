@@ -38,9 +38,7 @@ internal object AdCreativeRules {
       (!AdSemanticRules.isPlainSkip(label) && !AdSemanticRules.isCountdownSkip(label)) ||
       !contains(screen, container) || !contains(container, skip) ||
       container.width < screen.width * 0.90 || container.height < screen.height * 0.70 ||
-      skip.width > container.width * 0.30 || skip.height > container.height * 0.10 ||
-      skip.centerX < container.left + container.width * 0.70 ||
-      skip.top > container.top + container.height * 0.22
+      skip.width > container.width * 0.30 || skip.height > container.height * 0.10
     ) return false
     val largeCreative = creatives.any { creative ->
       contains(container, creative) && creative.width >= container.width * 0.90 &&
@@ -48,8 +46,6 @@ internal object AdCreativeRules {
     }
     val redirectHint = texts.any { text ->
       contains(container, text.bounds) &&
-        text.bounds.centerY >= container.top + container.height * 0.40 &&
-        text.bounds.centerY <= container.top + container.height * 0.90 &&
         AdSemanticRules.normalize(text.value) in setOf(
           "摇一摇跳转至第三方应用或详情页",
           "点击跳转详情页或第三方应用",
@@ -119,6 +115,7 @@ internal object AdCreativeRules {
   )
   private val motionActions = setOf(
     "扭动手机开启详情", "扭一扭开启详情", "摇一摇开启详情", "翻转手机",
+    "转动手机或点击图标", "转动手机点击图标", "转动手机", "扭动手机或点击图标",
   )
   private val motionRedirectHints = setOf(
     "互动跳转详情页或第三方应用", "互动跳转至详情页或第三方应用",
@@ -321,7 +318,7 @@ internal object AdCreativeRules {
       close.centerY < action.bounds.centerY
   }
 
-  /** Explicit upper ad badge + lower redirect CTA on one full-screen splash. */
+  /** Same-window ad disclosure and redirect semantics; neither has a required position. */
   fun hasRedirectSplashComposition(
     texts: List<Text>,
     skip: AdGeometryRules.Box,
@@ -342,37 +339,25 @@ internal object AdCreativeRules {
   ): Boolean {
     if (screen.width <= 0 || screen.height <= 0 || !contains(screen, skip) ||
       skip.width <= 0 || skip.height <= 0 ||
-      skip.width > screen.width * 0.34 || skip.height > screen.height * 0.12 ||
-      skip.centerX < screen.left + screen.width * 0.65 ||
-      skip.top > screen.top + screen.height * 0.22
+      skip.width > screen.width * 0.34 || skip.height > screen.height * 0.12
     ) return false
     val local = texts.filter { contains(screen, it.bounds) }
     val badge = local.any { text ->
-      AdSemanticRules.normalize(text.value) in badges &&
+      AdControlEvidenceRules.isAdBadge(text.value) &&
         text.bounds.width <= screen.width * 0.20 &&
-        text.bounds.height <= screen.height * 0.06 &&
-        text.bounds.centerY <= screen.top + screen.height * 0.30 &&
-        (text.bounds.centerX <= screen.left + screen.width * 0.40 ||
-          (text.bounds.centerX >= screen.left + screen.width * 0.50 &&
-            text.bounds.right <= skip.left + screen.width * 0.02 &&
-            kotlin.math.abs(text.bounds.centerY - skip.centerY) <= screen.height * 0.06))
+        text.bounds.height <= screen.height * 0.06
     }
     val redirect = local.any { text ->
-      AdSemanticRules.normalize(text.value).trimEnd('›', '〉', '→', '❯') in redirectActions &&
-        text.bounds.centerY >= screen.top + screen.height * 0.50 &&
-        text.bounds.centerY <= screen.top + screen.height * 0.88
+      AdControlEvidenceRules.hasRedirectDisclosure(text.value)
     }
     // A motion instruction alone also occurs in normal product tutorials.
-    // Require the separate lower third-party redirect disclosure as well.
+    // Require the separate third-party redirect disclosure as well.
     val motionAction = local.any { text ->
-      AdSemanticRules.normalize(text.value).trimEnd('›', '〉', '→', '❯') in motionActions &&
-        text.bounds.centerY >= screen.top + screen.height * 0.60 &&
-        text.bounds.centerY <= screen.top + screen.height * 0.92
+      AdSemanticRules.normalize(text.value).trimEnd('›', '〉', '→', '❯') in motionActions
     }
     val motionRedirect = local.any { text ->
-      AdSemanticRules.normalize(text.value) in motionRedirectHints &&
-        text.bounds.centerY >= screen.top + screen.height * 0.82 &&
-        text.bounds.centerY <= screen.top + screen.height * 0.97
+      AdSemanticRules.normalize(text.value) in motionRedirectHints ||
+        AdControlEvidenceRules.hasRedirectDisclosure(text.value)
     }
     return badge && ((motionAction && motionRedirect) || (!motionOnly && redirect))
   }
@@ -386,9 +371,7 @@ internal object AdCreativeRules {
   ): Boolean {
     if (packageName != "com.greenpoint.android.mc10086.activity" ||
       screen.width <= 0 || screen.height <= 0 || !contains(screen, skip) ||
-      skip.width > screen.width * 0.34 || skip.height > screen.height * 0.12 ||
-      skip.centerX < screen.left + screen.width * 0.65 ||
-      skip.top > screen.top + screen.height * 0.22
+      skip.width > screen.width * 0.34 || skip.height > screen.height * 0.12
     ) return false
 
     val local = texts.filter { contains(screen, it.bounds) }
@@ -397,9 +380,7 @@ internal object AdCreativeRules {
       .joinToString("") { it.value })
     val exactTrafficOffer = listOf("55gb", "大流量卡", "39元", "40gb", "云盘").all(offer::contains)
     val redirect = local.any { text ->
-      text.bounds.centerY >= screen.top + screen.height * 0.50 &&
-        text.bounds.centerY <= screen.top + screen.height * 0.90 &&
-        redirectActions.any { AdSemanticRules.normalize(text.value).contains(it) }
+      AdControlEvidenceRules.hasRedirectDisclosure(text.value)
     }
     return exactTrafficOffer && redirect
   }
@@ -413,18 +394,14 @@ internal object AdCreativeRules {
   ): Boolean {
     if (packageName != "com.greenpoint.android.mc10086.activity" ||
       screen.width <= 0 || screen.height <= 0 || !contains(screen, skip) ||
-      skip.width > screen.width * 0.34 || skip.height > screen.height * 0.12 ||
-      skip.centerX < screen.left + screen.width * 0.65 ||
-      skip.top > screen.top + screen.height * 0.22
+      skip.width > screen.width * 0.34 || skip.height > screen.height * 0.12
     ) return false
 
     val local = texts.filter { contains(screen, it.bounds) }
     val badge = local.any { text ->
       AdSemanticRules.normalize(text.value) == "广告" &&
         text.bounds.width <= screen.width * 0.20 &&
-        text.bounds.height <= screen.height * 0.06 &&
-        text.bounds.centerX <= screen.left + screen.width * 0.40 &&
-        text.bounds.centerY <= screen.top + screen.height * 0.30
+        text.bounds.height <= screen.height * 0.06
     }
     if (!badge) return false
 
@@ -434,15 +411,12 @@ internal object AdCreativeRules {
     val exactBroadbandOffer = offer.contains("千兆宽带") &&
       offer.contains("秋季特惠") && offer.contains("1元天起") && offer.contains("全家畅享")
     val redirect = local.any { text ->
-      val action = AdSemanticRules.normalize(text.value).trimEnd('›', '〉', '→', '❯')
-      action in redirectActions &&
-        text.bounds.centerY >= screen.top + screen.height * 0.50 &&
-        text.bounds.centerY <= screen.top + screen.height * 0.90
+      AdControlEvidenceRules.hasRedirectDisclosure(text.value)
     }
     return exactBroadbandOffer && redirect
   }
 
-  /** China Telecom's branded startup ad: only a real, compact bottom-right Skip may be clicked. */
+  /** Known host branding supports a ready skip; the control and copy may move. */
   fun hasChinaTelecomBrandedSplash(
     packageName: String,
     skipText: String,
@@ -455,36 +429,22 @@ internal object AdCreativeRules {
     val skipArea = skip.width.toLong().coerceAtLeast(0L) * skip.height.toLong().coerceAtLeast(0L)
     val screenArea = width.toLong() * height
     if (packageName != "com.ct.client" ||
-      AdSemanticRules.normalize(skipText) != "跳过" ||
-      AdSemanticRules.isBlockedSkipLabel(skipText) ||
+      AdSemanticRules.selectSkipLabel(listOf(skipText)) == null ||
       !contains(screen, skip) || skip.width > width * 0.28f || skip.height > height * 0.10f ||
-      skipArea.toDouble() / screenArea > 0.03 ||
-      skip.centerX < screen.left + width * 0.70f ||
-      skip.centerY < screen.top + height * 0.90f
+      skipArea.toDouble() / screenArea > 0.03
     ) return false
 
     val local = texts.filter { contains(screen, it.bounds) }
     val telecomLogo = local.any { text ->
       AdSemanticRules.normalize(text.value).contains("中国电信") &&
-        text.bounds.centerX in (screen.left + width * 0.25f).toInt()..(screen.left + width * 0.75f).toInt() &&
-        text.bounds.centerY in (screen.top + height * 0.78f).toInt()..(screen.top + height * 0.93f).toInt() &&
         text.bounds.width <= width * 0.55f && text.bounds.height <= height * 0.08f
     }
     if (!telecomLogo) return false
 
-    fun textInColumn(minX: Float, maxX: Float): String = local.asSequence()
-      .filter { text ->
-        text.bounds.centerX in (screen.left + width * minX).toInt()..(screen.left + width * maxX).toInt() &&
-          text.bounds.centerY in (screen.top + height * 0.38f).toInt()..(screen.top + height * 0.69f).toInt() &&
-          text.bounds.width <= width * 0.32f && text.bounds.height <= height * 0.28f
-      }
-      .sortedWith(compareBy<Text> { it.bounds.centerY }.thenBy { it.bounds.centerX })
-      .joinToString(separator = "") { AdSemanticRules.normalize(it.value) }
-
-    val leftSlogan = textInColumn(0.30f, 0.52f)
-    val rightSlogan = textInColumn(0.48f, 0.70f)
-    return leftSlogan.contains("用户") && leftSlogan.contains("至上") &&
-      rightSlogan.contains("用心") && rightSlogan.contains("服务")
+    if (local.any { AdControlEvidenceRules.hasRedirectDisclosure(it.value) }) return true
+    val copy = local.joinToString("") { AdSemanticRules.normalize(it.value) }
+    return copy.contains("用户") && copy.contains("至上") &&
+      copy.contains("用心") && copy.contains("服务")
   }
 
   /** China Mobile's centered plan-upgrade popup with its own lower-center close button. */

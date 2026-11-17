@@ -9,7 +9,8 @@ import kotlin.math.min
 /**
  * Finds a closed, contrasting button background around an already recognized
  * action label. A text box alone, an open background or a large poster fails.
- * This supplies geometry only; the service must verify ad evidence and two frames.
+ * This supplies geometry only; the service verifies the applicable control
+ * policy, current window and any required second frame before touching it.
  */
 internal object AdVisualButtonDetector {
   /** Distributed texture is only a visual-surface hint, never ad evidence. */

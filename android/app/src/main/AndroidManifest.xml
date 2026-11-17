@@ -2,6 +2,8 @@
     xmlns:tools="http://schemas.android.com/tools">
   <!-- Internet access is used for a user-initiated check of public release information. -->
   <uses-permission android:name="android.permission.INTERNET"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
   <!-- Declared so the ADB channel can `pm grant` it once paired; the app then
        re-enables the wireless debugging toggle if the system turns it off. -->
   <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"/>
@@ -84,10 +86,20 @@
       </intent-filter>
     </activity>
     <service
+      android:name=".backend.ClearScreenRuntimeService"
+      android:exported="false"
+      android:stopWithTask="false"
+      android:foregroundServiceType="specialUse">
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="Keep user-enabled accessibility ad assistance running after the app UI closes, with an ongoing notification." />
+    </service>
+    <service
       android:name=".backend.ClearScreenAccessibilityService"
       android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
       android:enabled="true"
       android:exported="false"
+      android:stopWithTask="false"
       android:label="@string/app_name">
       <intent-filter>
         <action android:name="android.accessibilityservice.AccessibilityService" />

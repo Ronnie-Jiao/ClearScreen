@@ -86,8 +86,23 @@ internal class ClearScreenSettingsNavigator(private val context: Context) {
 
   private fun isMiui(): Boolean = Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)
 
-  /** Opens developer options, or the system settings home when the OEM blocks direct navigation. */
+  /** Opens developer options, or About phone when developer mode is still off. */
   fun openDeveloperOptions(): String {
+    // With developer mode off, the developer sub-page cannot be opened and a settings search
+    // finds nothing — the user must first enable it by tapping Build number 7 times.
+    val developerOn = runCatching {
+      Settings.Global.getInt(context.contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1
+    }.getOrDefault(false)
+    if (!developerOn) {
+      val opened = tryOpen(listOf(Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)))
+      val notice = if (opened) {
+        "还没开启「开发者选项」：请连点「版本号」7 次开启，再回到净屏继续。"
+      } else {
+        "请先到「设置 → 关于手机」连点「版本号」7 次开启开发者选项，再回到净屏继续。"
+      }
+      notifySettingsFallback(notice)
+      return "aboutPhone"
+    }
     // MIUI/HyperOS redirects third-party launches of the developer sub-page to this app's details.
     // Open the settings home instead; Xiaomi's user path is Additional settings → Developer options.
     if (!isMiui() && tryOpen(developerCandidates())) return "developer"
@@ -127,6 +142,42 @@ internal class ClearScreenSettingsNavigator(private val context: Context) {
     context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
   }
 
+  /**
+   * Opens the settings screen that owns a single recommendation switch, with no
+   * accessibility automation attached. Used by the "去设置" rows that must land
+   * the user on the real system page even when the automatic switch is unavailable.
+   * Mirrors the route/fallback order in ClearScreenNativeModule.startUiCleanup.
+   */
+  fun openTarget(target: ClearScreenUiCleanup.Target): RouteResult {
+    val route = target.navigate
+    if (route != null) {
+      val landed = openRecommendRoute(route)
+      if (landed.level != ClearScreenRecommendRoutes.LEVEL_APP_DETAILS) return landed
+      return landed
+    }
+    return when (target.category) {
+      "store" -> {
+        openVendorStore()
+        RouteResult(ClearScreenRecommendRoutes.LEVEL_VENDOR, "store.home", null)
+      }
+      "news" -> when (target.entry) {
+        "home" -> {
+          openHomeScreen()
+          RouteResult(ClearScreenRecommendRoutes.LEVEL_VENDOR, "home.screen", null)
+        }
+        "browser" -> {
+          openVivoBrowser()
+          RouteResult(ClearScreenRecommendRoutes.LEVEL_VENDOR, "vivo.browser", null)
+        }
+        else -> {
+          openSystemHomeSettings()
+          RouteResult(ClearScreenRecommendRoutes.LEVEL_SYSTEM, "system.settings", null)
+        }
+      }
+      else -> openRecommendRoute(ClearScreenRecommendCatalog.ROUTE_AD_PRIVACY)
+    }
+  }
+
   fun openAppNotificationSettings(packageName: String) {
     require(packageName.matches(Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+"))) {
       "Invalid application package name"
@@ -139,7 +190,7 @@ internal class ClearScreenSettingsNavigator(private val context: Context) {
       emptyList()
     }
     if (tryOpen(candidates)) return
-    openAppDetailsOrThrow("已打开该应用的信息页，请点「通知」进入通知管理")
+    openTargetAppDetailsOrThrow(packageName, "未找到该应用的通知设置页，已打开该应用的信息页；请点「通知」进入通知管理")
   }
 
   /**
@@ -185,6 +236,15 @@ internal class ClearScreenSettingsNavigator(private val context: Context) {
     val appDetails = Intent(
       Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
       Uri.parse("package:${context.packageName}"),
+    )
+    if (!tryOpen(listOf(appDetails))) throw ActivityNotFoundException("No available application details screen")
+    notifySettingsFallback(notice)
+  }
+
+  private fun openTargetAppDetailsOrThrow(packageName: String, notice: String) {
+    val appDetails = Intent(
+      Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+      Uri.parse("package:$packageName"),
     )
     if (!tryOpen(listOf(appDetails))) throw ActivityNotFoundException("No available application details screen")
     notifySettingsFallback(notice)

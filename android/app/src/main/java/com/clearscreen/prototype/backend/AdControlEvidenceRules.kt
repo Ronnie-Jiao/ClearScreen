@@ -19,9 +19,9 @@ internal object AdControlEvidenceRules {
     fun permits(label: AdSemanticRules.ControlLabel): Boolean {
       if (!visual) return false
       if (label.kind == AdSemanticRules.ControlKind.GLYPH) {
-        // A local ad disclosure plus creative is enough for a bounded promo;
-        // generic full-screen/player X controls still need stronger evidence.
-        return structuralAdContainer || (!fullScreen && badge)
+        // A full-screen X needs the same ad ownership/disclosure as a labelled
+        // close. Its screen corner cannot supply or veto that evidence.
+        return structuralAdContainer || (badge && (!fullScreen || redirect || adContainer))
       }
       if (label.explicitAd) return structuralAdContainer || badge || adContainer || redirect
       if (!fullScreen) return structuralAdContainer || badge
@@ -32,7 +32,7 @@ internal object AdControlEvidenceRules {
     }
 
     fun permitsVisualTouch(label: AdSemanticRules.ControlLabel): Boolean =
-      label.kind != AdSemanticRules.ControlKind.GLYPH && fullScreen && permits(label) &&
+      fullScreen && permits(label) &&
         ((badge && redirect) || (adContainer && (badge || redirect)))
   }
 

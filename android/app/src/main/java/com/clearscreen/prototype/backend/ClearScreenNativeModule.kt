@@ -246,6 +246,10 @@ class ClearScreenNativeModule(
   fun setMasterEnabled(enabled: Boolean, promise: Promise) = runAsync(promise) {
     requirePrivacyConsent()
     store.setMasterEnabled(enabled)
+    ClearScreenRuntimeService.sync(reactContext)
+    if (enabled && hostResumed) {
+      reactContext.runOnUiQueueThread { ClearScreenAccessibilityRecovery.onForeground(reactContext) }
+    }
     true
   }
 
@@ -381,6 +385,36 @@ class ClearScreenNativeModule(
       if (landed.level != ClearScreenRecommendRoutes.LEVEL_APP_DETAILS) {
         landed.hint?.let { Toast.makeText(reactContext, it, Toast.LENGTH_LONG).show() }
       }
+      promise.resolve(Arguments.createMap().apply {
+        putString("level", landed.level)
+        putString("component", landed.component)
+        landed.hint?.let { putString("hint", it) }
+      })
+    } catch (error: Exception) {
+      promise.reject("SETTINGS_OPEN_FAILED", error)
+    }
+  }
+
+  /**
+   * Opens the exact system settings page that owns one recommendation switch,
+   * identified by its catalog id. For assisted targets a passive watch is armed
+   * first: it never taps anything, it only confirms the user's own change so the
+   * row can turn into「已设置」. The jump still works without the accessibility
+   * service; in that case the watch is simply skipped.
+   */
+  @ReactMethod
+  fun openTargetSettingsPage(id: String, promise: Promise) {
+    try {
+      val target = ClearScreenUiCleanup.targets(reactContext).singleOrNull { it.id == id }
+        ?: error("这台手机没有这个开关")
+      if (target.support == "assisted" && ClearScreenDirectSettings.spec(target) == null) {
+        runCatching { ClearScreenUiCleanup.begin(reactContext, target.id, false, store, manual = true) }
+      }
+      val landed = settingsNavigator.openTarget(target)
+      if (landed.level == ClearScreenRecommendRoutes.LEVEL_APP_DETAILS) {
+        runCatching { ClearScreenUiCleanup.cancel() }
+      }
+      landed.hint?.let { Toast.makeText(reactContext, it, Toast.LENGTH_LONG).show() }
       promise.resolve(Arguments.createMap().apply {
         putString("level", landed.level)
         putString("component", landed.component)
@@ -975,7 +1009,8 @@ class ClearScreenNativeModule(
     // This module and the accessibility service use the same default process.
     // Executing this call proves that process is alive, not that the service is bound.
     val processAlive = android.os.Process.myPid() > 0
-    val health = if (!serviceBound) ClearScreenAccessibilityHealth.UNAVAILABLE
+    val health = if (!serviceBound && ClearScreenAccessibilityRecovery.isPending) ClearScreenAccessibilityHealth.UNKNOWN
+      else if (!serviceBound) ClearScreenAccessibilityHealth.UNAVAILABLE
       else if (verify && hostResumed) ClearScreenAccessibilityHealth.check(reactContext.currentActivity)
       else ClearScreenAccessibilityHealth.current()
     return AccessibilityState(

@@ -9,18 +9,19 @@ internal class AdActionAttemptGuard(
     var lastSeenAt: Long,
     var ineffective: Boolean = false,
     var touchAttempted: Boolean = false,
+    val startup: Boolean = false,
   )
 
   private val attempts = LinkedHashMap<String, Attempt>()
 
   /** Reserve before dispatch, including requests that Android subsequently rejects. */
-  fun tryBegin(key: String, now: Long): Boolean {
+  fun tryBegin(key: String, now: Long, startup: Boolean = false): Boolean {
     removeExpired(now)
     attempts[key]?.let {
       it.lastSeenAt = now
       return false
     }
-    attempts[key] = Attempt(now)
+    attempts[key] = Attempt(now, startup = startup)
     while (attempts.size > maxTargets) attempts.remove(attempts.entries.first().key)
     return true
   }
@@ -40,6 +41,12 @@ internal class AdActionAttemptGuard(
   }
 
   fun clear() = attempts.clear()
+
+  /** Reopening an app starts a new opportunity for its startup controls only. */
+  fun clearStartupForPackage(packageName: String) {
+    val prefix = "$packageName|"
+    attempts.entries.removeAll { it.value.startup && it.key.startsWith(prefix) }
+  }
 
   private fun removeExpired(now: Long) {
     attempts.entries.removeAll { now - it.value.lastSeenAt >= quietPeriodMs }

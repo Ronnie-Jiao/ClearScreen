@@ -14,9 +14,11 @@ import java.text.Normalizer
  */
 internal object AdSemanticRules {
   private val ignoredPunctuation = Regex("""[\s\p{Z}\p{Cf}\-_:：，,。.!！？?()（）\[\]{}<>《》【】'"\x60~·|/\\]+""")
-  private val numericSkip = listOf(
-    Regex("""^\d{1,3}(?:秒|s)?(?:后)?(?:跳过|skip)(?:广告|此广告|视频|ad|thisad|video)?$"""),
-    Regex("""^(?:跳过|skip)(?:广告|此广告|视频|ad|thisad|video)?\d{1,3}(?:秒|s)?$"""),
+  private val readyNumericSkip = listOf(
+    Regex("""^(\d{1,3})(?:秒|s)?(?:后)?(?:跳过|skip)(?:广告|此广告|视频|ad|thisad|video)?$"""),
+    Regex("""^(?:跳过|skip)(?:广告|此广告|视频|ad|thisad|video)?(\d{1,3})(?:秒|s)?$"""),
+  )
+  private val numericSkip = readyNumericSkip + listOf(
     Regex("""^(?:skipin|跳过倒计时)\d{1,3}(?:秒|s)?$"""),
   )
   private val explicitSkip = setOf(
@@ -119,7 +121,7 @@ internal object AdSemanticRules {
     val actions = labels.map { value ->
       val compact = normalize(value)
       val action = compact.removeSuffix("按钮").removeSuffix("button")
-      if (isPlainSkip(action) || isExplicitSkip(action) || isClose(action)) action else compact
+      if (isPlainSkip(action) || isExplicitSkip(action) || isCountdownSkip(action) || isClose(action)) action else compact
     }
     selectSkipLabel(actions)?.let { return ControlLabel(it, ControlKind.SKIP, isExplicitSkip(it)) }
     selectCloseLabel(actions)?.let {
@@ -197,15 +199,16 @@ internal object AdSemanticRules {
   fun isCountdownSkip(compact: String): Boolean =
     numericSkip.any { it.matches(compact) }
 
-  /** OCR-only taps wait until a countdown reaches zero; a tree-backed enabled node is checked elsewhere. */
-  fun isZeroCountdownSkip(value: String): Boolean {
+  /** Remaining display time bounds evidence when the inaccessible ad changes its background tree. */
+  fun readySkipCountdownMillis(value: String): Long? {
+    if (isBlockedSkipLabel(value)) return null
     val compact = normalize(value)
-    val patterns = listOf(
-      Regex("""^(\d{1,3})(?:秒|s)?(?:后)?(?:跳过|skip)(?:广告|此广告|视频|ad|thisad|video)?$"""),
-      Regex("""^(?:跳过|skip)(?:广告|此广告|视频|ad|thisad|video)?(\d{1,3})(?:秒|s)?$"""),
-    )
-    return patterns.any { pattern -> pattern.matchEntire(compact)?.groupValues?.get(1)?.toIntOrNull() == 0 }
+    return readyNumericSkip.firstNotNullOfOrNull { pattern ->
+      pattern.matchEntire(compact)?.groupValues?.get(1)?.toLongOrNull()?.times(1_000L)
+    }
   }
+
+  fun isZeroCountdownSkip(value: String): Boolean = readySkipCountdownMillis(value) == 0L
 
   fun isExplicitSkip(compact: String): Boolean {
     val text = normalize(compact)

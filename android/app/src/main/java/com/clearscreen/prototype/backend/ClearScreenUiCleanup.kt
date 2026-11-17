@@ -46,6 +46,8 @@ internal object ClearScreenUiCleanup {
     var clicked: Boolean = false, var stageIndex: Int = 0, var stageClickedAt: Long = 0,
     var stageAwaitingPage: Boolean = false,
     var stageStartedAt: Long = 0, var stageTrackedIndex: Int = -1,
+    /** Watch only: the user operates the switch; net screen just confirms and records it. */
+    val manual: Boolean = false,
   )
   private val lock = Any()
   private var session: Session? = null
@@ -60,7 +62,8 @@ internal object ClearScreenUiCleanup {
     ClearScreenRecommendCatalog.targets(context).filter { it.support == "assisted" }
   private fun key(target: Target) = "ui:${target.id}"
 
-  fun begin(context: Context, id: String, restore: Boolean, store: ClearScreenStore): Target = synchronized(lock) {
+  fun begin(context: Context, id: String, restore: Boolean, store: ClearScreenStore,
+    manual: Boolean = false): Target = synchronized(lock) {
     val target = targets(context).singleOrNull { it.id == id } ?: error("这台手机没有这个开关")
     check(target.support == "assisted") { target.reason ?: "这个开关暂时无法自动操作" }
     check(active() == null) { "上一个操作还没结束" }
@@ -74,7 +77,7 @@ internal object ClearScreenUiCleanup {
     check(trusted.isNotEmpty()) {
       "无法确认系统设置页面"
     }
-    session = Session(target, trusted, restore, context.packageName, SystemClock.elapsedRealtime())
+    session = Session(target, trusted, restore, context.packageName, SystemClock.elapsedRealtime(), manual = manual)
     result = null
     target
   }
@@ -89,7 +92,9 @@ internal object ClearScreenUiCleanup {
     when (packageName) {
       in current.trustedPackages -> { current.leftApp = true; current.seenTarget = true; true }
       current.ownPackage -> {
-        if (current.seenTarget && windowChanged) finish(current, if (current.clicked) "没能确认是否已关成功，请到设置里查看" else "没找到这个开关，没有改动")
+        if (current.seenTarget && windowChanged) finish(current,
+          if (current.manual) "还没确认设置完成，请回到设置页关掉这个开关"
+          else if (current.clicked) "没能确认是否已关成功，请到设置里查看" else "没找到这个开关，没有改动")
         false
       }
       // Status bar, IME, and launcher emit background events during the jump;
@@ -100,7 +105,9 @@ internal object ClearScreenUiCleanup {
 
   fun onHostResume() = synchronized(lock) {
     val current = active() ?: return@synchronized
-    if (current.leftApp) finish(current, if (current.clicked) "没能确认是否已关成功，请到设置里查看" else "没找到这个开关，没有改动")
+    if (current.leftApp) finish(current,
+      if (current.manual) "还没确认设置完成，请回到设置页关掉这个开关"
+      else if (current.clicked) "没能确认是否已关成功，请到设置里查看" else "没找到这个开关，没有改动")
   }
   fun onHostPause() = synchronized(lock) { session?.leftApp = true }
 
@@ -180,56 +187,59 @@ internal object ClearScreenUiCleanup {
           it.ref.viewIdResourceName.orEmpty().contains("action_bar_title")
       }
       // Walk the page chain first: click the row that opens the next page, then look for the switch.
-      val pendingStage = current.target.stages.getOrNull(current.stageIndex)
-      if (pendingStage != null) {
-        current.sample = null
-        val stageNow = SystemClock.elapsedRealtime()
-        if (current.stageTrackedIndex != current.stageIndex) {
-          current.stageTrackedIndex = current.stageIndex
-          current.stageStartedAt = stageNow
-        }
-        if (current.stageAwaitingPage) {
-          if (stageNow - current.stageClickedAt >= 300 && hasStageHeader(pendingStage::matchesPage)) {
-            current.stageIndex++
-            current.stageAwaitingPage = false
-          } else if (stageNow - current.stageClickedAt > 12_000) {
-            finish(current, "没能打开「${pendingStage.page}」，没有改动")
+      // Manual watch never taps anything — the user navigates and flips the switch themselves.
+      if (!current.manual) {
+        val pendingStage = current.target.stages.getOrNull(current.stageIndex)
+        if (pendingStage != null) {
+          current.sample = null
+          val stageNow = SystemClock.elapsedRealtime()
+          if (current.stageTrackedIndex != current.stageIndex) {
+            current.stageTrackedIndex = current.stageIndex
+            current.stageStartedAt = stageNow
+          }
+          if (current.stageAwaitingPage) {
+            if (stageNow - current.stageClickedAt >= 300 && hasStageHeader(pendingStage::matchesPage)) {
+              current.stageIndex++
+              current.stageAwaitingPage = false
+            } else if (stageNow - current.stageClickedAt > 12_000) {
+              finish(current, "没能打开「${pendingStage.page}」，没有改动")
+            }
+            return@synchronized
+          }
+          if (stageNow - current.stageStartedAt > 20_000) {
+            finish(current, "没找到「${pendingStage.entry}」，没有改动")
+            return@synchronized
+          }
+          if (stageNow - current.stageClickedAt < 1_600) return@synchronized
+          if (pendingStage.fromPage != null && !hasStageHeader { it == pendingStage.fromPage }) return@synchronized
+          val entries = nodes.indices.filter { pendingStage.matchesEntry(nodes[it].text) }
+          if (entries.size != 1) return@synchronized
+          val entryIndex = entries.single()
+          val entry = nodes[entryIndex]
+          var pointer = entry.parent
+          var row: Node? = null
+          var depth = 0
+          while (pointer >= 0 && depth < 5) {
+            val candidate = nodes[pointer]
+            if (candidate.ref.isClickable && candidate.ref.isEnabled && !candidate.bounds.isEmpty) { row = candidate; break }
+            pointer = candidate.parent
+            depth++
+          }
+          if (row == null || !unobstructed(row.bounds)) return@synchronized
+          current.stageClickedAt = stageNow
+          val opened = row.ref.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+          if (opened) {
+            current.stageAwaitingPage = true
+          } else {
+            finish(current, "系统没有接受这次操作，设置没有被改动")
           }
           return@synchronized
         }
-        if (stageNow - current.stageStartedAt > 20_000) {
-          finish(current, "没找到「${pendingStage.entry}」，没有改动")
+        val stagedDone = current.target.stages.isNotEmpty() && current.stageIndex >= current.target.stages.size
+        if (stagedDone && SystemClock.elapsedRealtime() - current.stageClickedAt > 20_000) {
+          finish(current, if (current.clicked) "没能确认是否已关成功，请到设置里查看" else "没找到这个开关，没有改动")
           return@synchronized
         }
-        if (stageNow - current.stageClickedAt < 1_600) return@synchronized
-        if (pendingStage.fromPage != null && !hasStageHeader { it == pendingStage.fromPage }) return@synchronized
-        val entries = nodes.indices.filter { pendingStage.matchesEntry(nodes[it].text) }
-        if (entries.size != 1) return@synchronized
-        val entryIndex = entries.single()
-        val entry = nodes[entryIndex]
-        var pointer = entry.parent
-        var row: Node? = null
-        var depth = 0
-        while (pointer >= 0 && depth < 5) {
-          val candidate = nodes[pointer]
-          if (candidate.ref.isClickable && candidate.ref.isEnabled && !candidate.bounds.isEmpty) { row = candidate; break }
-          pointer = candidate.parent
-          depth++
-        }
-        if (row == null || !unobstructed(row.bounds)) return@synchronized
-        current.stageClickedAt = stageNow
-        val opened = row.ref.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        if (opened) {
-          current.stageAwaitingPage = true
-        } else {
-          finish(current, "系统没有接受这次操作，设置没有被改动")
-        }
-        return@synchronized
-      }
-      val stagedDone = current.target.stages.isNotEmpty() && current.stageIndex >= current.target.stages.size
-      if (stagedDone && SystemClock.elapsedRealtime() - current.stageClickedAt > 20_000) {
-        finish(current, if (current.clicked) "没能确认是否已关成功，请到设置里查看" else "没找到这个开关，没有改动")
-        return@synchronized
       }
       val headers = nodes.indices.filter { current.target.matchesPage(nodes[it].text) &&
         nodes[it].bounds.top < screen.top + screen.height() * .3 }
@@ -285,6 +295,16 @@ internal object ClearScreenUiCleanup {
       }
       val featureEnabled = checked != current.target.checkedWhenFeatureDisabled
       val desired = current.restore
+      if (current.manual) {
+        // The user flipped the switch themselves. Record the confirmed state so the row
+        // changes from「去设置」to「已设置」once the app is back in the foreground.
+        if (featureEnabled == desired) {
+          store.saveCleanupState(key(current.target), if (current.restore) "on" else "off")
+          if (current.restore) store.removeCleanupBackup(key(current.target))
+          finish(current, if (current.restore) "已恢复并确认" else "已设置")
+        }
+        return@synchronized
+      }
       if (featureEnabled == desired) {
         if (current.restore) {
           store.removeCleanupBackup(key(current.target))

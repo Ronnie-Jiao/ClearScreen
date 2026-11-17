@@ -135,9 +135,10 @@ export default function ServicePermissionsScreen({permissions,checking=false,ver
     }
     await startPairingAndOpenSettings();
   };
-  const showAdbSettingsGuide=()=>showAlert('开启无线调试',`1. 在开发者选项中打开「无线调试」
-2. 未配对时点「使用配对码配对设备」，保持窗口打开
-3. 返回本页，开关会自动开启`,[
+  const showAdbSettingsGuide=()=>showAlert('开启无线调试',`1. 若没开开发者选项：设置 → 关于手机 → 连点「版本号」7 次开启
+2. 在开发者选项中打开「无线调试」
+3. 未配对时点「使用配对码配对设备」，保持窗口打开
+4. 返回本页，开关会自动开启`,[
     {text:'取消',style:'cancel'},
     {text:'去设置',onPress:()=>{void openAdbSettings()}},
   ],{tone:'warning'});

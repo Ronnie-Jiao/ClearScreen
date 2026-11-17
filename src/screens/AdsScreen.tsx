@@ -40,7 +40,7 @@ export default function AdsScreen({onTab,onOpen,onOpenAppManagement}:{onTab:(tab
  const {inset:navInset}=useBottomNavMetrics();
  const entries:{title:string;icon:ImageSourcePropType;onPress:()=>void}[]=[
   {title:'排除应用',icon:ADS_APP_MANAGEMENT,onPress:onOpenAppManagement},
-  {title:'系统推荐开关',icon:ADS_SYSTEM_RECOMMEND,onPress:()=>onOpen('systemRecommend')},
+  {title:'系统推荐设置',icon:ADS_SYSTEM_RECOMMEND,onPress:()=>onOpen('systemRecommend')},
   {title:'应用通知管理',icon:ADS_APP_NOTIFICATIONS,onPress:()=>onOpen('appNotifications')},
   {title:'营销通知管理',icon:ADS_MARKETING_NOTIFICATIONS,onPress:()=>onOpen('marketingChannels')},
   ...(Platform.OS==='android'?[{title:'管理学习关闭按钮',icon:ADS_LEARNED_CLOSE,onPress:()=>onOpen('learnedRecords')}]:[]),

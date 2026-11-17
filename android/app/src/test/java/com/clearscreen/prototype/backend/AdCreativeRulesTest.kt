@@ -73,7 +73,7 @@ class AdCreativeRulesTest {
     assertFalse(hasXiaomiSplash(texts = listOf(xiaomiHint.copy(bounds =
       AdGeometryRules.Box(391, 2150, 688, 2240)))))
     assertFalse(hasXiaomiSplash(skipBox = xiaomiSplash))
-    assertFalse(hasXiaomiSplash(skipBox = AdGeometryRules.Box(400, 123, 560, 190)))
+    assertTrue(hasXiaomiSplash(skipBox = AdGeometryRules.Box(400, 123, 560, 190)))
   }
 
   // Manually transcribed from the supplied 19:01:52 / 19:01:56 screenshots.
@@ -129,18 +129,51 @@ class AdCreativeRulesTest {
     assertFalse(AdCreativeRules.hasRedirectSplashComposition(listOf(redirect), skip, screen))
     assertFalse(AdCreativeRules.hasRedirectSplashComposition(
       listOf(badge.copy(value = "免广告"), redirect), skip, screen))
-    assertFalse(AdCreativeRules.hasRedirectSplashComposition(
+    assertTrue(AdCreativeRules.hasRedirectSplashComposition(
       listOf(badge.copy(bounds = AdGeometryRules.Box(110, 1500, 215, 1560)), redirect), skip, screen))
     assertFalse(AdCreativeRules.hasRedirectSplashComposition(
       listOf(badge, redirect.copy(value = "允许并继续")), skip, screen))
   }
 
-  @Test fun centeredOrLargeControlsAndTextOutsideTheWindowAreRejected() {
-    assertFalse(AdCreativeRules.hasRedirectSplashComposition(listOf(badge, redirect),
-      AdGeometryRules.Box(400, 120, 620, 220), screen))
+  @Test fun buttonAndBadgeCanMoveWhileLargeControlsAndOtherWindowsAreRejected() {
+    for (x in listOf(20, 400, 990)) for (y in listOf(120, 1300, 2600)) {
+      assertTrue(AdCreativeRules.hasRedirectSplashComposition(listOf(badge, redirect),
+        AdGeometryRules.Box(x, y, x + 220, y + 100), screen))
+    }
     assertFalse(AdCreativeRules.hasRedirectSplashComposition(listOf(badge, redirect),
       AdGeometryRules.Box(0, 0, 1260, 2800), screen))
     assertFalse(AdCreativeRules.hasRedirectSplashComposition(listOf(badge, redirect),
       skip, AdGeometryRules.Box(700, 0, 1260, 2800)))
+  }
+
+  @Test fun telecomBrandedRedirectAllowsReadyCountdownAtAnyPositionButNeverShare() {
+    val texts = listOf(redirect,
+      AdCreativeRules.Text("中国电信", AdGeometryRules.Box(60, 110, 300, 180)),
+      AdCreativeRules.Text("SAMSUNG Galaxy", AdGeometryRules.Box(400, 700, 1000, 850)))
+    for (label in listOf("跳过", "4s | 跳过", "1跳过", "跳过 4s")) {
+      for (box in listOf(skip, AdGeometryRules.Box(60, 1400, 280, 1500),
+        AdGeometryRules.Box(990, 2600, 1210, 2700))) {
+        assertTrue(label, AdCreativeRules.hasChinaTelecomBrandedSplash("com.ct.client", label, box, screen, texts))
+      }
+    }
+    for (label in listOf("分享", "立即打开", "4秒后可跳过", "跳过教程")) {
+      assertFalse(label, AdCreativeRules.hasChinaTelecomBrandedSplash("com.ct.client", label, skip, screen, texts))
+    }
+    assertFalse(AdCreativeRules.hasChinaTelecomBrandedSplash("com.example.app", "跳过", skip, screen, texts))
+  }
+
+  @Test fun rotateOrClickMotionAdUsesCompleteDisclosureWithoutLayoutAssumptions() {
+    val badgeAtBottom = AdCreativeRules.Text("广告", AdGeometryRules.Box(1080, 2720, 1200, 2780))
+    val motion = AdCreativeRules.Text("转动手机 或 点击图标", AdGeometryRules.Box(280, 2350, 980, 2420))
+    val disclosure = AdCreativeRules.Text("跳转至详情页或第三方应用", AdGeometryRules.Box(200, 2450, 1100, 2520))
+    val texts = listOf(badgeAtBottom, motion, disclosure)
+    for (box in listOf(skip, AdGeometryRules.Box(20, 1300, 240, 1400))) {
+      assertTrue(AdCreativeRules.hasMotionRedirectSplashComposition(texts, box, screen))
+    }
+    assertFalse(AdCreativeRules.hasMotionRedirectSplashComposition(listOf(motion, disclosure), skip, screen))
+    assertFalse(AdCreativeRules.hasMotionRedirectSplashComposition(listOf(badgeAtBottom, motion), skip, screen))
+    assertFalse(AdCreativeRules.hasMotionRedirectSplashComposition(listOf(badgeAtBottom, disclosure), skip, screen))
+    assertFalse(AdCreativeRules.hasMotionRedirectSplashComposition(
+      listOf(badgeAtBottom.copy(value = "免广告"), motion, disclosure), skip, screen))
   }
 }

@@ -7,9 +7,10 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Recognizes the four diagonal strokes of an X inside an already exposed small
- * clickable control. This supplies visual evidence only; it never finds a tap
- * coordinate or authorizes closing a window without separate local ad evidence.
+ * Recognizes the four diagonal strokes of an X inside a bounded candidate
+ * region. This supplies visual geometry only; the service separately checks
+ * startup authorization or floating/ad structure, freshness, window and target
+ * state before performing an action.
  */
 internal object AdCloseIconDetector {
   fun findX(bitmap: Bitmap, target: Rect): Rect? {
